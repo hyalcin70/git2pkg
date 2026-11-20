@@ -64,19 +64,30 @@ pub struct PackageContext<'a> {
     pub asset_step: &'a str,
 }
 
+/// Debug-Symbole aus installierten Binaries entfernen, wenn `strip` vorhanden ist.
+pub fn strip_binaries_step() -> &'static str {
+    "strip --strip-unneeded \"$pkgdir\"/usr/bin/* 2>/dev/null || true"
+}
+
 pub fn line_echo(text: &str) -> String {
     format!("echo '{}'", text.replace('\'', "'\\''"))
 }
 
 /// Cargo-Build: nur echte ausführbare Artefakte nach `/work/dist` kopieren.
 pub fn cargo_build_step() -> &'static str {
-    "mkdir -p /work/dist /work/cargo-target && cargo build --release && find /work/cargo-target/release target/release -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -exec cp {} /work/dist/ \\;"
+    r#"mkdir -p /work/dist "${CARGO_TARGET_DIR:-target}/release"
+cargo build --release
+for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist; do
+  [ -d "$directory" ] || continue
+  find "$directory" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -exec cp {} /work/dist/ \; 2>/dev/null
+done"#
 }
 
-/// Cargo-Staging: Binaries aus `target/release/` UND `/work/dist/` übernehmen.
+/// Cargo-Staging: Binaries aus `${CARGO_TARGET_DIR:-target}/release`,
+/// `target/release/` UND `/work/dist/` übernehmen.
 pub fn cargo_install_step() -> &'static str {
     r#"mkdir -p "$pkgdir/usr/bin"
-for directory in /work/cargo-target/release target/release /work/dist; do
+for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist; do
   [ -d "$directory" ] || continue
   while IFS= read -r -d '' binary; do
     install -Dm755 "$binary" "$pkgdir/usr/bin/"
@@ -107,15 +118,66 @@ mod tests {
         let build = cargo_build_step();
         let install = cargo_install_step();
         for script in [build, install] {
-            assert!(script.contains("target/release"));
+            assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));
             assert!(script.contains("install -Dm755") || build.contains(script));
         }
         assert!(install.contains("/work/dist"));
-        assert!(install.contains("/work/cargo-target/release"));
+        assert!(install.contains("${CARGO_TARGET_DIR:-target}/release"));
+        assert!(install.contains("[ -d \"$directory\" ] || continue"));
         assert!(install.contains("mkdir -p \"$pkgdir/usr/bin\""));
         assert!(install.contains("install -Dm755"));
         assert!(install.contains("build-script-*"));
         assert!(install.contains("exit 1"));
+        assert!(strip_binaries_step().contains("--strip-unneeded"));
+    }
+
+    #[test]
+    fn alle_zielformate_erzeugen_syntaktisch_gueltige_paketskripte() {
+        let install = "mkdir -p \"$pkgdir/usr/bin\"";
+        let asset = "true";
+        for family in [
+            DistroFamily::Arch,
+            DistroFamily::Debian,
+            DistroFamily::Fedora,
+            DistroFamily::Suse,
+        ] {
+            let ctx = PackageContext {
+                name: "repo",
+                version: "1.0.0",
+                family: &family,
+                strategy: BuildStrategy::Default,
+                has_pkgbuild: false,
+                arch: PackageArch::Amd64,
+                build_step: "true",
+                install_step: install,
+                is_cargo: false,
+                asset_step: asset,
+            };
+            let script = generate(&ctx).join("\n");
+            assert!(!script.trim().is_empty());
+            match family {
+                DistroFamily::Arch => assert!(script.contains("makepkg")),
+                DistroFamily::Debian => assert!(script.contains("dpkg-deb --build")),
+                DistroFamily::Fedora | DistroFamily::Suse => {
+                    assert!(script.contains("rpmbuild"))
+                }
+                DistroFamily::Unknown => unreachable!(),
+            }
+            let path = std::env::temp_dir().join(format!(
+                "git2pkg-format-{:?}-{}.sh",
+                family,
+                std::process::id()
+            ));
+            std::fs::write(&path, format!("{}\n", script)).unwrap();
+            let ok = std::process::Command::new("bash")
+                .arg("-n")
+                .arg(&path)
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
+            let _ = std::fs::remove_file(&path);
+            assert!(ok, "ungueltiges Paketskript fuer {:?}", family);
+        }
     }
 
     #[test]

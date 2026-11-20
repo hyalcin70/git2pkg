@@ -40,6 +40,8 @@ pub fn run_cli(url: &str) {
         cstdint_fix: false,
         submodule_fix: false,
         skip_deps: false,
+        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        container_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     println!("{}", texts.cli_header(config.engine.label(), &config.distro.name));
@@ -62,6 +64,11 @@ pub fn run_cli(url: &str) {
             BuildEvent::Failed(error) => {
                 eprintln!("{}", texts.cli_failed(&error));
                 std::process::exit(1);
+            }
+            BuildEvent::ContainerStarted(id) => println!("==> {}", id),
+            BuildEvent::Cancelled => {
+                eprintln!("[warn] Build vom Benutzer abgebrochen.");
+                std::process::exit(130);
             }
         }
     }

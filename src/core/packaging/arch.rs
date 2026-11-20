@@ -53,6 +53,7 @@ done"#.to_string(),
     } else {
         "mkdir -p \"$pkgdir\" \"$pkgdir/usr/bin\" \"$pkgdir/usr/lib\" \"$pkgdir/usr/share\"\n  cp -a /work/out/. \"$pkgdir\"/".to_string()
     };
+    let install_body = format!("{}\n  {}", install_body, super::strip_binaries_step());
     lines.push(format!(
         "cat > /work/pkg/PKGBUILD <<'PKGBUILD_EOF'\npkgname={name}\npkgver={version}\npkgrel=1\npkgdesc='Built by git2pkg'\narch=('{arch}')\nlicense=('GPL-3.0-or-later')\noptions=('!strip' '!debug')\ndepends=(${{dep_line}})\nbuild() {{\n  true\n}}\npackage() {{\n  {install_body}\n}}\nPKGBUILD_EOF",
         name = ctx.name,
@@ -108,14 +109,16 @@ mod tests {
             has_pkgbuild: false,
             arch: PackageArch::Amd64,
             build_step: "true",
-            install_step: "true",
+            install_step: crate::core::packaging::cargo_install_step(),
             is_cargo: true,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
-        assert!(script.contains("target/release"));
+        assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));
+        assert!(script.contains("[ -d \"$directory\" ] || continue"));
         assert!(script.contains("/work/dist"));
         assert!(script.contains("install -Dm755"));
         assert!(script.contains("exit 1"));
+        assert!(script.contains("--strip-unneeded"));
     }
 }

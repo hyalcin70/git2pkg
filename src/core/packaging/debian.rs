@@ -34,6 +34,10 @@ done"#.to_string(),
     ));
     lines.push("mkdir -p /work/deb/usr/bin /work/deb/usr/lib /work/deb/usr/share".to_string());
     lines.push("cp -a /work/out/. /work/deb/".to_string());
+    lines.push(
+        "pkgdir=/work/deb && strip --strip-unneeded \"$pkgdir\"/usr/bin/* 2>/dev/null || true"
+            .to_string(),
+    );
     lines.push(format!(
         "fakeroot dpkg-deb --build /work/deb /work/dist/{}_{}_{}.deb",
         ctx.name,
@@ -70,5 +74,26 @@ mod tests {
         assert!(script.contains("dpkg-shlibdeps -O"));
         assert!(script.contains("Depends: ${depends}"));
         assert!(script.contains("Architecture: amd64"));
+        assert!(script.contains("--strip-unneeded"));
+    }
+
+    #[test]
+    fn cargo_install_step_beruecksichtigt_cargo_target_dir() {
+        let family = DistroFamily::Debian;
+        let ctx = PackageContext {
+            name: "repo",
+            version: "1.0.0",
+            family: &family,
+            strategy: BuildStrategy::Default,
+            has_pkgbuild: false,
+            arch: PackageArch::Amd64,
+            build_step: "true",
+            install_step: crate::core::packaging::cargo_install_step(),
+            is_cargo: true,
+            asset_step: "true",
+        };
+        let script = script(&ctx).join("\n");
+        assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));
+        assert!(script.contains("[ -d \"$directory\" ] || continue"));
     }
 }

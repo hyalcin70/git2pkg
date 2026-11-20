@@ -4,7 +4,7 @@
 use crate::core::container::{
     cached_repo_has_local_dependencies, cleanup_failed_build_artifacts, cleanup_failed_builds,
     container_engine_available,
-    default_output_dir, detect_engine, has_failed_build_cache, run_build, BuildConfig, BuildEvent, BuildOutcome, BuildStrategy,
+    default_output_dir, detect_engine, run_build, BuildConfig, BuildEvent, BuildOutcome, BuildStrategy,
     ContainerEngine, TargetFormat,
 };
 use crate::core::distro::{detect_distro, DistroFamily, DistroInfo, TargetDistro};
@@ -15,7 +15,9 @@ use eframe::egui;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Eingebettetes Creator-Logo (PNG 600x160). Die Binary bleibt dadurch
@@ -73,6 +75,8 @@ pub struct Git2PkgApp {
     build_progress: f32,
     cargo_crates: u32,
     building: bool,
+    cancel_flag: Arc<AtomicBool>,
+    container_id: Arc<Mutex<Option<String>>>,
     receiver: Option<Receiver<BuildEvent>>,
     install_receiver: Option<Receiver<String>>,
     outcome: Option<BuildOutcome>,
@@ -84,13 +88,19 @@ pub struct Git2PkgApp {
     show_info: bool,
     install_dialog: Option<PathBuf>,
     retry_dialog: bool,
+    cross_build_dialog: bool,
     last_build_failed: bool,
+    had_build_in_session: bool,
     show_cleanup_dialog: bool,
     force_close: bool,
     logo: Option<egui::TextureHandle>,
     app_icon: Option<egui::TextureHandle>,
     linux_badge: Option<egui::TextureHandle>,
     clipboard: Option<arboard::Clipboard>,
+}
+
+fn is_foreign_target(target: TargetDistro, host: &DistroFamily) -> bool {
+    target != TargetDistro::Auto && target.family(host) != *host
 }
 
 impl Git2PkgApp {
@@ -118,6 +128,8 @@ impl Git2PkgApp {
             build_progress: 0.0,
             cargo_crates: 0,
             building: false,
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+            container_id: Arc::new(Mutex::new(None)),
             receiver: None,
             install_receiver: None,
             outcome: None,
@@ -129,7 +141,9 @@ impl Git2PkgApp {
             show_info: false,
             install_dialog: None,
             retry_dialog: false,
+            cross_build_dialog: false,
             last_build_failed: false,
+            had_build_in_session: false,
             show_cleanup_dialog: false,
             force_close: false,
             logo: None,
@@ -283,8 +297,11 @@ impl Git2PkgApp {
         let has_deps = cached_repo_has_local_dependencies(&url);
         self.next_strategy = strategy.next(has_deps);
         self.building = true;
+        self.had_build_in_session = true;
         self.build_progress = 0.0;
         self.cargo_crates = 0;
+        self.cancel_flag.store(false, Ordering::Relaxed);
+        *self.container_id.lock().unwrap() = None;
         self.outcome = None;
         self.error = None;
         self.hint = None;
@@ -308,9 +325,24 @@ impl Git2PkgApp {
             cstdint_fix: false,
             submodule_fix: false,
             skip_deps: false,
+            cancel_flag: self.cancel_flag.clone(),
+            container_id: self.container_id.clone(),
         };
         std::thread::spawn(move || run_build(config, tx));
         self.receiver = Some(rx);
+    }
+
+    /// Benutzerabbruch: Flag setzen und die Oberfläche sofort freigeben.
+    fn cancel_build(&mut self) {
+        if !self.building {
+            return;
+        }
+        self.cancel_flag.store(true, Ordering::Relaxed);
+        self.building = false;
+        self.build_progress = 0.0;
+        self.retry_dialog = false;
+        self.install_dialog = None;
+        self.log.push_str("[warn] Build vom Benutzer abgebrochen.\n");
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
@@ -323,6 +355,21 @@ impl Git2PkgApp {
                 match rx.try_recv() {
                     Ok(BuildEvent::Step(text)) => {
                         self.step = text;
+                        changed = true;
+                    }
+                    Ok(BuildEvent::ContainerStarted(id)) => {
+                        *self.container_id.lock().unwrap() = Some(id);
+                        changed = true;
+                    }
+                    Ok(BuildEvent::Cancelled) => {
+                        self.building = false;
+                        self.last_build_failed = true;
+                        self.retry_dialog = false;
+                        self.install_dialog = None;
+                        self.step = self.texts().failed_step().to_string();
+                        self.build_progress = 0.0;
+                        *self.container_id.lock().unwrap() = None;
+                        clear_receiver = true;
                         changed = true;
                     }
                     Ok(BuildEvent::Log(text)) => {
@@ -534,7 +581,8 @@ impl eframe::App for Git2PkgApp {
         }
         if ctx.input(|i| i.viewport().close_requested())
             && !self.force_close
-            && (self.last_build_failed || has_failed_build_cache())
+            && self.had_build_in_session
+            && self.last_build_failed
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.show_cleanup_dialog = true;
@@ -556,14 +604,15 @@ impl eframe::App for Git2PkgApp {
 
         // Werkzeugleiste: oben rechts Design, Sprache und Container-Engine.
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
                 ui.strong("git2pkg");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(
                             egui::Button::new(texts.info_button())
                                 .corner_radius(egui::CornerRadius::same(8))
-                                .min_size(egui::vec2(58.0, 22.0))
+                                .min_size(egui::vec2(46.0, 20.0))
                                 .selected(self.show_info),
                         )
                         .on_hover_text(texts.info_button())
@@ -613,7 +662,7 @@ impl eframe::App for Git2PkgApp {
             });
         });
 
-        // Statusleiste: schmal, einzeilig, Beschriftungen normal, Werte grün.
+        // Statusleiste: fest zwei Zeilen - Systeminfos oben, Fortschritt mittig darunter.
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let green = self.value_color();
@@ -634,16 +683,20 @@ impl eframe::App for Git2PkgApp {
                 ui.separator();
                 ui.strong(texts.status_step());
                 ui.colored_label(green, self.step.as_str());
-                if self.building {
+            });
+            if self.building {
+                ui.add_space(3.0);
+                ui.vertical_centered(|ui| {
                     let percent = (self.build_progress * 100.0).round() as u32;
                     let label = format!("{} % — {}", percent, self.step);
+                    let width = 420.0_f32.min(ui.available_width());
                     ui.add(
                         egui::ProgressBar::new(self.build_progress)
                             .text(label)
-                            .desired_width(210.0),
+                            .desired_width(width),
                     );
-                }
-            });
+                });
+            }
         });
 
         // Über / Info-Dialog, zentriert und in allen fünf Sprachen.
@@ -769,6 +822,31 @@ impl eframe::App for Git2PkgApp {
             }
         }
 
+        // Hinweis bei aktiv ausgewähltem Cross-Build-Ziel, zentriert und gut lesbar.
+        if self.cross_build_dialog {
+            let title = self.texts().target_format().to_string();
+            let body = self.texts().cross_build_warning().to_string();
+            let ok = self.texts().ok_understood().to_string();
+            let mut open = true;
+            let mut close = false;
+            egui::Window::new(&title)
+                .open(&mut open)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.set_max_width(440.0);
+                    ui.label(&body);
+                    ui.add_space(8.0);
+                    if ui.button(&ok).clicked() {
+                        close = true;
+                    }
+                });
+            if !open || close {
+                self.cross_build_dialog = false;
+            }
+        }
+
         // Automatisches Retry-Popup, wenn der Auto-Resolver nichts mehr fand.
         if self.retry_dialog {
             let title = self.texts().retry_failed_title().to_string();
@@ -790,7 +868,7 @@ impl eframe::App for Git2PkgApp {
                     ui.label(&reason_label);
                     ui.monospace(&reason);
                     ui.add_space(6.0);
-                    let next = self.texts().next_strategy(&self.next_strategy_label());
+                    let next = self.texts().next_strategy(self.next_strategy_label());
                     ui.strong(&next);
                     ui.add_space(6.0);
                     ui.label(&question);
@@ -1012,7 +1090,15 @@ impl eframe::App for Git2PkgApp {
                                     egui::vec2(button_area, ui.available_height()),
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if ui
+                                        if self.building {
+                                            let cancel = egui::Button::new(
+                                                egui::RichText::new(texts.cancel_build())
+                                                    .color(egui::Color32::from_rgb(220, 60, 60)),
+                                            );
+                                            if ui.add(cancel).clicked() {
+                                                self.cancel_build();
+                                            }
+                                        } else if ui
                                             .add_enabled(
                                                 self.engine_available,
                                                 egui::Button::new(texts.build_start()),
@@ -1050,6 +1136,7 @@ impl eframe::App for Git2PkgApp {
                                     TargetDistro::Suse => texts.target_suse().to_string(),
                                 };
                                 let combo_width = (input_width - label_area - 16.0).max(180.0);
+                                let previous_target = self.target_distro;
                                 egui::ComboBox::from_id_salt("target-distro")
                                     .selected_text(selected)
                                     .width(combo_width)
@@ -1080,6 +1167,11 @@ impl eframe::App for Git2PkgApp {
                                             texts.target_suse(),
                                         );
                                     });
+                                if self.target_distro != previous_target
+                                    && is_foreign_target(self.target_distro, &self.distro.family)
+                                {
+                                    self.cross_build_dialog = true;
+                                }
                             });
 
                             // Zeile 3: Ausgabeordner + Ändern-Button rechts bündig.
@@ -1229,7 +1321,7 @@ fn progress_from_line(current: f32, line: &str, cargo_crates: u32) -> f32 {
         {
             extract_percent(line)
                 .map(|value| 0.15 * value)
-                .unwrap_or_else(|| current.max(0.03).min(0.15))
+                .unwrap_or_else(|| current.clamp(0.03, 0.15))
         } else if lower.contains("setup") || lower.contains("install") {
             0.15
                 + extract_percent(line)

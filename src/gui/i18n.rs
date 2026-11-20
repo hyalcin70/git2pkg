@@ -379,6 +379,36 @@ impl Texts {
         )
     }
 
+    pub fn cancel_build(&self) -> &'static str {
+        self.get(
+            "Cancel build",
+            "Build abbrechen",
+            "Derlemeyi iptal et",
+            "Cancelar compilación",
+            "Annuler la compilation",
+        )
+    }
+
+    pub fn ok_understood(&self) -> &'static str {
+        self.get(
+            "OK, got it",
+            "OK, verstanden",
+            "Tamam, anladım",
+            "Entendido",
+            "OK, compris",
+        )
+    }
+
+    pub fn cross_build_warning(&self) -> &'static str {
+        self.get(
+            "Note: Cross-builds for another distribution may work, but cannot be guaranteed for all projects. If something fails, please test building directly on the target distribution.",
+            "Hinweis: Cross-Builds für eine andere Distribution können funktionieren, lassen sich aber nicht für alle Projekte garantieren. Falls es hakt, teste den Bau bitte direkt auf der jeweiligen Ziel-Distribution.",
+            "Not: Başka bir dağıtım için çapraz derleme çalışabilir ancak tüm projeler için garanti edilemez. Bir sorun olursa lütfen hedef dağıtımda doğrudan derlemeyi deneyin.",
+            "Nota: Las compilaciones cruzadas para otra distribución pueden funcionar, pero no se pueden garantizar para todos los proyectos. Si algo falla, prueba a compilar directamente en la distribución de destino.",
+            "Remarque : les compilations croisées pour une autre distribution peuvent fonctionner, mais ne sont pas garanties pour tous les projets. En cas de problème, veuillez tester la compilation directement sur la distribution cible.",
+        )
+    }
+
     pub fn build_running(&self) -> &'static str {
         self.get(
             "Build running in container \u{2026}",
@@ -640,6 +670,33 @@ impl Texts {
             name
         )
     }
+    pub fn step_strategy_round(
+        &self,
+        strategy: &str,
+        index: u8,
+        total: u8,
+        round: u8,
+        max_rounds: u8,
+    ) -> String {
+        format!(
+            "{} {}/{}: {} — {} {}/{}",
+            self.get(
+                "Strategy",
+                "Strategie",
+                "Strateji",
+                "Estrategia",
+                "Stratégie"
+            ),
+            index,
+            total,
+            strategy,
+            self.get("Round", "Runde", "Tur", "Ronda", "Tour"),
+            round,
+            max_rounds
+        )
+    }
+
+    #[allow(dead_code)]
     pub fn step_attempt(&self, current: u8, max: u8) -> String {
         format!(
             "{} {}/{}",
@@ -1040,6 +1097,28 @@ mod tests {
     }
 
     #[test]
+    fn cross_build_warning_ist_in_fuenf_sprachen_vorhanden() {
+        for lang in Language::ALL {
+            let text = Texts::new(lang).cross_build_warning();
+            assert!(text.len() > 80, "zu kurz für {:?}: {}", lang, text);
+        }
+        assert!(Texts::new(Language::De)
+            .cross_build_warning()
+            .starts_with("Hinweis:"));
+        assert!(Texts::new(Language::En)
+            .cross_build_warning()
+            .starts_with("Note:"));
+        assert!(Texts::new(Language::Es)
+            .cross_build_warning()
+            .starts_with("Nota:"));
+        assert_eq!(Texts::new(Language::De).ok_understood(), "OK, verstanden");
+        assert_eq!(Texts::new(Language::En).ok_understood(), "OK, got it");
+        assert_eq!(Texts::new(Language::Tr).ok_understood(), "Tamam, anladım");
+        assert_eq!(Texts::new(Language::Es).ok_understood(), "Entendido");
+        assert_eq!(Texts::new(Language::Fr).ok_understood(), "OK, compris");
+    }
+
+    #[test]
     fn tuerkische_sonderzeichen_sind_vorhanden() {
         let tr = Texts::new(Language::Tr);
         let build_system = tr.step_build_system("Cargo (Rust)");
@@ -1066,6 +1145,20 @@ mod tests {
         for c in ['İ', 'ı', 'ğ', 'ş', 'Ş', 'ç', 'ö', 'ü'] {
             assert!(combined.contains(c), "fehlendes Zeichen: {}", c);
         }
+    }
+
+    #[test]
+    fn strategie_und_runde_werden_angezeigt() {
+        let text = Texts::new(Language::De).step_strategy_round(
+            "System-Bibliotheken",
+            2,
+            4,
+            1,
+            10,
+        );
+        assert!(text.contains("Strategie 2/4"), "{}", text);
+        assert!(text.contains("System-Bibliotheken"), "{}", text);
+        assert!(text.contains("Runde 1/10"), "{}", text);
     }
 
     #[test]

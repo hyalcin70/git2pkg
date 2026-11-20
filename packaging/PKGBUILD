@@ -4,7 +4,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Isolated package builder from Git repositories for Linux distributions"
 arch=('x86_64')
-url="https://github.com/hakan/git2pkg"
+url="https://github.com/hyalcin70/git2pkg"
 license=('GPL-3.0-or-later')
 depends=('libxkbcommon' 'wayland' 'libxcb' 'libxrandr' 'libxi' 'libxcursor' 'mesa' 'hicolor-icon-theme')
 makedepends=('rust' 'cargo' 'pkgconf' 'libxkbcommon' 'mesa' 'wayland' 'libxcb' 'libxrandr' 'libxi' 'libxcursor')
@@ -21,4 +21,22 @@ package() {
   install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # Desktop- und Icon-Dateien liegen je nach Projekt in assets/ oder packaging/.
+  for f in assets/*.desktop packaging/*.desktop; do
+    [ -f "$f" ] || continue
+    install -Dm644 "$f" "$pkgdir/usr/share/applications/$(basename "$f")"
+  done
+  for f in assets/*.svg packaging/*.svg; do
+    [ -f "$f" ] || continue
+    install -Dm644 "$f" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$(basename "$f")"
+  done
+  for f in assets/*.png packaging/*.png assets/*.ico packaging/*.ico; do
+    [ -f "$f" ] || continue
+    install -Dm644 "$f" "$pkgdir/usr/share/pixmaps/$(basename "$f")"
+  done
+  for f in assets/*.png packaging/*.png; do
+    [ -f "$f" ] || continue
+    install -Dm644 "$f" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$(basename "$f")"
+  done
 }

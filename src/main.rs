@@ -45,7 +45,7 @@ fn second_monitor_position() -> Option<egui::Pos2> {
 }
 
 fn parse_geometry(token: &str) -> Option<(i32, i32)> {
-    let start = token.find(|c| c == '+' || c == '-')?;
+    let start = token.find(['+', '-'])?;
     let mut numbers = Vec::new();
     let mut current = String::new();
     let mut sign = 1i32;
@@ -75,8 +75,32 @@ fn parse_geometry(token: &str) -> Option<(i32, i32)> {
     Some((*numbers.first()?, *numbers.get(1)?))
 }
 
+fn print_usage() {
+    println!("git2pkg - isolated package builder from Git repositories");
+    println!();
+    println!("Usage:");
+    println!("  git2pkg                         Start the graphical interface");
+    println!("  git2pkg --cli <URL> [options]   Build without the GUI");
+    println!();
+    println!("CLI options:");
+    println!("  --format=package|binary         Package type (default: package)");
+    println!("  --target=auto|arch|debian|fedora|opensuse");
+    println!("                                  Target distribution (default: auto)");
+    println!("  --binary                        Alias for --format=binary");
+    println!("  -h, --help                      Show this help");
+}
+
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = env::args().collect();
+    if args.iter().skip(1).any(|arg| arg == "-h" || arg == "--help") {
+        print_usage();
+        return Ok(());
+    }
+    if args.len() >= 2 && args[1] == "--cli" && args.len() < 3 {
+        eprintln!("git2pkg: --cli requires a repository URL");
+        print_usage();
+        return Ok(());
+    }
     if args.len() >= 3 && args[1] == "--cli" {
         cli::run_cli(&args[2]);
         return Ok(());

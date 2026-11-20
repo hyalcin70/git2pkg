@@ -12,11 +12,8 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     lines.push(
         "mkdir -p \"$HOME/rpmbuild\"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}".to_string(),
     );
-    lines.push(
-        "(cd /work/out && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > \"$HOME/rpmbuild/SOURCES/files.list\"".to_string(),
-    );
     lines.push(format!(
-        "cat > \"$HOME/rpmbuild/SPECS/{name}.spec\" <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\n%files -f files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
+        "cat > \"$HOME/rpmbuild/SPECS/{name}.spec\" <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/git2pkg-files.list\n%files -f /tmp/git2pkg-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.rpm(),
@@ -54,7 +51,29 @@ mod tests {
             let script = script(&ctx).join("\n");
             assert!(script.contains("AutoReqProv: yes"));
             assert!(script.contains("%defattr(-,root,root,-)"));
-            assert!(script.contains("%files -f files.list"));
+            assert!(script.contains("%files -f /tmp/git2pkg-files.list"));
+            assert!(script.contains("--strip-unneeded"));
+            assert!(script.contains("> /tmp/git2pkg-files.list"));
         }
+    }
+
+    #[test]
+    fn cargo_install_step_beruecksichtigt_cargo_target_dir() {
+        let family = DistroFamily::Fedora;
+        let ctx = PackageContext {
+            name: "repo",
+            version: "1.0.0",
+            family: &family,
+            strategy: BuildStrategy::Default,
+            has_pkgbuild: false,
+            arch: PackageArch::Amd64,
+            build_step: "true",
+            install_step: crate::core::packaging::cargo_install_step(),
+            is_cargo: true,
+            asset_step: "true",
+        };
+        let script = script(&ctx).join("\n");
+        assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));
+        assert!(script.contains("[ -d \"$directory\" ] || continue"));
     }
 }

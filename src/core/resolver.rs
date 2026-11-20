@@ -141,6 +141,167 @@ pub fn family_key(family: &DistroFamily) -> &'static str {
     }
 }
 
+/// Normalisiert eine Git-URL, damit der Profil-Hash stabil bleibt.
+fn normalize_repo_url(url: &str) -> String {
+    let mut value = url.trim().to_ascii_lowercase();
+    for prefix in ["https://", "http://", "git://", "ssh://"] {
+        if let Some(rest) = value.strip_prefix(prefix) {
+            value = rest.to_string();
+            break;
+        }
+    }
+    if let Some(at) = value.find('@') {
+        value = value[at + 1..].to_string();
+    }
+    while value.ends_with('/') {
+        value.pop();
+    }
+    if value.ends_with(".git") {
+        value.truncate(value.len() - 4);
+    }
+    value
+}
+
+/// SHA-256 des normalisierten Repository-Namens - ohne weitere Abhängigkeit.
+fn sha256_hex(input: &str) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut message = normalize_repo_url(input).into_bytes();
+    let bit_len = (message.len() as u64).saturating_mul(8);
+    message.push(0x80);
+    while message.len() % 64 != 56 {
+        message.push(0);
+    }
+    message.extend_from_slice(&bit_len.to_be_bytes());
+
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    for chunk in message.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (index, word) in w[..16].iter_mut().enumerate() {
+            *word = u32::from_be_bytes([
+                chunk[index * 4],
+                chunk[index * 4 + 1],
+                chunk[index * 4 + 2],
+                chunk[index * 4 + 3],
+            ]);
+        }
+        for index in 16..64 {
+            let s0 = w[index - 15].rotate_right(7)
+                ^ w[index - 15].rotate_right(18)
+                ^ (w[index - 15] >> 3);
+            let s1 = w[index - 2].rotate_right(17)
+                ^ w[index - 2].rotate_right(19)
+                ^ (w[index - 2] >> 10);
+            w[index] = w[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[index - 7])
+                .wrapping_add(s1);
+        }
+        let (mut a, mut b, mut c, mut d) = (h[0], h[1], h[2], h[3]);
+        let (mut e, mut f, mut g, mut hh) = (h[4], h[5], h[6], h[7]);
+        for index in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choice = (e & f) ^ ((!e) & g);
+            let t1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(choice)
+                .wrapping_add(K[index])
+                .wrapping_add(w[index]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(majority);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+    h.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+fn repo_profile_key(url: &str) -> String {
+    sha256_hex(url)
+}
+
+/// Anonymer, stabiler Schlüssel für ein Repository (ohne Klartextnamen).
+pub fn repo_hash(url: &str) -> String {
+    repo_profile_key(url)
+}
+
+/// Ein Paket ohne ausführbare Datei in den Standardsystempfaden ist unvollständig.
+pub fn package_lacks_executable(listing: &str) -> bool {
+    let prefixes = ["usr/bin/", "usr/local/bin/", "bin/", "usr/sbin/", "opt/"];
+    for line in listing.lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.is_empty() {
+            continue;
+        }
+        let flags = tokens[0];
+        let path = (*tokens.last().unwrap())
+            .trim_start_matches("./")
+            .trim_start_matches('/');
+        if !prefixes.iter().any(|prefix| path.starts_with(prefix)) {
+            continue;
+        }
+        if flags.contains('x') || flags.contains("-rwx") {
+            return false;
+        }
+    }
+    true
+}
+
+/// Nur kompilierte Build-Systeme werden für unvollständige Pakete profiliert.
+pub fn is_compiled_build_system(label: &str) -> bool {
+    let value = label.to_ascii_lowercase();
+    ["cmake", "cargo", "rust", "meson", "ninja", "make", "qmake", "go", "autotools"]
+        .iter()
+        .any(|name| value.contains(name))
+}
+
+/// Erfolgreiche, generische Bauweise für ein Repo oder eine Strukturklasse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BuildRecipe {
+    #[serde(default)]
+    pub signature: String,
+    #[serde(default)]
+    pub strategy: String,
+    #[serde(default)]
+    pub skip_deps: bool,
+    #[serde(default)]
+    pub cmake_compat: bool,
+    #[serde(default)]
+    pub cstdint_fix: bool,
+    #[serde(default)]
+    pub submodule_fix: bool,
+    #[serde(default)]
+    pub packages: Vec<String>,
+}
+
 /// Lokale, dauerhafte Paket-Zuordnungen ("Live-Lernen" ohne KI).
 #[derive(Debug, Clone)]
 #[derive(Serialize, Deserialize, Default)]
@@ -151,6 +312,10 @@ struct LearnedFile {
     negative_cache: Vec<String>,
     #[serde(default)]
     build_fixes: HashMap<String, String>,
+    #[serde(default)]
+    repo_profiles: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    build_recipes: HashMap<String, BuildRecipe>,
 }
 
 pub struct MappingStore {
@@ -158,6 +323,8 @@ pub struct MappingStore {
     learned: HashMap<String, String>,
     negative_cache: Vec<String>,
     build_fixes: HashMap<String, String>,
+    repo_profiles: HashMap<String, Vec<String>>,
+    build_recipes: HashMap<String, BuildRecipe>,
     defaults: HashMap<String, String>,
 }
 
@@ -177,9 +344,12 @@ impl MappingStore {
         let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
 
         // Neue datei mit Sektionen; alte flache Dateien werden übernommen.
-        let (learned, negative_cache, build_fixes) = if value.get("packages").is_some()
+        let (learned, negative_cache, build_fixes, repo_profiles, build_recipes) =
+            if value.get("packages").is_some()
             || value.get("build_fixes").is_some()
             || value.get("negative_cache").is_some()
+            || value.get("repo_profiles").is_some()
+            || value.get("build_recipes").is_some()
         {
             let packages = value
                 .get("packages")
@@ -193,10 +363,18 @@ impl MappingStore {
                 .get("build_fixes")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
-            (packages, negative, fixes)
+            let profiles = value
+                .get("repo_profiles")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            let recipes = value
+                .get("build_recipes")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            (packages, negative, fixes, profiles, recipes)
         } else {
             let flat = serde_json::from_value::<HashMap<String, String>>(value).unwrap_or_default();
-            (flat, Vec::new(), HashMap::new())
+            (flat, Vec::new(), HashMap::new(), HashMap::new(), HashMap::new())
         };
 
         let store = Self {
@@ -204,6 +382,8 @@ impl MappingStore {
             learned,
             negative_cache,
             build_fixes,
+            repo_profiles,
+            build_recipes,
             defaults,
         };
         store.save();
@@ -218,6 +398,8 @@ impl MappingStore {
             packages: self.learned.clone(),
             negative_cache: self.negative_cache.clone(),
             build_fixes: self.build_fixes.clone(),
+            repo_profiles: self.repo_profiles.clone(),
+            build_recipes: self.build_recipes.clone(),
         };
         if let Ok(json) = serde_json::to_string_pretty(&file) {
             let _ = fs::write(&self.path, json);
@@ -270,8 +452,84 @@ impl MappingStore {
         self.build_fixes.get(key).cloned()
     }
 
+    /// Merkt sich, dass eine Strategie für dieses Repository nur ein unvollständiges
+    /// Paket erzeugt hat. Der Repository-Name wird nie im Klartext gespeichert.
+    pub fn mark_incomplete_strategy(&mut self, url: &str, strategy: &str) {
+        let key = repo_profile_key(url);
+        let list = self.repo_profiles.entry(key).or_default();
+        if !list.iter().any(|entry| entry == strategy) {
+            list.push(strategy.to_string());
+            self.save();
+        }
+    }
+
+    pub fn has_incomplete_default(&self, url: &str) -> bool {
+        self.is_incomplete_strategy(url, "Default")
+    }
+
+    pub fn is_incomplete_strategy(&self, url: &str, strategy: &str) -> bool {
+        self.repo_profiles
+            .get(&repo_profile_key(url))
+            .map(|list| list.iter().any(|entry| entry == strategy))
+            .unwrap_or(false)
+    }
+
+    #[allow(dead_code)]
+    pub fn incomplete_strategies(&self, url: &str) -> Vec<String> {
+        self.repo_profiles
+            .get(&repo_profile_key(url))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Speichert eine erfolgreiche Bauweise exakt und strukturbasiert.
+    pub fn record_build_recipe(&mut self, url: &str, recipe: BuildRecipe) {
+        let repo_key = format!("repo:{}", repo_hash(url));
+        let signature_key = format!("sig:{}", recipe.signature);
+        let changed = self.build_recipes.get(&repo_key) != Some(&recipe)
+            || self.build_recipes.get(&signature_key) != Some(&recipe);
+        self.build_recipes.insert(repo_key, recipe.clone());
+        self.build_recipes.insert(signature_key, recipe);
+        if changed {
+            self.save();
+        }
+    }
+
+    /// Erst der exakte Repo-Treffer, dann die allgemeine Struktur-Signatur.
+    pub fn apply_learned_recipe(
+        &self,
+        url: &str,
+        signature: &str,
+    ) -> Option<(BuildRecipe, bool)> {
+        self.build_recipes
+            .get(&format!("repo:{}", repo_hash(url)))
+            .cloned()
+            .map(|recipe| (recipe, true))
+            .or_else(|| {
+                self.build_recipes
+                    .get(&format!("sig:{}", signature))
+                    .cloned()
+                    .map(|recipe| (recipe, false))
+            })
+    }
+
+    pub fn build_recipe_count(&self) -> usize {
+        self.build_recipes
+            .iter()
+            .filter(|(key, _)| key.starts_with("sig:"))
+            .count()
+    }
+
+    pub fn repo_profile_count(&self) -> usize {
+        self.repo_profiles.values().map(Vec::len).sum()
+    }
+
     pub fn learned_rule_count(&self) -> usize {
-        self.learned.len() + self.negative_cache.len() + self.build_fixes.len()
+        self.learned.len()
+            + self.negative_cache.len()
+            + self.build_fixes.len()
+            + self.repo_profile_count()
+            + self.build_recipe_count()
     }
 }
 
@@ -451,6 +709,7 @@ pub fn detect_source_group_error(output: &str) -> Option<SourceGroupError> {
     // Zeilenbasiert: funktioniert mit rohem Log genauso wie mit `[err]`/`[out]`
     // präfigierten Zeilen und mit über mehrere Zeilen verteilten Meldungen.
     let lines: Vec<&str> = output.lines().collect();
+    let hint_re = Regex::new(r#"is not a prefix of file[^"]*"([^"]+)""#).ok();
     for (index, line) in lines.iter().enumerate() {
         let Some(position) = line.find("CMake Error at ") else {
             continue;
@@ -472,8 +731,8 @@ pub fn detect_source_group_error(output: &str) -> Option<SourceGroupError> {
             continue;
         }
         let window_text = window.join("\n");
-        let hint_re = Regex::new(r#"is not a prefix of file[^"]*"([^"]+)""#).ok();
         let hint = hint_re
+            .as_ref()
             .and_then(|regex| regex.captures(&window_text))
             .map(|found| found[1].to_string());
         return Some(SourceGroupError {
@@ -896,4 +1155,88 @@ mod tests {
         let out = "No package 'ssl' found\nNo package 'ssl' found\n";
         assert_eq!(analyze_output(out).len(), 1);
     }
+    #[test]
+    fn sha256_ist_korrekt() {
+        assert_eq!(
+            sha256_hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn build_recipes_werden_gelernt_und_wiedergefunden() {
+        let dir = std::env::temp_dir().join(format!(
+            "git2pkg-recipes-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let path = dir.join("learned_mappings.json");
+        let mut store = MappingStore::from_path(path.clone());
+        let recipe = BuildRecipe {
+            signature: "cmake+deps_dir+repo_script".to_string(),
+            strategy: "SystemLibsOnly".to_string(),
+            skip_deps: true,
+            packages: vec!["pkgconf".to_string()],
+            ..Default::default()
+        };
+        store.record_build_recipe("https://github.com/user/Example.git", recipe);
+
+        let reloaded = MappingStore::from_path(path);
+        let (exact, is_exact) = reloaded
+            .apply_learned_recipe(
+                "https://github.com/user/Example.git",
+                "cmake+deps_dir+repo_script",
+            )
+            .unwrap();
+        assert!(is_exact);
+        assert!(exact.skip_deps);
+        let (similar, by_signature) = reloaded
+            .apply_learned_recipe(
+                "https://github.com/other/Similar.git",
+                "cmake+deps_dir+repo_script",
+            )
+            .unwrap();
+        assert!(!by_signature);
+        assert_eq!(similar.strategy, "SystemLibsOnly");
+        assert_eq!(reloaded.build_recipe_count(), 1);
+        assert!(reloaded.learned_rule_count() >= 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn repo_profiles_werden_gelernt_und_uebersprungen() {
+        let dir = std::env::temp_dir().join(format!(
+            "git2pkg-profiles-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let path = dir.join("learned_mappings.json");
+        let url = "https://github.com/user/Example.git";
+
+        let mut store = MappingStore::from_path(path.clone());
+        assert!(!store.is_incomplete_strategy(url, "Default"));
+        store.mark_incomplete_strategy(url, "Default");
+        assert!(store.is_incomplete_strategy(url, "Default"));
+        assert!(store.has_incomplete_default(url));
+        assert_eq!(store.incomplete_strategies(url), vec!["Default".to_string()]);
+
+        let reloaded = MappingStore::from_path(path);
+        assert!(reloaded.is_incomplete_strategy(url, "Default"));
+        assert!(reloaded.has_incomplete_default(url));
+        assert_eq!(reloaded.learned_rule_count(), 1);
+        assert_eq!(repo_profile_key(url), sha256_hex(&normalize_repo_url(url)));
+
+        assert!(package_lacks_executable("-rw-r--r-- 0 0 12 usr/share/repo/data.txt"));
+        assert!(!package_lacks_executable("-rwxr-xr-x 0 0 12 usr/bin/repo"));
+        assert!(is_compiled_build_system("Cargo (Rust)"));
+        assert!(!is_compiled_build_system("Unknown"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
 }

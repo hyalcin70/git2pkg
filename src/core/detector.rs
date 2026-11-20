@@ -1,5 +1,6 @@
 //! Deterministische Erkennung des Build-Systems anhand von Marker-Dateien.
 
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,126 @@ impl BuildSystem {
             BuildSystem::Unknown => "true",
         }
     }
+}
+
+/// Allgemeine, reproduzierbare Struktur-Signatur eines Repositories.
+/// Enthält niemals den Projekt- oder Repository-Namen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ProjectFingerprint {
+    pub signature: String,
+    pub build_system: String,
+    pub features: Vec<String>,
+}
+
+impl ProjectFingerprint {
+    pub fn from_root(root: &Path) -> Self {
+        let build_system = fingerprint_build_system(root).to_string();
+        let mut features = Vec::new();
+        if root.join("deps/CMakeLists.txt").is_file() {
+            features.push("deps_dir".to_string());
+        }
+        if root.join("third_party/CMakeLists.txt").is_file() {
+            features.push("third_party".to_string());
+        }
+        if has_repo_script(root) {
+            features.push("repo_script".to_string());
+        }
+        if root.join("PKGBUILD").is_file() {
+            features.push("pkgbuild".to_string());
+        }
+        if is_workspace(root) {
+            features.push("workspace".to_string());
+        }
+        if root.join(".gitmodules").is_file() {
+            features.push("submodules".to_string());
+        }
+        if has_desktop_assets(root) {
+            features.push("desktop_assets".to_string());
+        }
+        let text = fingerprint_text(root);
+        if uses_toolkit(&text, &["qt5", "qt6", "find_package(qt", "qmake"]) {
+            features.push("qt".to_string());
+        }
+        if uses_toolkit(&text, &["gtk", "gtkmm", "gtk4"]) {
+            features.push("gtk".to_string());
+        }
+        let signature = if features.is_empty() {
+            build_system.clone()
+        } else {
+            format!("{}+{}", build_system, features.join("+"))
+        };
+        Self {
+            signature,
+            build_system,
+            features,
+        }
+    }
+}
+
+fn fingerprint_build_system(root: &Path) -> &'static str {
+    if root.join("configure.ac").is_file() || root.join("configure").is_file() {
+        return "autotools";
+    }
+    match detect_build_system(root) {
+        BuildSystem::Cargo => "cargo",
+        BuildSystem::CMake => "cmake",
+        BuildSystem::Meson => "meson",
+        BuildSystem::Qmake => "qmake",
+        BuildSystem::Go => "go",
+        BuildSystem::Python => "python",
+        BuildSystem::Make => "make",
+        BuildSystem::Unknown => "unknown",
+    }
+}
+
+fn has_repo_script(root: &Path) -> bool {
+    [
+        "BuildLinux.sh",
+        "build.sh",
+        "build_linux.sh",
+        "build-linux.sh",
+        "compile.sh",
+    ]
+    .iter()
+    .any(|name| root.join(name).is_file())
+}
+
+fn is_workspace(root: &Path) -> bool {
+    if let Ok(text) = std::fs::read_to_string(root.join("Cargo.toml")) {
+        if text.lines().any(|line| line.trim() == "[workspace]") {
+            return true;
+        }
+    }
+    root.join("crates").is_dir()
+}
+
+fn has_desktop_assets(root: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .path()
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("desktop"))
+            .unwrap_or(false)
+    })
+}
+
+fn fingerprint_text(root: &Path) -> String {
+    let mut text = String::new();
+    for name in ["CMakeLists.txt", "meson.build"] {
+        if let Ok(content) = std::fs::read_to_string(root.join(name)) {
+            text.push_str(&content);
+            text.push('\n');
+        }
+    }
+    text.to_ascii_lowercase()
+}
+
+fn uses_toolkit(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
 }
 
 /// CMake-Projekte mit einem Unterverzeichnis `deps/` enthalten lokale Abhängigkeiten
@@ -113,6 +234,33 @@ mod tests {
             fs::write(path, "").unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn fingerabdruck_ist_generisch_und_stabil() {
+        let root = temp_root(
+            "fingerprint",
+            &[
+                "CMakeLists.txt",
+                "deps/CMakeLists.txt",
+                "build.sh",
+                ".gitmodules",
+                "app.desktop",
+            ],
+        );
+        fs::write(
+            root.join("CMakeLists.txt"),
+            "find_package(Qt6 REQUIRED)\n",
+        )
+        .unwrap();
+        let first = ProjectFingerprint::from_root(&root);
+        let second = ProjectFingerprint::from_root(&root);
+        assert_eq!(first, second);
+        assert!(first.signature.starts_with("cmake+"));
+        assert!(first.features.contains(&"deps_dir".to_string()));
+        assert!(first.features.contains(&"repo_script".to_string()));
+        assert!(first.features.contains(&"qt".to_string()));
+        assert!(!first.signature.contains("fingerprint"));
     }
 
     #[test]

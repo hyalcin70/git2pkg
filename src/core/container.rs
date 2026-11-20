@@ -3,12 +3,15 @@
 //! Fallback `docker run --rm`). Ausgaben werden über einen `mpsc::Sender`
 //! live an die GUI weitergeleitet.
 
-use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem};
+use crate::core::detector::{
+    detect_build_system, has_local_deps, BuildSystem, ProjectFingerprint,
+};
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
 use regex::Regex;
 use crate::core::resolver::{
     analyze_output, candidate_names, detect_build_fixes, detect_source_group_error, family_key,
-    package_from_search, probe_commands, search_command, valid_package_name, MappingStore, MissingDep, SourceGroupError,
+    is_compiled_build_system, package_from_search, package_lacks_executable, probe_commands,
+    search_command, valid_package_name, BuildRecipe, MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 
@@ -17,9 +20,10 @@ use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const OK_MARKER: &str = "__GIT2PKG_BUILD_OK__";
 const DEPS_FAILURE_MARKER: &str = "[deps] Bau fehlgeschlagen";
@@ -28,6 +32,8 @@ fn deps_fallback_needed(output: &str, skip_deps: bool) -> bool {
     !skip_deps && output.contains(DEPS_FAILURE_MARKER)
 }
 const MAX_ATTEMPTS: u8 = 5;
+const INITIAL_HEAL_ROUNDS: u8 = 5;
+const MAX_HEAL_ROUNDS: u8 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetFormat {
@@ -106,6 +112,9 @@ impl BuildContainer {
         if !started.success {
             return Err("Container konnte nicht gestartet werden".to_string());
         }
+        *config.container_id.lock().unwrap() = Some(name.clone());
+        let _ = tx.send(BuildEvent::Log(format!("[container] {}", name)));
+        let _ = tx.send(BuildEvent::ContainerStarted(name.clone()));
         Ok(Self {
             engine: config.engine.clone(),
             name,
@@ -121,6 +130,15 @@ impl BuildContainer {
             command.to_string(),
         ];
         run_streamed(self.engine.binary(), &args, tx)
+    }
+
+     pub(crate) fn stop(&self) {
+        let args = vec!["rm", "-f", &self.name];
+        let _ = Command::new(self.engine.binary())
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
 
     fn exec_script(&self, tx: &Sender<BuildEvent>) -> Result<CommandOutput, String> {
@@ -186,6 +204,15 @@ pub enum BuildStrategy {
 }
 
 impl BuildStrategy {
+    pub fn index(self) -> u8 {
+        match self {
+            Self::Default => 1,
+            Self::SystemLibsOnly => 2,
+            Self::RepoScript => 3,
+            Self::DirectStagingFallback => 4,
+        }
+    }
+
     /// Nächste sinnvolle Stufe. Ohne lokale deps/ wird Stufe 2 übersprungen.
     pub fn next(self, has_deps: bool) -> Self {
         match self {
@@ -193,6 +220,25 @@ impl BuildStrategy {
             BuildStrategy::Default | BuildStrategy::SystemLibsOnly => BuildStrategy::RepoScript,
             BuildStrategy::RepoScript => BuildStrategy::DirectStagingFallback,
             BuildStrategy::DirectStagingFallback => BuildStrategy::Default,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            BuildStrategy::Default => "Default",
+            BuildStrategy::SystemLibsOnly => "SystemLibsOnly",
+            BuildStrategy::RepoScript => "RepoScript",
+            BuildStrategy::DirectStagingFallback => "DirectStagingFallback",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "Default" => Some(Self::Default),
+            "SystemLibsOnly" => Some(Self::SystemLibsOnly),
+            "RepoScript" => Some(Self::RepoScript),
+            "DirectStagingFallback" => Some(Self::DirectStagingFallback),
+            _ => None,
         }
     }
 
@@ -226,6 +272,7 @@ fn build_cache_root() -> PathBuf {
 }
 
 /// True, wenn mindestens ein fehlgeschlagener Build-Cache existiert.
+#[allow(dead_code)]
 pub fn has_failed_build_cache() -> bool {
     let Ok(entries) = fs::read_dir(build_cache_root()) else {
         return false;
@@ -255,6 +302,33 @@ pub fn cleanup_failed_build_artifacts() -> usize {
     cleanup_failed_build_artifacts_in(&build_cache_root())
 }
 
+fn remove_heavy_build_dirs(work: &Path) -> usize {
+    let mut cleaned = 0;
+    for name in [
+        "build",
+        "deps-build",
+        "cargo-target",
+        "cargo-home",
+        "ccache",
+        "out",
+        "dist",
+        "pkg",
+    ] {
+        let dir = work.join(name);
+        if dir.is_dir() && fs::remove_dir_all(&dir).is_ok() {
+            cleaned += 1;
+        }
+    }
+    cleaned
+}
+
+fn cleanup_successful_build(work: &Path, tx: &Sender<BuildEvent>) {
+    let _ = remove_heavy_build_dirs(work);
+    let _ = tx.send(BuildEvent::Log(
+        "[cache] Temporäre Build-Dateien automatisch bereinigt".to_string(),
+    ));
+}
+
 fn cleanup_failed_build_artifacts_in(root: &Path) -> usize {
     let Ok(entries) = fs::read_dir(root) else {
         return 0;
@@ -265,21 +339,7 @@ fn cleanup_failed_build_artifacts_in(root: &Path) -> usize {
         if !work.join("FAILED").is_file() {
             continue;
         }
-        for name in [
-            "build",
-            "deps-build",
-            "cargo-target",
-            "cargo-home",
-            "ccache",
-            "out",
-            "dist",
-            "pkg",
-        ] {
-            let dir = work.join(name);
-            if dir.is_dir() && fs::remove_dir_all(&dir).is_ok() {
-                cleaned += 1;
-            }
-        }
+        cleaned += remove_heavy_build_dirs(&work);
         // Der Cache gilt jetzt als bereinigt, der Quellcode bleibt aber nutzbar.
         let _ = fs::remove_file(work.join("FAILED"));
     }
@@ -333,6 +393,10 @@ pub struct BuildConfig {
     pub submodule_fix: bool,
     /// Nach gescheitertem deps/-Vorbau: Hauptprojekt gegen Systembibliotheken bauen.
     pub skip_deps: bool,
+    /// Vom GUI-Thread gesetzt, um einen laufenden Build sofort zu stoppen.
+    pub cancel_flag: Arc<AtomicBool>,
+    /// ID des aktuellen Wegwerf-Containers für den sofortigen Stopp.
+    pub container_id: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +405,30 @@ pub enum BuildEvent {
     Log(String),
     Finished(BuildOutcome),
     Failed(String),
+    ContainerStarted(String),
+    Cancelled,
+}
+
+const CANCEL_TOKEN: &str = "__GIT2PKG_CANCELLED__";
+
+struct CancelWatchDone(Arc<AtomicBool>);
+impl Drop for CancelWatchDone {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+fn abort_running_build(
+    container: &BuildContainer,
+    config: &BuildConfig,
+    tx: &Sender<BuildEvent>,
+) -> String {
+    container.stop();
+    *config.container_id.lock().unwrap() = None;
+    let _ = tx.send(BuildEvent::Log(
+        "[warn] Build vom Benutzer abgebrochen.".to_string(),
+    ));
+    CANCEL_TOKEN.to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -363,6 +451,9 @@ pub fn run_build(mut config: BuildConfig, tx: Sender<BuildEvent>) {
     match execute(&mut config, &tx) {
         Ok(outcome) => {
             let _ = tx.send(BuildEvent::Finished(outcome));
+        }
+        Err(err) if err == CANCEL_TOKEN => {
+            let _ = tx.send(BuildEvent::Cancelled);
         }
         Err(err) => {
             let _ = tx.send(BuildEvent::Failed(err));
@@ -429,19 +520,18 @@ fn comment_source_group_block(path: &Path, line: usize) -> bool {
     }
     let mut balance = 0_i32;
     let mut end = start;
-    for index in start..lines.len() {
-        balance += lines[index].matches('(').count() as i32
-            - lines[index].matches(')').count() as i32;
+    for (index, line) in lines.iter().enumerate().skip(start) {
+        balance += line.matches('(').count() as i32 - line.matches(')').count() as i32;
         end = index;
         if balance <= 0 {
             break;
         }
     }
-    for index in start..=end {
-        let trimmed = lines[index].trim_start().to_string();
+    for line in lines.iter_mut().take(end + 1).skip(start) {
+        let trimmed = line.trim_start().to_string();
         if !trimmed.starts_with('#') {
-            let indent = lines[index].len() - trimmed.len();
-            lines[index] = format!("{}# {}", &lines[index][..indent], trimmed);
+            let indent = line.len() - trimmed.len();
+            *line = format!("{}# {}", &line[..indent], trimmed);
         }
     }
     let mut output = lines.join("\n");
@@ -497,6 +587,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut mappings = MappingStore::load();
     let mut failed_candidates: HashSet<String> = HashSet::new();
     let mut healed_source_groups: HashSet<(String, usize, String)> = HashSet::new();
+    let mut skipped_incomplete: HashSet<String> = HashSet::new();
 
     step(tx, texts.step_workdir());
     let work = temp_workdir(&config.url)?;
@@ -513,7 +604,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         )));
         let _ = run_streamed(
             "git",
-            &vec![
+            &[
                 "-C".to_string(),
                 src.to_string_lossy().into_owned(),
                 "reset".to_string(),
@@ -523,7 +614,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         );
         let _ = run_streamed(
             "git",
-            &vec![
+            &[
                 "-C".to_string(),
                 src.to_string_lossy().into_owned(),
                 "clean".to_string(),
@@ -554,6 +645,24 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         "[project] {} {}",
         identity.name, identity.version
     )));
+
+    let fingerprint = ProjectFingerprint::from_root(&src);
+    if let Some((recipe, _exact)) =
+        mappings.apply_learned_recipe(&config.url, &fingerprint.signature)
+    {
+        if let Some(strategy) = BuildStrategy::from_key(&recipe.strategy) {
+            config.strategy = strategy;
+        }
+        config.skip_deps = recipe.skip_deps;
+        config.cmake_compat |= recipe.cmake_compat;
+        config.cstdint_fix |= recipe.cstdint_fix;
+        config.submodule_fix |= recipe.submodule_fix;
+        let _ = tx.send(BuildEvent::Log(format!(
+            "[learn] Bekannte Bauweise für Struktur '{}' angewendet",
+            fingerprint.signature
+        )));
+    }
+
     if config.strategy == BuildStrategy::RepoScript {
         let _ = tx.send(BuildEvent::Log(format!(
             "[strategy] {} - Repo-Skript: {}",
@@ -576,16 +685,53 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
     // Ein Container fuer den gesamten Build inklusive Suche und Nachinstallation.
     let container = BuildContainer::start(config, &work, tx)?;
+    let watch_done = Arc::new(AtomicBool::new(false));
+    let _watch_guard = CancelWatchDone(watch_done.clone());
+    {
+        let cancel = config.cancel_flag.clone();
+        let container_id = config.container_id.clone();
+        let engine = config.engine.clone();
+        std::thread::spawn(move || {
+            while !watch_done.load(Ordering::Relaxed) {
+                if cancel.load(Ordering::Relaxed) {
+                    if let Some(id) = container_id.lock().unwrap().take() {
+                        let _ = Command::new(engine.binary())
+                            .args(["rm", "-f", &id])
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .status();
+                    }
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+    }
     let mut db_synced = false;
     let mut extra_packages: Vec<String> = Vec::new();
     let mut last_output = String::new();
     let mut forced_strategy: Option<BuildStrategy> = None;
     let mut direct_tried = false;
 
-    let mut attempt = 1;
-    let mut allowed_attempts = MAX_ATTEMPTS;
-    'attempt: while attempt <= allowed_attempts {
-        step(tx, texts.step_attempt(attempt, MAX_ATTEMPTS));
+    let mut strategy_attempt: u8 = 1;
+    let mut heal_round: u8 = 1;
+    let mut allowed_rounds: u8 = INITIAL_HEAL_ROUNDS;
+    'attempt: while strategy_attempt <= MAX_ATTEMPTS {
+        if config.cancel_flag.load(Ordering::Relaxed) {
+            return Err(abort_running_build(&container, config, tx));
+        }
+        let effective_strategy = forced_strategy.unwrap_or(config.strategy);
+        let strategy_name = effective_strategy.label();
+        step(
+            tx,
+            texts.step_strategy_round(
+                strategy_name,
+                effective_strategy.index(),
+                MAX_ATTEMPTS,
+                heal_round,
+                allowed_rounds,
+            ),
+        );
         // Frische Artefakte pro Versuch, der geklonte Quellcode bleibt erhalten.
         for name in ["out", "dist", "pkg"] {
             let dir = work.join(name);
@@ -594,7 +740,35 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             }
             fs::create_dir_all(&dir).map_err(|e| format!("cache dir: {}", e))?;
         }
-        let effective_strategy = forced_strategy.unwrap_or(config.strategy);
+        if mappings.is_incomplete_strategy(&config.url, strategy_name)
+            && !skipped_incomplete.contains(strategy_name)
+        {
+            skipped_incomplete.insert(strategy_name.to_string());
+            let (next, message) = if effective_strategy == BuildStrategy::Default
+                && mappings.has_incomplete_default(&config.url)
+            {
+                (
+                    BuildStrategy::SystemLibsOnly,
+                    "[learn] Gespeichertes Lern-Profil aktiv — überspringe deps/ und baue direkt gegen System-Bibliotheken".to_string(),
+                )
+            } else {
+                let next = effective_strategy.next(has_deps);
+                (
+                    next,
+                    format!(
+                        "[learn] Bekanntes unvollständiges Profil für Strategie '{}' übersprungen — starte direkt mit alternativer Strategie",
+                        strategy_name
+                    ),
+                )
+            };
+            let _ = tx.send(BuildEvent::Log(message));
+            config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+            strategy_attempt += 1;
+            heal_round = 1;
+            allowed_rounds = INITIAL_HEAL_ROUNDS;
+            forced_strategy = Some(next);
+            continue 'attempt;
+        }
         // Nur Stufe 1 baut lokale deps/ vor; alle späteren Stufen nutzen Systemlibs.
         let deps_first = has_deps && effective_strategy == BuildStrategy::Default;
         if deps_first {
@@ -615,12 +789,71 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         if deps_first && effective_strategy != BuildStrategy::DirectStagingFallback && !config.skip_deps {
             script = with_deps_prebuild(&script);
         }
-        let result = run_container(&container, &work, &script, tx)?;
+        let result = match run_container(&container, &work, &script, tx) {
+            Ok(result) => result,
+            Err(error) => {
+                if config.cancel_flag.load(Ordering::Relaxed) {
+                    return Err(abort_running_build(&container, config, tx));
+                }
+                return Err(error);
+            }
+        };
+        if config.cancel_flag.load(Ordering::Relaxed) {
+            return Err(abort_running_build(&container, config, tx));
+        }
         last_output = result.text.clone();
         let deps_failed = deps_fallback_needed(&last_output, config.skip_deps);
 
         if result.text.contains(OK_MARKER) {
-            if !verify_built_packages(&container, config, tx) {
+            if !verify_built_packages(
+                &container,
+                config,
+                tx,
+                is_compiled_build_system(system.label()),
+                strategy_name,
+                &mut mappings,
+            ) {
+                // Lernprofil: kompiliertes Projekt ohne ausführbare Datei im Paket.
+                let mut incomplete_profile = false;
+                if is_compiled_build_system(system.label()) {
+                    if let Ok(listing) = container.exec("find /work/dist -maxdepth 1 -type f", tx) {
+                        for raw in listing.text.lines() {
+                            let path = raw.trim();
+                            let kind = if path.ends_with(".pkg.tar.zst") {
+                                "pkg"
+                            } else if path.ends_with(".deb") {
+                                "deb"
+                            } else if path.ends_with(".rpm") {
+                                "rpm"
+                            } else {
+                                continue;
+                            };
+                            if let Ok(archive) = container.exec(&archive_listing_command(kind, path), tx) {
+                                if package_lacks_executable(&archive.text) {
+                                    let _ = tx.send(BuildEvent::Log(
+                                        "[warn] Erzeugtes Paket enthält keine ausführbare Programmdatei — merke Strategie für dieses Repository als unvollständig".to_string(),
+                                    ));
+                                    mappings.mark_incomplete_strategy(&config.url, strategy_name);
+                                    incomplete_profile = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if incomplete_profile {
+                    let next = effective_strategy.next(has_deps);
+                    strategy_attempt += 1;
+                    heal_round = 1;
+                    allowed_rounds = INITIAL_HEAL_ROUNDS;
+                    config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+                    forced_strategy = Some(next);
+                    let _ = tx.send(BuildEvent::Log(format!(
+                        "[strategy] {} (unvollständiges Profil)",
+                        next.label()
+                    )));
+                    continue;
+                }
                 if direct_tried {
                     mark_failed_build(&work);
                     return Err(
@@ -629,6 +862,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     );
                 }
                 direct_tried = true;
+                strategy_attempt += 1;
+                heal_round = 1;
+                allowed_rounds = INITIAL_HEAL_ROUNDS;
                 forced_strategy = Some(BuildStrategy::DirectStagingFallback);
                 let _ = tx.send(BuildEvent::Log(format!(
                     "[strategy] {}",
@@ -636,7 +872,28 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 )));
                 continue;
             }
-            return package_result(config, &work, &identity, &last_output, tx);
+            if config.cancel_flag.load(Ordering::Relaxed) {
+                return Err(abort_running_build(&container, config, tx));
+            }
+            if config.target == TargetFormat::NativePackage {
+                let recipe = BuildRecipe {
+                    signature: fingerprint.signature.clone(),
+                    strategy: effective_strategy.key().to_string(),
+                    skip_deps: config.skip_deps,
+                    cmake_compat: config.cmake_compat,
+                    cstdint_fix: config.cstdint_fix,
+                    submodule_fix: config.submodule_fix,
+                    packages: extra_packages.clone(),
+                };
+                mappings.record_build_recipe(&config.url, recipe);
+                let _ = tx.send(BuildEvent::Log(format!(
+                    "[learn] Erfolgreiche Bauweise für Struktur '{}' gespeichert",
+                    fingerprint.signature
+                )));
+            }
+            let outcome = package_result(config, &work, &identity, &last_output, tx)?;
+            cleanup_successful_build(&work, tx);
+            return Ok(outcome);
         }
 
         if let Some(error) = detect_source_group_error(&last_output) {
@@ -647,7 +904,15 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             );
             if !healed_source_groups.contains(&key) && heal_source_group(&work, &error, tx) {
                 healed_source_groups.insert(key);
-                allowed_attempts += 1;
+                heal_round += 1;
+                if heal_round > allowed_rounds {
+                    let next = effective_strategy.next(has_deps);
+                    strategy_attempt += 1;
+                    heal_round = 1;
+                    allowed_rounds = INITIAL_HEAL_ROUNDS;
+                    config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+                    forced_strategy = Some(next);
+                }
                 continue;
             }
         }
@@ -672,8 +937,10 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                         .to_string(),
                 ));
                 config.skip_deps = true;
+                strategy_attempt += 1;
+                heal_round = 1;
+                allowed_rounds = INITIAL_HEAL_ROUNDS;
                 forced_strategy = Some(BuildStrategy::SystemLibsOnly);
-                allowed_attempts += 1;
                 continue 'attempt;
             }
             mark_failed_build(&work);
@@ -773,12 +1040,18 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                             .to_string(),
                     ));
                     config.skip_deps = true;
-                    allowed_attempts += 1;
+                    strategy_attempt += 1;
+                    heal_round = 1;
+                    allowed_rounds = INITIAL_HEAL_ROUNDS;
+                    forced_strategy = Some(BuildStrategy::SystemLibsOnly);
                     continue 'attempt;
                 }
                 mark_failed_build(&work);
                 return Err(texts.err_no_package(&dep.label()));
             };
+            // Nach der ersten erfolgreichen Nachinstallation brauchen große
+            // C++-Workspaces mehr als 5 Runden für alle find_package()-Aufrufe.
+            allowed_rounds = MAX_HEAL_ROUNDS;
             mappings.learn(family, &raw_name, &package);
             let _ = tx.send(BuildEvent::Log(format!(
                 "[learn] Aus Fehler gelernt & gespeichert: {} -> {}",
@@ -794,11 +1067,24 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 extra_packages.push(package);
             }
         }
-        attempt += 1;
+        if heal_round >= allowed_rounds {
+            let next = effective_strategy.next(has_deps);
+            strategy_attempt += 1;
+            heal_round = 1;
+            allowed_rounds = INITIAL_HEAL_ROUNDS;
+            config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+            forced_strategy = Some(next);
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[strategy] {} (Selbstheilungs-Runden erschöpft)",
+                next.label()
+            )));
+        } else {
+            heal_round += 1;
+        }
     }
 
     mark_failed_build(&work);
-    Err(texts.err_max_attempts(MAX_ATTEMPTS, &last_output))
+    Err(texts.err_max_attempts(strategy_attempt.saturating_sub(1), &last_output))
 }
 
 /// Nur echte Fehlermeldungen als `[err]` markieren - nicht alles, was auf stderr kommt.
@@ -965,7 +1251,7 @@ fn install_packages_command(family: &DistroFamily, packages: &[String]) -> Strin
     }
     let list = cleaned.join(" ");
     match family {
-        DistroFamily::Arch => format!("pacman -S --noconfirm --needed -- {}", list),
+        DistroFamily::Arch => format!("yes '' | pacman -S --noconfirm --needed -- {}", list),
         DistroFamily::Debian => format!("DEBIAN_FRONTEND=noninteractive apt-get install -y {}", list),
         DistroFamily::Fedora => format!("dnf install -y {}", list),
         DistroFamily::Suse => format!("zypper --non-interactive install {}", list),
@@ -1006,12 +1292,8 @@ fn package_slug(raw: &str) -> String {
 /// fasst Mehrfachpunkte zusammen und erzwingt einen führenden Ziffer.
 fn version_slug(raw: &str) -> String {
     let mut text = raw.trim();
-    loop {
-        if let Some(rest) = text.strip_prefix('v').or_else(|| text.strip_prefix('V')) {
-            text = rest;
-        } else {
-            break;
-        }
+    while let Some(rest) = text.strip_prefix('v').or_else(|| text.strip_prefix('V')) {
+        text = rest;
     }
 
     let mut cleaned = String::with_capacity(text.len());
@@ -1102,7 +1384,10 @@ fn project_identity(url: &str, src: &Path) -> ProjectIdentity {
 fn project_install_step(system: &BuildSystem, name: &str) -> String {
     let step = match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_install_step().to_string(),
-        BuildSystem::CMake => "DESTDIR=\"$pkgdir\" cmake --install build".to_string(),
+        BuildSystem::CMake => {
+            "cmake --build build -j$(nproc) && [ -f build/cmake_install.cmake ] && DESTDIR=\"$pkgdir\" cmake --install build"
+                .to_string()
+        }
         BuildSystem::Meson => "DESTDIR=\"$pkgdir\" ninja -C build install".to_string(),
         BuildSystem::Go => format!("install -Dm755 app \"$pkgdir/usr/bin/{}\"", name),
         BuildSystem::Python => {
@@ -1113,8 +1398,9 @@ fn project_install_step(system: &BuildSystem, name: &str) -> String {
         BuildSystem::Unknown => "true".to_string(),
     };
     format!(
-        "mkdir -p \"$pkgdir/usr/bin\" \"$pkgdir/usr/lib\" \"$pkgdir/usr/share\"\n{}",
-        step
+        "mkdir -p \"$pkgdir/usr/bin\" \"$pkgdir/usr/lib\" \"$pkgdir/usr/share\"\n{}\n{}",
+        step,
+        crate::core::packaging::strip_binaries_step()
     )
 }
 
@@ -1122,7 +1408,7 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
     match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_build_step(),
         BuildSystem::CMake => {
-            "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
+            "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
         }
         BuildSystem::Meson => {
             "meson setup build --prefix=/usr && ninja -C build && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
@@ -1162,7 +1448,6 @@ fn sanitize_package(raw: &str) -> String {
 }
 
 #[allow(dead_code)]
-#[allow(dead_code)]
 fn build_script(config: &BuildConfig, system: &BuildSystem, extra: &[String]) -> String {
     let identity = project_identity(&config.url, Path::new(""));
     build_script_with(
@@ -1177,29 +1462,55 @@ fn build_script(config: &BuildConfig, system: &BuildSystem, extra: &[String]) ->
 }
 
 /// Build-Schritt unter Berücksichtigung der ausgewählten Strategie.
-
+///
 /// Generisches Nachinstallieren von Desktop-Dateien und deren Icons.
 /// Wirkt für jedes Build-System und jede Distribution - ohne Projektname.
 fn asset_staging_step() -> &'static str {
     r#"
-mkdir -p "$pkgdir/usr/share/applications" "$pkgdir/usr/share/icons/hicolor/scalable/apps" "$pkgdir/usr/share/pixmaps"
+mkdir -p "$pkgdir/usr/share/applications" "$pkgdir/usr/share/icons/hicolor/scalable/apps" "$pkgdir/usr/share/icons/hicolor/256x256/apps" "$pkgdir/usr/share/pixmaps"
+find_git2pkg_assets() {
+  find . -maxdepth 3 -type f "$@" \
+    ! -path './target/*' ! -path '*/target/*' ! -path '*/cargo-target/*' \
+    ! -path '*/build/*' ! -path '*/.git/*' -print0 2>/dev/null
+}
 while IFS= read -r -d '' desktop; do
-  name=$(basename "$desktop")
-  target="$pkgdir/usr/share/applications/$name"
-  [ -e "$target" ] || install -Dm644 "$desktop" "$target"
-  icon=$(grep -m1 '^Icon=' "$desktop" | cut -d= -f2- | tr -d '
-')
-  if [ -n "$icon" ]; then
-    found=$(find . -type f \( -name "$icon.svg" -o -name "$icon.png" \) -print -quit)
-    if [ -n "$found" ]; then
-      case "$found" in
-        *.svg) dest="$pkgdir/usr/share/icons/hicolor/scalable/apps/$(basename "$found")" ;;
-        *) dest="$pkgdir/usr/share/pixmaps/$(basename "$found")" ;;
-      esac
-      [ -e "$dest" ] || install -Dm644 "$found" "$dest"
-    fi
-  fi
-done < <(find . -type f -name '*.desktop' -print0)
+  base=$(basename "$desktop")
+  case "$base" in
+    *.desktop.in) name="${base%.desktop.in}" ;;
+    *) name="${base%.desktop}" ;;
+  esac
+  target="$pkgdir/usr/share/applications/$name.desktop"
+  [ -e "$target" ] && continue
+  case "$base" in
+    *.desktop.in)
+      sed -e "s|@EXEC@|$name|g" -e "s|@ICON@|$name|g" "$desktop" > "$target" || true
+      ;;
+    *)
+      install -Dm644 "$desktop" "$target"
+      ;;
+  esac
+  icon=$(grep -m1 '^Icon=' "$target" 2>/dev/null | cut -d= -f2- | tr -d '\r')
+  [ -z "$icon" ] && continue
+  icon=$(printf '%s' "$icon" | sed "s|@ICON@|$name|g")
+  for ext in svg png ico; do
+    found=$(find_git2pkg_assets -name "$icon.$ext" -print -quit)
+    [ -n "$found" ] || found=$(find_git2pkg_assets -name "$name.$ext" -print -quit)
+    [ -z "$found" ] && continue
+    case "$ext" in
+      svg)
+        install -Dm644 "$found" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$(basename "$found")"
+        ;;
+      png)
+        install -Dm644 "$found" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$(basename "$found")"
+        install -Dm644 "$found" "$pkgdir/usr/share/pixmaps/$(basename "$found")"
+        ;;
+      ico)
+        install -Dm644 "$found" "$pkgdir/usr/share/pixmaps/$(basename "$found")"
+        ;;
+    esac
+    break
+  done
+done < <(find_git2pkg_assets \( -name '*.desktop' -o -name '*.desktop.in' \))
 "#
 }
 
@@ -1207,7 +1518,7 @@ fn build_step_text(system: &BuildSystem, strategy: BuildStrategy, repo_script: O
     // Direkter Fallback ignoriert Repo-Skripte und Generator-Sonderwege.
     if strategy == BuildStrategy::DirectStagingFallback {
         if *system == BuildSystem::CMake {
-            return r#"cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \;"#.to_string();
+            return r#"cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \;"#.to_string();
         }
         return binary_build_step(system).to_string();
     }
@@ -1322,7 +1633,7 @@ fn build_script_with(
 
     match &config.target {
         TargetFormat::StandaloneBinary => {
-            lines.push(echo_line(&texts.log_binary_build()));
+            lines.push(echo_line(texts.log_binary_build()));
             lines.push(format!("cd /work/src && {}", build_step));
         }
         TargetFormat::NativePackage => {
@@ -1504,6 +1815,8 @@ mod tests {
             cstdint_fix: false,
             submodule_fix: false,
             skip_deps: false,
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+            container_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -1514,7 +1827,7 @@ mod tests {
             &BuildSystem::CMake,
             &["foo (bar)".to_string()],
         );
-        assert!(script.contains("pacman -S --noconfirm --needed -- foo"));
+        assert!(script.contains("yes '' | pacman -S --noconfirm --needed -- foo"));
         assert!(!script.contains("--needed foo (bar)"));
     }
 
@@ -1577,6 +1890,75 @@ mod tests {
         for (input, expected) in cases {
             assert_eq!(version_slug(input), expected, "Version: {:?}", input);
         }
+    }
+
+    #[test]
+    fn asset_staging_findet_desktop_dateien_in_unterordnern() {
+        let script = asset_staging_step();
+        assert!(script.contains("-maxdepth 3"));
+        assert!(script.contains("*.desktop.in"));
+        assert!(script.contains("@EXEC@"));
+        assert!(script.contains("@ICON@"));
+        assert!(script.contains("usr/share/applications"));
+        assert!(script.contains("usr/share/icons/hicolor/scalable/apps"));
+        assert!(script.contains("usr/share/pixmaps"));
+        assert!(script.contains("cargo-target"));
+        assert!(script.contains("! -path '*/.git/*'"));
+        let path = std::env::temp_dir().join(format!("git2pkg-assets-{}.sh", std::process::id()));
+        std::fs::write(&path, script).unwrap();
+        let ok = std::process::Command::new("bash")
+            .arg("-n")
+            .arg(&path)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        let _ = std::fs::remove_file(&path);
+        assert!(ok, "ungueltiges Asset-Staging-Skript");
+    }
+
+    #[test]
+    fn alle_buildsysteme_und_strategien_erzeugen_gueltige_skripte() {
+        let config = config(DistroFamily::Arch, TargetFormat::NativePackage);
+        let identity = project_identity("https://example.invalid/repo.git", Path::new(""));
+        let systems = [
+            BuildSystem::Cargo,
+            BuildSystem::CMake,
+            BuildSystem::Meson,
+            BuildSystem::Qmake,
+            BuildSystem::Go,
+            BuildSystem::Python,
+            BuildSystem::Make,
+            BuildSystem::Unknown,
+        ];
+        let strategies = [
+            BuildStrategy::Default,
+            BuildStrategy::SystemLibsOnly,
+            BuildStrategy::RepoScript,
+            BuildStrategy::DirectStagingFallback,
+        ];
+        let path = std::env::temp_dir().join(format!("git2pkg-buildmatrix-{}.sh", std::process::id()));
+        for system in systems {
+            for strategy in strategies {
+                let script = build_script_with(
+                    &config,
+                    &system,
+                    &[],
+                    None,
+                    &identity,
+                    strategy,
+                    false,
+                );
+                std::fs::write(&path, script).unwrap();
+                let ok = std::process::Command::new("bash")
+                    .arg("-n")
+                    .arg(&path)
+                    .status()
+                    .map(|status| status.success())
+                    .unwrap_or(false);
+                assert!(ok, "ungueltiges Buildskript: {:?} / {:?}", system, strategy);
+            }
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -1805,7 +2187,7 @@ mod tests {
             &DistroFamily::Arch,
             &["libpng".to_string(), "eigen".to_string()],
         );
-        assert!(cmd.contains("pacman -S --noconfirm --needed -- libpng eigen"));
+        assert!(cmd.contains("yes '' | pacman -S --noconfirm --needed -- libpng eigen"));
     }
 
     #[test]
@@ -1919,6 +2301,7 @@ mod tests {
         );
         assert!(deb.contains("Arch-PKGBUILD wird fuer dieses Zielformat ignoriert"));
         assert!(deb.contains("cmake --install build"));
+        assert!(deb.contains("cmake --build build -j$(nproc) && [ -f build/cmake_install.cmake ] && DESTDIR="));
         assert!(deb.contains("dpkg-deb --build /work/deb /work/dist/repo_0.1.0_amd64.deb"));
         assert!(!deb.contains("makepkg"));
 
@@ -1997,7 +2380,7 @@ mod tests {
             &BuildSystem::CMake,
             &["openssl".to_string()],
         );
-        assert!(script.contains("pacman -S --noconfirm --needed -- openssl"));
+        assert!(script.contains("yes '' | pacman -S --noconfirm --needed -- openssl"));
         assert!(script.contains("cmake -S . -B build"));
         assert!(script.contains("export CMAKE_POLICY_VERSION_MINIMUM=3.5"));
         assert!(script.contains("-DCMAKE_POLICY_VERSION_MINIMUM=3.5"));
@@ -2082,6 +2465,44 @@ mod tests {
         }
         assert!(!work.join("FAILED").exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn erfolgreicher_build_behaelt_nur_den_quellcode() {
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-success-cleanup-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        for name in [
+            "build",
+            "deps-build",
+            "cargo-target",
+            "cargo-home",
+            "ccache",
+            "out",
+            "dist",
+            "pkg",
+            "src",
+        ] {
+            fs::create_dir_all(root.join(name)).unwrap();
+        }
+        fs::write(root.join("src/README.md"), "source").unwrap();
+        assert_eq!(remove_heavy_build_dirs(&root), 8);
+        assert!(root.join("src/README.md").is_file());
+        for name in [
+            "build",
+            "deps-build",
+            "cargo-target",
+            "cargo-home",
+            "ccache",
+            "out",
+            "dist",
+            "pkg",
+        ] {
+            assert!(!root.join(name).exists(), "{} wurde nicht entfernt", name);
+        }
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
