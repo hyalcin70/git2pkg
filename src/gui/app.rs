@@ -22,9 +22,9 @@ use std::time::{Duration, Instant};
 
 /// Eingebettetes Creator-Logo (PNG 600x160). Die Binary bleibt dadurch
 /// vollständig selbstständig und benötigt keine externe Bilddatei.
-const CREATOR_LOGO: &[u8] = include_bytes!("../../assets/created_by_sattnek.png");
+const CREATOR_LOGO: &[u8] = include_bytes!("../../assets/creator_logo.png");
 /// Eingebettetes Programm-Icon (256x256, transparenter Rand).
-const APP_ICON: &[u8] = include_bytes!("../../assets/git2pkg.png");
+const APP_ICON: &[u8] = include_bytes!("../../assets/app_icon.png");
 /// Eingebettetes "Made for Linux"-Badge für die Statusleiste.
 const LINUX_BADGE: &[u8] = include_bytes!("../../assets/made_for_linux.png");
 
@@ -740,7 +740,7 @@ impl eframe::App for Git2PkgApp {
                 ));
                 ui.add_space(6.0);
                 if ui.link(texts.link_repository()).clicked() {
-                    let _ = open::that("https://github.com");
+                    let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
                 }
                 if ui.link(texts.link_support()).clicked() {
                     let _ = open::that("https://ko-fi.com");

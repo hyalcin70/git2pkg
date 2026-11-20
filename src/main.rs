@@ -7,7 +7,7 @@ use std::process::Command;
 
 /// Eingebettetes Programm-Icon für Titelleiste, Taskleiste und Alt-Tab.
 fn app_icon() -> Option<egui::IconData> {
-    const ICON: &[u8] = include_bytes!("../assets/git2pkg.png");
+    const ICON: &[u8] = include_bytes!("../assets/app_icon.png");
     let image = image::load_from_memory(ICON).ok()?.to_rgba8();
     let (width, height) = image.dimensions();
     Some(egui::IconData {

@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install GUI system headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev \
+            libxi-dev libxcursor-dev libx11-dev libgl1-mesa-dev \
+            libatk1.0-dev libgtk-3-dev libasound2-dev pkg-config
+
+      - name: Build release binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Package binary
+        run: |
+          mkdir -p dist/git2pkg
+          cp target/x86_64-unknown-linux-gnu/release/git2pkg dist/git2pkg/
+          cp README.md LICENSE dist/git2pkg/
+          tar -czf git2pkg-linux-x86_64.tar.gz -C dist git2pkg
+          sha256sum git2pkg-linux-x86_64.tar.gz > git2pkg-linux-x86_64.tar.gz.sha256
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            git2pkg-linux-x86_64.tar.gz
+            git2pkg-linux-x86_64.tar.gz.sha256
+          generate_release_notes: true

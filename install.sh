@@ -10,7 +10,7 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 DESKTOP_FILE="$DESKTOP_DIR/git2pkg.desktop"
 ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
 ICON_FILE="$ICON_DIR/git2pkg.png"
-ASSET_ICON="assets/git2pkg.png"
+ASSET_ICON="assets/app_icon.png"
 
 say() { printf '%s\n' "$*"; }
 bold() { printf '%s%s%s\n' "$BOLD" "$1" "$RESET"; }

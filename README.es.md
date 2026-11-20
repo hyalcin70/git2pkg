@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/git2pkg.png" alt="git2pkg" width="128"></p>
+<p align="center"><img src="assets/app_icon.png" alt="git2pkg" width="128"></p>
 
 [English](README.md) | [Deutsch](README.de.md) | [Türkçe](README.tr.md) | [Español](README.es.md) | [Français](README.fr.md)
 

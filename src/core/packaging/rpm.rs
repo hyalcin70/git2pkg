@@ -13,7 +13,7 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
         "mkdir -p \"$HOME/rpmbuild\"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}".to_string(),
     );
     lines.push(format!(
-        "cat > \"$HOME/rpmbuild/SPECS/{name}.spec\" <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/git2pkg-files.list\n%files -f /tmp/git2pkg-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
+        "cat > \"$HOME/rpmbuild/SPECS/{name}.spec\" <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/package-files.list\n%files -f /tmp/package-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.rpm(),
@@ -51,9 +51,9 @@ mod tests {
             let script = script(&ctx).join("\n");
             assert!(script.contains("AutoReqProv: yes"));
             assert!(script.contains("%defattr(-,root,root,-)"));
-            assert!(script.contains("%files -f /tmp/git2pkg-files.list"));
+            assert!(script.contains("%files -f /tmp/package-files.list"));
             assert!(script.contains("--strip-unneeded"));
-            assert!(script.contains("> /tmp/git2pkg-files.list"));
+            assert!(script.contains("> /tmp/package-files.list"));
         }
     }
 

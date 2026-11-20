@@ -1182,12 +1182,12 @@ mod tests {
             packages: vec!["pkgconf".to_string()],
             ..Default::default()
         };
-        store.record_build_recipe("https://github.com/user/Example.git", recipe);
+        store.record_build_recipe("example-app", recipe);
 
         let reloaded = MappingStore::from_path(path);
         let (exact, is_exact) = reloaded
             .apply_learned_recipe(
-                "https://github.com/user/Example.git",
+                "example-app",
                 "cmake+deps_dir+repo_script",
             )
             .unwrap();
@@ -1195,7 +1195,7 @@ mod tests {
         assert!(exact.skip_deps);
         let (similar, by_signature) = reloaded
             .apply_learned_recipe(
-                "https://github.com/other/Similar.git",
+                "sample-tool",
                 "cmake+deps_dir+repo_script",
             )
             .unwrap();
@@ -1217,7 +1217,7 @@ mod tests {
                 .as_nanos()
         ));
         let path = dir.join("learned_mappings.json");
-        let url = "https://github.com/user/Example.git";
+        let url = "example-app";
 
         let mut store = MappingStore::from_path(path.clone());
         assert!(!store.is_incomplete_strategy(url, "Default"));

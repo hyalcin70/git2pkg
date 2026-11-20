@@ -148,11 +148,11 @@ impl Texts {
     }
     pub fn repo_hint(&self) -> &'static str {
         self.get(
-            "Git URL, e.g. https://github.com/user/repo or https://gitlab.com",
-            "Git-URL, z. B. https://github.com/user/repo oder https://gitlab.com",
-            "Git URL'si, örn. https://github.com/user/repo veya https://gitlab.com",
-            "URL de Git, p. ej. https://github.com/user/repo o https://gitlab.com",
-            "URL Git, p. ex. https://github.com/user/repo ou https://gitlab.com",
+            "Git URL of the repository",
+            "Git-URL des Repositories",
+            "Depo Git URL'si",
+            "URL Git del repositorio",
+            "URL Git du dépôt",
         )
     }
     pub fn build_start(&self) -> &'static str {

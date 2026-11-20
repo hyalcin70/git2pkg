@@ -1467,18 +1467,117 @@ fn build_script(config: &BuildConfig, system: &BuildSystem, extra: &[String]) ->
 /// Wirkt für jedes Build-System und jede Distribution - ohne Projektname.
 fn asset_staging_step() -> &'static str {
     r#"
-mkdir -p "$pkgdir/usr/share/applications" "$pkgdir/usr/share/icons/hicolor/scalable/apps" "$pkgdir/usr/share/icons/hicolor/256x256/apps" "$pkgdir/usr/share/pixmaps"
-find_git2pkg_assets() {
-  find . -maxdepth 3 -type f "$@" \
-    ! -path './target/*' ! -path '*/target/*' ! -path '*/cargo-target/*' \
-    ! -path '*/build/*' ! -path '*/.git/*' -print0 2>/dev/null
+mkdir -p "$pkgdir/usr/share/applications" \
+  "$pkgdir/usr/share/icons/hicolor/scalable/apps" \
+  "$pkgdir/usr/share/icons/hicolor/256x256/apps" \
+  "$pkgdir/usr/share/icons/hicolor/128x128/apps" \
+  "$pkgdir/usr/share/pixmaps"
+find_repo_assets() {
+  find . -maxdepth 4 -type f \
+    \( -iname '*.svg' -o -iname '*.png' -o -iname '*.ico' -o -iname '*.xpm' \
+       -o -iname '*.desktop' -o -iname '*.desktop.in' \) \
+    ! -path './.git/*' ! -path '*/.git/*' \
+    ! -path './target/*' ! -path '*/target/*' \
+    ! -path './cargo-target/*' ! -path '*/cargo-target/*' \
+    ! -path './build/*' ! -path '*/build/*' \
+    ! -path './deps-build/*' ! -path '*/deps-build/*' \
+    ! -path './out/*' ! -path '*/out/*' \
+    ! -path './dist/*' ! -path '*/dist/*' \
+    ! -path './pkg/*' ! -path '*/pkg/*' \
+    ! -path './node_modules/*' ! -path '*/node_modules/*' \
+    ! -path './tests/*' ! -path '*/tests/*' \
+    ! -path './docs/*' ! -path '*/docs/*' \
+    -print0 2>/dev/null
 }
+png_dimensions() {
+  local f="$1" size=""
+  if command -v identify >/dev/null 2>&1; then
+    size=$(identify -format '%wx%h' "$f" 2>/dev/null)
+  fi
+  if [ -z "$size" ] && command -v file >/dev/null 2>&1; then
+    size=$(file -b "$f" 2>/dev/null | sed -nE 's/.*, ([0-9]+) x ([0-9]+).*/\1x\2/p')
+  fi
+  if [ -z "$size" ]; then
+    local w h
+    w=$(dd if="$f" bs=1 skip=16 count=4 2>/dev/null | od -An -tu1 | awk '{print $1*16777216+$2*65536+$3*256+$4}')
+    h=$(dd if="$f" bs=1 skip=20 count=4 2>/dev/null | od -An -tu1 | awk '{print $1*16777216+$2*65536+$3*256+$4}')
+    if [ "${w:-0}" -gt 0 ] 2>/dev/null && [ "${h:-0}" -gt 0 ] 2>/dev/null; then
+      size="${w}x${h}"
+    fi
+  fi
+  printf '%s' "$size"
+}
+install_icons() {
+  local expected="$1" fallback="$2"
+  local expected_lc fallback_lc
+  expected_lc=$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')
+  fallback_lc=$(printf '%s' "$fallback" | tr '[:upper:]' '[:lower:]')
+  local ext best best_score score base base_lc dir special dims
+  for ext in svg png ico xpm; do
+    best=""
+    best_score=99
+    while IFS= read -r -d '' candidate; do
+      case "$candidate" in *."$ext") ;; *) continue ;; esac
+      base=$(basename "$candidate")
+      base_lc=$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')
+      case "$base_lc" in
+        screenshot*|*screenshot*|banner*|*banner*|preview*|*preview*|bg*|background*|*background*|wallpaper*) continue ;;
+      esac
+      score=9
+      case "$base_lc" in
+        "$expected_lc".*) score=0 ;;
+        "$fallback_lc".*) score=1 ;;
+        icon.*|app.*|logo.*) score=2 ;;
+        *icon*|*logo*) score=3 ;;
+        *)
+          dir=$(dirname "$candidate" | tr '[:upper:]' '[:lower:]')
+          for special in icons assets data resources pixmaps; do
+            case "$dir" in
+              */$special|*/$special/*|./$special|./$special/*) score=4 ;;
+            esac
+          done
+          ;;
+      esac
+      if [ "$score" -lt "$best_score" ]; then
+        best="$candidate"
+        best_score="$score"
+      fi
+    done < <(find_repo_assets)
+    [ -z "$best" ] && continue
+    case "$ext" in
+      svg)
+        install -Dm644 "$best" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$expected.svg" 2>/dev/null || true
+        ;;
+      png)
+        dims=$(png_dimensions "$best")
+        case "$dims" in
+          16x16|22x22|24x24|32x32|48x48|64x64|72x72|96x96|128x128|256x256|512x512)
+            install -Dm644 "$best" "$pkgdir/usr/share/icons/hicolor/$dims/apps/$expected.png" 2>/dev/null || true
+            ;;
+          *)
+            install -Dm644 "$best" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$expected.png" 2>/dev/null || true
+            install -Dm644 "$best" "$pkgdir/usr/share/icons/hicolor/128x128/apps/$expected.png" 2>/dev/null || true
+            install -Dm644 "$best" "$pkgdir/usr/share/pixmaps/$expected.png" 2>/dev/null || true
+            ;;
+        esac
+        ;;
+      ico)
+        install -Dm644 "$best" "$pkgdir/usr/share/pixmaps/$expected.ico" 2>/dev/null || true
+        ;;
+      xpm)
+        install -Dm644 "$best" "$pkgdir/usr/share/pixmaps/$expected.xpm" 2>/dev/null || true
+        ;;
+    esac
+  done
+}
+desktop_count=0
 while IFS= read -r -d '' desktop; do
   base=$(basename "$desktop")
   case "$base" in
     *.desktop.in) name="${base%.desktop.in}" ;;
     *) name="${base%.desktop}" ;;
   esac
+  desktop_count=$((desktop_count + 1))
   target="$pkgdir/usr/share/applications/$name.desktop"
   [ -e "$target" ] && continue
   case "$base" in
@@ -1489,28 +1588,16 @@ while IFS= read -r -d '' desktop; do
       install -Dm644 "$desktop" "$target"
       ;;
   esac
+  chmod 0644 "$target" 2>/dev/null || true
   icon=$(grep -m1 '^Icon=' "$target" 2>/dev/null | cut -d= -f2- | tr -d '\r')
-  [ -z "$icon" ] && continue
-  icon=$(printf '%s' "$icon" | sed "s|@ICON@|$name|g")
-  for ext in svg png ico; do
-    found=$(find_git2pkg_assets -name "$icon.$ext" -print -quit)
-    [ -n "$found" ] || found=$(find_git2pkg_assets -name "$name.$ext" -print -quit)
-    [ -z "$found" ] && continue
-    case "$ext" in
-      svg)
-        install -Dm644 "$found" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$(basename "$found")"
-        ;;
-      png)
-        install -Dm644 "$found" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$(basename "$found")"
-        install -Dm644 "$found" "$pkgdir/usr/share/pixmaps/$(basename "$found")"
-        ;;
-      ico)
-        install -Dm644 "$found" "$pkgdir/usr/share/pixmaps/$(basename "$found")"
-        ;;
-    esac
-    break
-  done
-done < <(find_git2pkg_assets \( -name '*.desktop' -o -name '*.desktop.in' \))
+  [ -z "$icon" ] && icon="$name"
+  icon=$(printf '%s' "$icon" | sed "s|@ICON@|$name|g" | xargs basename 2>/dev/null || printf '%s' "$icon")
+  [ -z "$icon" ] && icon="$name"
+  install_icons "$icon" "$name"
+done < <(find_repo_assets | while IFS= read -r -d '' f; do case "$f" in *.desktop|*.desktop.in) printf '%s\0' "$f" ;; esac; done)
+if [ "$desktop_count" -eq 0 ]; then
+  install_icons "${PKG_NAME:-package}" "${PKG_NAME:-package}"
+fi
 "#
 }
 
@@ -1802,7 +1889,7 @@ mod tests {
             _ => "ID=arch\n",
         });
         BuildConfig {
-            url: "https://example.invalid/repo.git".to_string(),
+            url: "example-app".to_string(),
             target,
             target_distro: TargetDistro::Auto,
             distro,
@@ -1895,7 +1982,7 @@ mod tests {
     #[test]
     fn asset_staging_findet_desktop_dateien_in_unterordnern() {
         let script = asset_staging_step();
-        assert!(script.contains("-maxdepth 3"));
+        assert!(script.contains("-maxdepth 4"));
         assert!(script.contains("*.desktop.in"));
         assert!(script.contains("@EXEC@"));
         assert!(script.contains("@ICON@"));
@@ -1904,6 +1991,11 @@ mod tests {
         assert!(script.contains("usr/share/pixmaps"));
         assert!(script.contains("cargo-target"));
         assert!(script.contains("! -path '*/.git/*'"));
+        assert!(script.contains("! -path '*/node_modules/*'"));
+        assert!(script.contains("! -path '*/tests/*'"));
+        assert!(script.contains("! -path '*/docs/*'"));
+        assert!(script.contains("icon.*|app.*|logo.*"));
+        assert!(script.contains("*icon*|*logo*"));
         let path = std::env::temp_dir().join(format!("git2pkg-assets-{}.sh", std::process::id()));
         std::fs::write(&path, script).unwrap();
         let ok = std::process::Command::new("bash")
@@ -1917,9 +2009,65 @@ mod tests {
     }
 
     #[test]
+    fn asset_staging_installt_icon_unter_erwartetem_namen() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-icon-stage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let repo = root.join("repo");
+        let out = root.join("out");
+        fs::create_dir_all(repo.join("packaging")).unwrap();
+        fs::create_dir_all(repo.join("assets")).unwrap();
+        fs::write(
+            repo.join("packaging/sample-tool.desktop"),
+            "[Desktop Entry]\nName=Sample Tool\nExec=sample-tool\nIcon=sample-tool\nType=Application\n",
+        )
+        .unwrap();
+
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&16u32.to_be_bytes());
+        png.extend_from_slice(&16u32.to_be_bytes());
+        png.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+        fs::write(repo.join("assets/icon.png"), png).unwrap();
+
+        let command = format!(
+            "pkgdir='{}'; cd '{}'; {}",
+            out.display(),
+            repo.display(),
+            asset_staging_step()
+        );
+        let status = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(&command)
+            .status()
+            .unwrap();
+        assert!(status.success(), "Asset-Staging-Skript fehlgeschlagen");
+
+        let desktop = out.join("usr/share/applications/sample-tool.desktop");
+        assert!(desktop.is_file(), "Desktop-Datei nicht gestaged");
+        let icon = out.join("usr/share/icons/hicolor/16x16/apps/sample-tool.png");
+        assert!(
+            icon.is_file(),
+            "Icon wurde nicht unter dem erwarteten Namen installiert"
+        );
+        assert!(fs::read_to_string(&desktop).unwrap().contains("Icon=sample-tool"));
+        assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
+        assert_eq!(fs::metadata(&icon).unwrap().permissions().mode() & 0o777, 0o644);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn alle_buildsysteme_und_strategien_erzeugen_gueltige_skripte() {
         let config = config(DistroFamily::Arch, TargetFormat::NativePackage);
-        let identity = project_identity("https://example.invalid/repo.git", Path::new(""));
+        let identity = project_identity("example-app", Path::new(""));
         let systems = [
             BuildSystem::Cargo,
             BuildSystem::CMake,
@@ -1978,8 +2126,8 @@ mod tests {
             "[package]\nname = \"foo\"\nversion = \"2.3.4\"\n",
         )
         .unwrap();
-        let cargo = project_identity("https://example.invalid/repo-cargo.git", &root);
-        assert_eq!(cargo.name, "repo-cargo");
+        let cargo = project_identity("example-cargo", &root);
+        assert_eq!(cargo.name, "example-cargo");
         assert_eq!(cargo.version, "2.3.4");
 
         fs::remove_file(root.join("Cargo.toml")).unwrap();
@@ -1988,18 +2136,18 @@ mod tests {
             "project(sample VERSION 2.20.0 LANGUAGES C)\n",
         )
         .unwrap();
-        let cmake = project_identity("https://example.invalid/repo-cmake.git", &root);
-        assert_eq!(cmake.name, "repo-cmake");
+        let cmake = project_identity("example-cmake", &root);
+        assert_eq!(cmake.name, "example-cmake");
         assert_eq!(cmake.version, "2.20.0");
 
         fs::remove_file(root.join("CMakeLists.txt")).unwrap();
         fs::write(root.join("pyproject.toml"), "[project]\nversion = \"1.2.3\"\n").unwrap();
-        let python = project_identity("https://example.invalid/repo-python.git", &root);
-        assert_eq!(python.name, "repo-python");
+        let python = project_identity("example-python", &root);
+        assert_eq!(python.name, "example-python");
         assert_eq!(python.version, "1.2.3");
 
-        let fallback = project_identity("https://example.invalid/repo.git", Path::new(""));
-        assert_eq!(fallback.name, "repo");
+        let fallback = project_identity("example-app", Path::new(""));
+        assert_eq!(fallback.name, "example-app");
         assert_eq!(fallback.version, "0.1.0");
         fs::remove_dir_all(root).unwrap();
     }
@@ -2078,7 +2226,7 @@ mod tests {
             "[package]\nname = \"repo\"\nversion = \"v1.0.0-13\"\n",
         )
         .unwrap();
-        let identity = project_identity("https://example.invalid/repo.git", &root);
+        let identity = project_identity("example-app", &root);
         assert_eq!(identity.version, "1.0.0.13");
         fs::remove_dir_all(root).unwrap();
 
@@ -2157,8 +2305,8 @@ mod tests {
 
     #[test]
     fn cache_key_und_strategien_sind_stabil() {
-        assert_eq!(source_cache_key("https://x/y.git"), source_cache_key("https://x/y.git"));
-        assert_ne!(source_cache_key("https://x/y.git"), source_cache_key("https://x/z.git"));
+        assert_eq!(source_cache_key("sample-tool/y.git"), source_cache_key("sample-tool/y.git"));
+        assert_ne!(source_cache_key("sample-tool/y.git"), source_cache_key("sample-tool/z.git"));
         assert_eq!(BuildStrategy::Default.next(true), BuildStrategy::SystemLibsOnly);
         assert_eq!(BuildStrategy::Default.next(false), BuildStrategy::RepoScript);
         assert_eq!(BuildStrategy::SystemLibsOnly.next(true), BuildStrategy::RepoScript);
@@ -2355,7 +2503,7 @@ mod tests {
     fn script_enthaelt_makerpkg_fuer_arch() {
         let script = build_script(&config(DistroFamily::Arch, TargetFormat::NativePackage), &BuildSystem::Cargo, &[]);
         assert!(script.contains("makepkg"));
-        assert!(script.contains("pkgname=repo"));
+        assert!(script.contains("pkgname=example-app"));
         assert!(script.contains(OK_MARKER));
     }
 
@@ -2363,14 +2511,14 @@ mod tests {
     fn script_enthaelt_dpkg_deb_fuer_debian() {
         let script = build_script(&config(DistroFamily::Debian, TargetFormat::NativePackage), &BuildSystem::Cargo, &[]);
         assert!(script.contains("dpkg-deb"));
-        assert!(script.contains("repo_0.1.0_amd64.deb"));
+        assert!(script.contains("example-app_0.1.0_amd64.deb"));
     }
 
     #[test]
     fn script_enthaelt_rpmbuild_fuer_fedora() {
         let script = build_script(&config(DistroFamily::Fedora, TargetFormat::NativePackage), &BuildSystem::Cargo, &[]);
         assert!(script.contains("rpmbuild"));
-        assert!(script.contains("repo.spec"));
+        assert!(script.contains("example-app.spec"));
     }
 
     #[test]
