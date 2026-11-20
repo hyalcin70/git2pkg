@@ -1,0 +1,29 @@
+[package]
+name = "git2pkg"
+version = "0.1.0"
+edition = "2021"
+authors = ["SattNEK"]
+license = "GPL-3.0-or-later"
+description = "Isolated package builder from Git repositories for Linux distributions"
+repository = "https://github.com/hyalcin70/git2pkg"
+readme = "README.md"
+keywords = ["linux", "packaging", "container", "podman", "gui"]
+categories = ["development-tools"]
+
+[dependencies]
+eframe = "0.32"
+egui = "0.32"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dark-light = "1"
+rfd = "0.17"
+egui_extras = { version = "0.32", features = ["all_loaders"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+open = "5"
+arboard = { version = "3", features = ["wayland-data-control"] }
+
+[profile.release]
+opt-level = 2
+lto = true
+strip = true

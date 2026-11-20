@@ -1,0 +1,46 @@
+{
+  "arch:Boost": "boost",
+  "debian:Boost": "libboost-dev",
+  "fedora:Boost": "boost-devel",
+  "suse:Boost": "boost-devel",
+
+  "arch:Eigen3": "eigen",
+  "debian:Eigen3": "libeigen3-dev",
+  "fedora:Eigen3": "eigen3-devel",
+  "suse:Eigen3": "eigen3-devel",
+
+  "arch:wxWidgets": "wxwidgets-gtk3",
+  "debian:wxWidgets": "libwxgtk3.2-dev",
+  "fedora:wxWidgets": "wxGTK-devel",
+  "suse:wxWidgets": "wxWidgets-devel",
+
+  "arch:OpenGL": "libglvnd",
+  "debian:OpenGL": "libgl-dev",
+  "fedora:OpenGL": "mesa-libGL-devel",
+  "suse:OpenGL": "libGL-devel",
+
+  "arch:ZLIB": "zlib",
+  "debian:ZLIB": "zlib1g-dev",
+  "fedora:ZLIB": "zlib-devel",
+  "suse:ZLIB": "zlib-devel",
+
+  "arch:CURL": "curl",
+  "debian:CURL": "libcurl4-openssl-dev",
+  "fedora:CURL": "libcurl-devel",
+  "suse:CURL": "libcurl-devel",
+
+  "arch:OpenSSL": "openssl",
+  "debian:OpenSSL": "libssl-dev",
+  "fedora:OpenSSL": "openssl-devel",
+  "suse:OpenSSL": "libopenssl-devel",
+
+  "arch:JPEG": "libjpeg-turbo",
+  "debian:JPEG": "libjpeg-dev",
+  "fedora:JPEG": "libjpeg-turbo-devel",
+  "suse:JPEG": "libjpeg-devel",
+
+  "arch:PNG": "libpng",
+  "debian:PNG": "libpng-dev",
+  "fedora:PNG": "libpng-devel",
+  "suse:PNG": "libpng-devel"
+}

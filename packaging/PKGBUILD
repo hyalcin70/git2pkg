@@ -1,0 +1,24 @@
+# Maintainer: SattNEK
+pkgname=git2pkg
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Isolated package builder from Git repositories for Linux distributions"
+arch=('x86_64')
+url="https://github.com/hakan/git2pkg"
+license=('GPL-3.0-or-later')
+depends=('libxkbcommon' 'wayland' 'libxcb' 'libxrandr' 'libxi' 'libxcursor' 'mesa' 'hicolor-icon-theme')
+makedepends=('rust' 'cargo' 'pkgconf' 'libxkbcommon' 'mesa' 'wayland' 'libxcb' 'libxrandr' 'libxi' 'libxcursor')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  cargo build --release --locked
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

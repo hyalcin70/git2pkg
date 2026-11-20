@@ -1,0 +1,14 @@
+# Rust build output
+/target/
+
+# Build artifacts produced by git2pkg
+/dist/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+*.log
