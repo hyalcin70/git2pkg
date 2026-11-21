@@ -15,6 +15,8 @@ Les décisions de compilation proviennent de la détection de fichiers, d'expres
 régulières appliquées à la sortie du compilateur et du gestionnaire de paquets du
 conteneur.
 
+> **Statut Alpha :** Ce projet est actuellement en phase de test active (Alpha). Aucun support, aucune assistance ni aucune garantie n'est fourni.
+
 ## Pourquoi je l'ai créé
 
 J'adore découvrir de nouveaux outils open source sur GitHub, GitLab et ailleurs,

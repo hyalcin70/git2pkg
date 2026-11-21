@@ -14,6 +14,8 @@ nunca necesita una cadena de compilación ni bibliotecas de build.
 se toman mediante detección de archivos, expresiones regulares sobre la salida
 del compilador y el gestor de paquetes del contenedor.
 
+> **Estado Alfa:** Este proyecto se encuentra actualmente en fase de pruebas activas (Alfa). No se ofrece ningún tipo de soporte, ayuda ni garantía.
+
 ## Por qué lo construí
 
 Me encanta descubrir nuevas herramientas de código abierto en GitHub, GitLab y

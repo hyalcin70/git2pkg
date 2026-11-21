@@ -15,6 +15,8 @@ zekâ, LLM veya harici API çağrısı yoktur.** Derleme kararları dosya tespit
 derleyici çıktısı üzerinde düzenli ifadeler ve konteynerdeki paket yöneticisi
 ile alınır.
 
+> **Alfa Durumu:** Bu proje şu anda aktif test aşamasındadır (Alfa). Herhangi bir destek, yardım veya garanti sağlanmamaktadır.
+
 ## Neden bunu geliştirdim
 
 GitHub, GitLab ve benzeri yerlerde yeni açık kaynak araçları keşfetmeyi

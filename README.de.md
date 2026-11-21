@@ -14,6 +14,8 @@ keine KI, kein LLM und keine externen API-Aufrufe.** Build-Entscheidungen
 erfolgen durch Dateierkennung, reguläre Ausdrücke über Compiler-Ausgaben und
 den Paketmanager im Container.
 
+> **Alpha-Status:** Dieses Projekt befindet sich aktuell noch in der aktiven Testphase (Alpha). Jegliche Unterstützung, Hilfe oder Gewährleistung wird nicht gewährt.
+
 ## Warum ich das gebaut habe
 
 Ich entdecke gerne neue Open-Source-Tools auf GitHub, GitLab und anderen

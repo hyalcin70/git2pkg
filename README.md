@@ -13,6 +13,8 @@ toolchain or build libraries.
 no LLM and no external API calls.** Build decisions come from file detection,
 regular expressions over compiler output, and the container's package manager.
 
+> **Alpha Status:** This project is currently in active testing (Alpha). No support, assistance, or warranty of any kind is provided.
+
 ## Why I Built This
 
 I love discovering new open-source tools on GitHub, GitLab and elsewhere, but I
