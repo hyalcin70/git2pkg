@@ -73,6 +73,7 @@ pub struct Git2PkgApp {
     log: String,
     log_snapshot: String,
     log_hovered: bool,
+    last_log_selection: Option<egui::text::CCursorRange>,
     step: String,
     build_progress: f32,
     cargo_crates: u32,
@@ -103,6 +104,20 @@ pub struct Git2PkgApp {
 
 fn is_foreign_target(target: TargetDistro, host: &DistroFamily) -> bool {
     target != TargetDistro::Auto && target.family(host) != *host
+}
+
+/// Gibt den markierten Teil eines Logs anhand char-basierter Cursor zurueck.
+fn selected_text_from_range(range: Option<egui::text::CCursorRange>, text: &str) -> Option<String> {
+    let range = range?;
+    if range.primary == range.secondary {
+        return None;
+    }
+    let char_range = range.as_sorted_char_range();
+    let chars: Vec<char> = text.chars().collect();
+    if char_range.start > chars.len() || char_range.end > chars.len() {
+        return None;
+    }
+    Some(chars[char_range.start..char_range.end].iter().collect())
 }
 
 /// Read-only buffer for the live log: selectable and copyable, never editable.
@@ -156,6 +171,7 @@ impl Git2PkgApp {
             log: String::new(),
             log_snapshot: String::new(),
             log_hovered: false,
+            last_log_selection: None,
             step: String::new(),
             build_progress: 0.0,
             cargo_crates: 0,
@@ -1383,8 +1399,7 @@ impl eframe::App for Git2PkgApp {
                 .map(|state| !state.cursor.is_empty())
                 .unwrap_or(false)
                 || (self.log_hovered && ui.input(|input| input.pointer.primary_down()));
-            let saved_selection = egui::TextEdit::load_state(ctx, log_id);
-            let secondary_click = ui.input(|input| input.pointer.secondary_clicked());
+            let secondary_pressed = ui.input(|input| input.pointer.secondary_pressed());
             let mut log_hovered = false;
             egui::ScrollArea::both()
                 .stick_to_bottom(self.building && !selection_active)
@@ -1402,50 +1417,54 @@ impl eframe::App for Git2PkgApp {
                             .text_color(log_line_color("", dark)),
                     );
                     log_hovered = response.hovered();
-                    if secondary_click && log_hovered {
-                        // Ein Secondary Click setzt bei egui sonst den Cursor
-                        // zurück und löscht die laufende Markierung.
-                        if let Some(saved) = saved_selection {
-                            egui::TextEdit::store_state(ctx, log_id, saved);
+                    let mut state =
+                        egui::TextEdit::load_state(ui.ctx(), response.id).unwrap_or_default();
+                    let menu_open = secondary_pressed || response.context_menu_opened();
+                    if !menu_open {
+                        if let Some(range) = state.cursor.char_range() {
+                            if range.primary != range.secondary {
+                                self.last_log_selection = Some(range);
+                            } else if response.clicked() {
+                                self.last_log_selection = None;
+                            }
                         }
+                    } else if let Some(saved) = self.last_log_selection {
+                        state.cursor.set_char_range(Some(saved));
+                        state.store(ui.ctx(), response.id);
+                    }
+
+                    let mut saved_selection = self.last_log_selection;
+                    let has_selection = saved_selection
+                        .map(|range| range.primary != range.secondary)
+                        .unwrap_or(false);
+                    if secondary_pressed || response.context_menu_opened() {
                         let texts = self.texts();
                         let snapshot = self.log_snapshot.clone();
                         response.context_menu(|ui| {
-                            if ui.button(texts.context_copy()).clicked() {
-                                let selected = egui::TextEdit::load_state(ui.ctx(), log_id)
-                                    .and_then(|state| state.cursor.char_range())
-                                    .and_then(|range| {
-                                        if range.is_empty() {
-                                            return None;
-                                        }
-                                        let char_range = range.as_sorted_char_range();
-                                        let chars: Vec<char> = snapshot.chars().collect();
-                                        if char_range.end > chars.len() {
-                                            return None;
-                                        }
-                                        Some(
-                                            chars[char_range.start..char_range.end]
-                                                .iter()
-                                                .collect::<String>(),
-                                        )
-                                    })
-                                    .filter(|text| !text.is_empty())
-                                    .unwrap_or_else(|| snapshot.clone());
-                                ui.ctx().copy_text(selected);
+                            if ui
+                                .add_enabled(has_selection, egui::Button::new(texts.context_copy()))
+                                .clicked()
+                            {
+                                if let Some(selected) =
+                                    selected_text_from_range(saved_selection, &snapshot)
+                                {
+                                    ui.ctx().copy_text(selected);
+                                }
                             }
                             if ui.button(texts.context_select_all()).clicked() {
-                                let mut state = egui::TextEdit::load_state(ui.ctx(), log_id)
-                                    .unwrap_or_default();
-                                let end = egui::text::CCursor::new(snapshot.chars().count());
-                                state
-                                    .cursor
-                                    .set_char_range(Some(egui::text::CCursorRange::two(
-                                        egui::text::CCursor::new(0),
-                                        end,
-                                    )));
-                                egui::TextEdit::store_state(ui.ctx(), log_id, state);
+                                let range = egui::text::CCursorRange::two(
+                                    egui::text::CCursor::new(0),
+                                    egui::text::CCursor::new(snapshot.chars().count()),
+                                );
+                                saved_selection = Some(range);
+                                let mut menu_state =
+                                    egui::TextEdit::load_state(ui.ctx(), response.id)
+                                        .unwrap_or_default();
+                                menu_state.cursor.set_char_range(Some(range));
+                                menu_state.store(ui.ctx(), response.id);
                             }
                         });
+                        self.last_log_selection = saved_selection;
                     }
                     if self.building {
                         let dim = if dark {
@@ -1592,6 +1611,22 @@ mod tests {
         let buffer = ReadOnlyText("zeile eins\nzeile zwei\n");
         assert!(!buffer.is_mutable());
         assert_eq!(buffer.as_str(), "zeile eins\nzeile zwei\n");
+    }
+
+    #[test]
+    fn markierter_log_text_wird_anhand_cursor_range_kopiert() {
+        let text = "alpha\nbeta\ngamma\n";
+        let range = egui::text::CCursorRange::two(
+            egui::text::CCursor::new(6),
+            egui::text::CCursor::new(11),
+        );
+        assert_eq!(
+            selected_text_from_range(Some(range), text).as_deref(),
+            Some("beta\n")
+        );
+        let empty = egui::text::CCursorRange::one(egui::text::CCursor::new(3));
+        assert_eq!(selected_text_from_range(Some(empty), text), None);
+        assert_eq!(selected_text_from_range(None, text), None);
     }
 
     #[test]
