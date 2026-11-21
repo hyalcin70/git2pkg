@@ -319,6 +319,12 @@ fn remove_heavy_build_dirs(work: &Path) -> usize {
             cleaned += 1;
         }
     }
+    for name in ["build.sh", "BUILD_LOG.txt", "FAILED"] {
+        let file = work.join(name);
+        if file.is_file() && fs::remove_file(&file).is_ok() {
+            cleaned += 1;
+        }
+    }
     cleaned
 }
 
@@ -1568,9 +1574,9 @@ install_icons() {
           *)
             install -Dm644 "$best" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$expected.png" 2>/dev/null || true
             install -Dm644 "$best" "$pkgdir/usr/share/icons/hicolor/128x128/apps/$expected.png" 2>/dev/null || true
-            install -Dm644 "$best" "$pkgdir/usr/share/pixmaps/$expected.png" 2>/dev/null || true
             ;;
         esac
+        install -Dm644 "$best" "$pkgdir/usr/share/pixmaps/$expected.png" 2>/dev/null || true
         ;;
       ico)
         install -Dm644 "$best" "$pkgdir/usr/share/pixmaps/$expected.ico" 2>/dev/null || true
@@ -1770,6 +1776,12 @@ fn build_script_with(
     lines.push(artifact_glob.to_string());
     lines.push(
         "if [ ! -f \"${artifacts[0]}\" ]; then echo '__GIT2PKG_NO_ARTIFACT__' >&2; exit 1; fi"
+            .to_string(),
+    );
+    // Root-eigene Bauordner muessen im Container entfernt werden; /work/dist
+    // bleibt bis zum Kopieren der Artefakte durch den Host erhalten.
+    lines.push(
+        "rm -rf /work/cargo-target /work/cargo-home /work/ccache /work/build /work/deps-build /work/out /work/pkg 2>/dev/null || true"
             .to_string(),
     );
     lines.push(format!("echo '{}'", OK_MARKER));
@@ -2102,6 +2114,10 @@ mod tests {
                 .exists(),
             "UI-Icon aus ui/ wurde faelschlich als Programm-Icon installiert"
         );
+        assert!(
+            out.join("usr/share/pixmaps/sample-tool.png").is_file(),
+            "Icon fehlt in /usr/share/pixmaps"
+        );
         assert!(fs::read_to_string(&desktop).unwrap().contains("Icon=sample-tool"));
         assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
         assert_eq!(fs::metadata(&icon).unwrap().permissions().mode() & 0o777, 0o644);
@@ -2155,6 +2171,10 @@ mod tests {
         assert!(desktop_text.contains("Icon=sample-tool"));
         assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
         assert_eq!(fs::metadata(&icon).unwrap().permissions().mode() & 0o777, 0o644);
+        assert!(
+            out.join("usr/share/pixmaps/sample-tool.png").is_file(),
+            "Fallback-Icon fehlt in /usr/share/pixmaps"
+        );
 
         assert!(
             !out.join("usr/share/pixmaps/package.png").exists(),
@@ -2611,6 +2631,7 @@ mod tests {
         assert!(script.contains("makepkg"));
         assert!(script.contains("pkgname=example-app"));
         assert!(script.contains(OK_MARKER));
+        assert!(script.contains("rm -rf /work/cargo-target /work/cargo-home"));
     }
 
     #[test]
@@ -2742,7 +2763,9 @@ mod tests {
             fs::create_dir_all(root.join(name)).unwrap();
         }
         fs::write(root.join("src/README.md"), "source").unwrap();
-        assert_eq!(remove_heavy_build_dirs(&root), 8);
+        fs::write(root.join("build.sh"), "script").unwrap();
+        fs::write(root.join("BUILD_LOG.txt"), "log").unwrap();
+        assert_eq!(remove_heavy_build_dirs(&root), 10);
         assert!(root.join("src/README.md").is_file());
         for name in [
             "build",
