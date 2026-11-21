@@ -71,6 +71,7 @@ pub struct Git2PkgApp {
     engine_available: bool,
     distro: DistroInfo,
     log: String,
+    log_snapshot: String,
     step: String,
     build_progress: f32,
     cargo_crates: u32,
@@ -103,6 +104,29 @@ fn is_foreign_target(target: TargetDistro, host: &DistroFamily) -> bool {
     target != TargetDistro::Auto && target.family(host) != *host
 }
 
+/// Read-only buffer for the live log: selectable and copyable, never editable.
+struct ReadOnlyText<'a>(&'a str);
+
+impl egui::TextBuffer for ReadOnlyText<'_> {
+    fn is_mutable(&self) -> bool {
+        false
+    }
+
+    fn as_str(&self) -> &str {
+        self.0
+    }
+
+    fn insert_text(&mut self, _text: &str, _char_index: usize) -> usize {
+        0
+    }
+
+    fn delete_char_range(&mut self, _char_range: std::ops::Range<usize>) {}
+
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<ReadOnlyText<'static>>()
+    }
+}
+
 impl Git2PkgApp {
     pub fn new() -> Self {
         // Wissensdatei beim Programmstart anlegen/befüllen.
@@ -124,6 +148,7 @@ impl Git2PkgApp {
             engine_available: container_engine_available(),
             distro: detect_distro(),
             log: String::new(),
+            log_snapshot: String::new(),
             step: String::new(),
             build_progress: 0.0,
             cargo_crates: 0,
@@ -1310,19 +1335,25 @@ impl eframe::App for Git2PkgApp {
 
             // Das Log nutzt den verbleibenden Platz dynamisch; die unteren
             // Panels werden dadurch nie überdeckt oder abgeschnitten.
+            if self.log_snapshot != self.log {
+                self.log_snapshot = self.log.clone();
+            }
+            let dark = self.theme_mode.is_dark();
             let log_height = ui.available_height().max(120.0);
             egui::ScrollArea::both()
                 .stick_to_bottom(true)
                 .max_height(log_height)
                 .show(ui, |ui| {
-                    let dark = self.theme_mode.is_dark();
-                    let log = self.log.clone();
-                    for line in log.lines() {
-                        let color = log_line_color(line, dark);
-                        ui.add(
-                            egui::Label::new(egui::RichText::new(line).monospace().color(color)),
-                        );
-                    }
+                    // Read-only TextEdit: volle Textauswahl mit Maus, Doppelklick
+                    // und Strg+C/Kontextmenü, ohne dass der Inhalt änderbar ist.
+                    let mut log_buffer = ReadOnlyText(&self.log_snapshot);
+                    ui.add(
+                        egui::TextEdit::multiline(&mut log_buffer)
+                            .frame(false)
+                            .desired_width(f32::INFINITY)
+                            .font(egui::FontId::monospace(13.0))
+                            .text_color(log_line_color("", dark)),
+                    );
                     if self.building {
                         let dim = if dark {
                             egui::Color32::from_gray(150)
@@ -1464,7 +1495,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fortschritt_wird_aus_log_signalen_gelesen() {
+    fn log_readonly_buffer_ist_nicht_editierbar() {
+        use egui::TextBuffer as _;
+        let buffer = ReadOnlyText("zeile eins\nzeile zwei\n");
+        assert!(!buffer.is_mutable());
+        assert_eq!(buffer.as_str(), "zeile eins\nzeile zwei\n");
+    }
+
+    #[test]
+    fn fortschritt_wird_aus_log_signalen_lesen() {
         assert_eq!(extract_percent("Receiving objects: 45% (123/456)"), Some(0.45));
         assert_eq!(extract_percent("[ 28%] Building CXX object"), Some(0.28));
         assert_eq!(extract_fraction("[140/420] Linking"), Some((140.0, 420.0)));
