@@ -15,8 +15,9 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
         lines.extend([
             line_echo("[pkgbuild] Verwende vorhandene PKGBUILD direkt im Repo (makepkg in /work/src)"),
             "rm -f /work/src/*.pkg.tar.zst".to_string(),
-            "chown -R builder:builder /work/src /work/dist".to_string(),
-            "su builder -c 'cd /work/src && makepkg -s --noconfirm'".to_string(),
+            "mkdir -p /work/cargo-target /work/cargo-home /work/ccache".to_string(),
+            "chown -R builder:builder /work/src /work/dist /work/cargo-target /work/cargo-home /work/ccache".to_string(),
+            "su builder -c 'export CARGO_TARGET_DIR=/work/cargo-target; export CARGO_HOME=/work/cargo-home; export CCACHE_DIR=/work/ccache; cd /work/src && makepkg -s --noconfirm'".to_string(),
             "rm -f /work/src/*-debug-*.pkg.tar.zst".to_string(),
             "cp /work/src/*.pkg.tar.zst /work/dist/".to_string(),
         ]);
@@ -76,6 +77,33 @@ mod tests {
     use crate::core::packaging::PackageArch;
     use crate::core::container::BuildStrategy;
     use crate::core::distro::DistroFamily;
+
+    #[test]
+    fn in_tree_pkgbuild_setzt_cargo_target_dir() {
+        let family = DistroFamily::Arch;
+        let ctx = PackageContext {
+            name: "repo",
+            version: "1.0.0",
+            family: &family,
+            strategy: BuildStrategy::Default,
+            has_pkgbuild: true,
+            arch: PackageArch::Amd64,
+            build_step: "true",
+            install_step: "true",
+            is_cargo: true,
+            asset_step: "true",
+        };
+        let script = script(&ctx).join("\n");
+        assert!(script.contains("export CARGO_TARGET_DIR=/work/cargo-target"));
+        assert!(script.contains("makepkg -s --noconfirm"));
+    }
+
+    #[test]
+    fn eigenes_pkgbuild_nutzt_cargo_target_dir() {
+        let pkgbuild = include_str!("../../../packaging/PKGBUILD");
+        assert!(pkgbuild.contains("${CARGO_TARGET_DIR:-target}/release"));
+        assert!(!pkgbuild.contains("install -Dm755 \"target/release"));
+    }
 
     #[test]
     fn generierte_pkgbuild_enthaelt_depends() {

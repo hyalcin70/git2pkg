@@ -72,6 +72,7 @@ pub struct Git2PkgApp {
     distro: DistroInfo,
     log: String,
     log_snapshot: String,
+    log_hovered: bool,
     step: String,
     build_progress: f32,
     cargo_crates: u32,
@@ -149,6 +150,7 @@ impl Git2PkgApp {
             distro: detect_distro(),
             log: String::new(),
             log_snapshot: String::new(),
+            log_hovered: false,
             step: String::new(),
             build_progress: 0.0,
             cargo_crates: 0,
@@ -1340,20 +1342,28 @@ impl eframe::App for Git2PkgApp {
             }
             let dark = self.theme_mode.is_dark();
             let log_height = ui.available_height().max(120.0);
+            let log_id = egui::Id::new("live-log-text");
+            let selection_active = egui::TextEdit::load_state(ctx, log_id)
+                .map(|state| !state.cursor.is_empty())
+                .unwrap_or(false)
+                || (self.log_hovered && ui.input(|input| input.pointer.primary_down()));
+            let mut log_hovered = false;
             egui::ScrollArea::both()
-                .stick_to_bottom(true)
+                .stick_to_bottom(self.building && !selection_active)
                 .max_height(log_height)
                 .show(ui, |ui| {
                     // Read-only TextEdit: volle Textauswahl mit Maus, Doppelklick
                     // und Strg+C/Kontextmenü, ohne dass der Inhalt änderbar ist.
                     let mut log_buffer = ReadOnlyText(&self.log_snapshot);
-                    ui.add(
+                    let response = ui.add(
                         egui::TextEdit::multiline(&mut log_buffer)
+                            .id(log_id)
                             .frame(false)
                             .desired_width(f32::INFINITY)
                             .font(egui::FontId::monospace(13.0))
                             .text_color(log_line_color("", dark)),
                     );
+                    log_hovered = response.hovered();
                     if self.building {
                         let dim = if dark {
                             egui::Color32::from_gray(150)
@@ -1366,6 +1376,7 @@ impl eframe::App for Git2PkgApp {
                         });
                     }
                 });
+            self.log_hovered = log_hovered;
             ui.add_space(2.0);
         });
     }
