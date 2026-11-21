@@ -74,6 +74,7 @@ pub struct Git2PkgApp {
     log_snapshot: String,
     log_hovered: bool,
     last_log_selection: Option<egui::text::CCursorRange>,
+    last_url_selection: Option<egui::text::CCursorRange>,
     step: String,
     build_progress: f32,
     cargo_crates: u32,
@@ -118,6 +119,46 @@ fn selected_text_from_range(range: Option<egui::text::CCursorRange>, text: &str)
         return None;
     }
     Some(chars[char_range.start..char_range.end].iter().collect())
+}
+
+/// Ersetzt den markierten Zeichenbereich (oder fuegt am Cursor ein) und liefert
+/// den neuen String sowie die neue Cursorposition in Zeichenindizes zurueck.
+fn replace_text_in_range(
+    text: &str,
+    range: Option<egui::text::CCursorRange>,
+    replacement: &str,
+) -> (String, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    let (start, end) = match range {
+        Some(range) => {
+            let sorted = range.as_sorted_char_range();
+            (sorted.start.min(chars.len()), sorted.end.min(chars.len()))
+        }
+        None => (chars.len(), chars.len()),
+    };
+    let mut result: String = chars[..start].iter().collect();
+    let cursor = result.chars().count() + replacement.chars().count();
+    result.push_str(replacement);
+    result.extend(chars[end..].iter());
+    (result, cursor)
+}
+
+fn store_text_cursor(ctx: &egui::Context, id: egui::Id, range: egui::text::CCursorRange) {
+    let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(range));
+    state.store(ctx, id);
+}
+
+/// Liest den Clipboard-Text. Auf Wayland kann die zwischengespeicherte Instanz
+/// veraltet sein, daher immer auch eine frische Instanz als Fallback versuchen.
+fn read_clipboard_text(clipboard: &mut Option<arboard::Clipboard>) -> Option<String> {
+    if let Some(clipboard) = clipboard.as_mut() {
+        if let Ok(text) = clipboard.get_text() {
+            return Some(text);
+        }
+    }
+    let mut fresh = arboard::Clipboard::new().ok()?;
+    fresh.get_text().ok()
 }
 
 /// Read-only buffer for the live log: selectable and copyable, never editable.
@@ -172,6 +213,7 @@ impl Git2PkgApp {
             log_snapshot: String::new(),
             log_hovered: false,
             last_log_selection: None,
+            last_url_selection: None,
             step: String::new(),
             build_progress: 0.0,
             cargo_crates: 0,
@@ -1107,6 +1149,13 @@ impl eframe::App for Git2PkgApp {
                                 (input_width - label_area - button_area - 16.0).max(120.0);
 
                             // Zeile 1: Repository-URL + Build-Button rechts bündig.
+                            let url_id = egui::Id::new("repo-url");
+                            let url_menu_id = egui::Id::new("repo-url-context-menu");
+                            let secondary_pressed =
+                                ui.input(|input| input.pointer.secondary_pressed());
+                            let secondary_clicked =
+                                ui.input(|input| input.pointer.secondary_clicked());
+                            let pointer_pos = ui.input(|input| input.pointer.latest_pos());
                             ui.horizontal_wrapped(|ui| {
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(label_area, ui.available_height()),
@@ -1132,7 +1181,7 @@ impl eframe::App for Git2PkgApp {
                                         response_slot = Some(
                                             ui.add(
                                                 egui::TextEdit::singleline(&mut self.url)
-                                                    .id(egui::Id::new("repo-url"))
+                                                    .id(url_id)
                                                     .hint_text(texts.repo_hint())
                                                     .desired_width(url_field_width),
                                             ),
@@ -1150,6 +1199,34 @@ impl eframe::App for Git2PkgApp {
                                 );
                                 let url_response =
                                     response_slot.expect("URL-Textfeld wurde nicht erzeugt");
+                                let mut state = egui::TextEdit::load_state(ui.ctx(), url_id)
+                                    .unwrap_or_default();
+                                let state_range = state.cursor.char_range();
+                                let popup_open = egui::Popup::is_id_open(ui.ctx(), url_menu_id);
+                                let menu_open =
+                                    secondary_pressed || secondary_clicked || popup_open;
+                                if !menu_open {
+                                    if let Some(range) = state.cursor.char_range() {
+                                        if range.primary != range.secondary {
+                                            self.last_url_selection = Some(range);
+                                        } else if url_response.clicked() || url_response.has_focus()
+                                        {
+                                            self.last_url_selection = None;
+                                        }
+                                    }
+                                } else if let Some(saved) = self.last_url_selection {
+                                    state.cursor.set_char_range(Some(saved));
+                                    state.store(ui.ctx(), url_id);
+                                }
+                                // TextEdit kann secondary_clicked verbrauchen; global oeffnen.
+                                if secondary_clicked {
+                                    let over_url = pointer_pos
+                                        .map(|pos| url_response.rect.contains(pos))
+                                        .unwrap_or_else(|| url_response.hovered());
+                                    if over_url {
+                                        egui::Popup::open_id(ui.ctx(), url_menu_id);
+                                    }
+                                }
                                 if clear_clicked {
                                     self.url.clear();
                                     url_response.request_focus();
@@ -1176,17 +1253,120 @@ impl eframe::App for Git2PkgApp {
                                 }
                                 // Nach Paste den Cursor sauber ans Ende der URL setzen.
                                 if pasted_now || middle_pasted {
-                                    let id = egui::Id::new("repo-url");
-                                    if let Some(mut state) =
-                                        egui::TextEdit::load_state(ui.ctx(), id)
-                                    {
-                                        let end =
-                                            egui::text::CCursor::new(self.url.chars().count());
-                                        state.cursor.set_char_range(Some(
-                                            egui::text::CCursorRange::one(end),
-                                        ));
-                                        egui::TextEdit::store_state(ui.ctx(), id, state);
-                                    }
+                                    let end = egui::text::CCursor::new(self.url.chars().count());
+                                    store_text_cursor(
+                                        ui.ctx(),
+                                        url_id,
+                                        egui::text::CCursorRange::one(end),
+                                    );
+                                }
+                                if egui::Popup::is_id_open(ui.ctx(), url_menu_id) {
+                                    let texts = self.texts();
+                                    let mut url_value = self.url.clone();
+                                    let mut saved_selection = self
+                                        .last_url_selection
+                                        .or(state_range)
+                                        .unwrap_or_else(|| {
+                                            egui::text::CCursorRange::one(egui::text::CCursor::new(
+                                                url_value.chars().count(),
+                                            ))
+                                        });
+                                    let has_selection =
+                                        saved_selection.primary != saved_selection.secondary;
+                                    let paste_text = if self.building {
+                                        None
+                                    } else {
+                                        read_clipboard_text(&mut self.clipboard)
+                                    };
+                                    egui::Popup::context_menu(&url_response)
+                                        .id(url_menu_id)
+                                        .show(|ui| {
+                                            if ui
+                                                .add_enabled(
+                                                    paste_text.is_some(),
+                                                    egui::Button::new(texts.context_paste()),
+                                                )
+                                                .clicked()
+                                            {
+                                                if let Some(text) = paste_text.clone() {
+                                                    let (new_url, cursor) = replace_text_in_range(
+                                                        &url_value,
+                                                        Some(saved_selection),
+                                                        &text,
+                                                    );
+                                                    url_value = new_url;
+                                                    saved_selection = egui::text::CCursorRange::one(
+                                                        egui::text::CCursor::new(cursor),
+                                                    );
+                                                    store_text_cursor(
+                                                        ui.ctx(),
+                                                        url_id,
+                                                        saved_selection,
+                                                    );
+                                                }
+                                                egui::Popup::close_id(ui.ctx(), url_menu_id);
+                                            }
+                                            if ui
+                                                .add_enabled(
+                                                    has_selection && !self.building,
+                                                    egui::Button::new(texts.context_cut()),
+                                                )
+                                                .clicked()
+                                            {
+                                                if let Some(selected) = selected_text_from_range(
+                                                    Some(saved_selection),
+                                                    &url_value,
+                                                ) {
+                                                    ui.ctx().copy_text(selected);
+                                                    let (new_url, cursor) = replace_text_in_range(
+                                                        &url_value,
+                                                        Some(saved_selection),
+                                                        "",
+                                                    );
+                                                    url_value = new_url;
+                                                    saved_selection = egui::text::CCursorRange::one(
+                                                        egui::text::CCursor::new(cursor),
+                                                    );
+                                                    store_text_cursor(
+                                                        ui.ctx(),
+                                                        url_id,
+                                                        saved_selection,
+                                                    );
+                                                }
+                                                egui::Popup::close_id(ui.ctx(), url_menu_id);
+                                            }
+                                            if ui
+                                                .add_enabled(
+                                                    has_selection,
+                                                    egui::Button::new(texts.context_copy()),
+                                                )
+                                                .clicked()
+                                            {
+                                                if let Some(selected) = selected_text_from_range(
+                                                    Some(saved_selection),
+                                                    &url_value,
+                                                ) {
+                                                    ui.ctx().copy_text(selected);
+                                                }
+                                                egui::Popup::close_id(ui.ctx(), url_menu_id);
+                                            }
+                                            if ui.button(texts.context_select_all()).clicked() {
+                                                saved_selection = egui::text::CCursorRange::two(
+                                                    egui::text::CCursor::new(0),
+                                                    egui::text::CCursor::new(
+                                                        url_value.chars().count(),
+                                                    ),
+                                                );
+                                                store_text_cursor(
+                                                    ui.ctx(),
+                                                    url_id,
+                                                    saved_selection,
+                                                );
+                                                egui::Popup::close_id(ui.ctx(), url_menu_id);
+                                            }
+                                        });
+                                    self.url = url_value;
+                                    self.last_url_selection = Some(saved_selection);
                                 }
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(button_area, ui.available_height()),
@@ -1654,6 +1834,24 @@ mod tests {
         let empty = egui::text::CCursorRange::one(egui::text::CCursor::new(3));
         assert_eq!(selected_text_from_range(Some(empty), text), None);
         assert_eq!(selected_text_from_range(None, text), None);
+    }
+
+    #[test]
+    fn url_einfuegen_ersetzt_auswahl_oder_fuegt_am_cursor_ein() {
+        let range =
+            egui::text::CCursorRange::two(egui::text::CCursor::new(3), egui::text::CCursor::new(6));
+        let (text, cursor) = replace_text_in_range("abcDEFghi", Some(range), "XY");
+        assert_eq!(text, "abcXYghi");
+        assert_eq!(cursor, 5);
+
+        let cursor_range = egui::text::CCursorRange::one(egui::text::CCursor::new(1));
+        let (text, cursor) = replace_text_in_range("äBC", Some(cursor_range), "X");
+        assert_eq!(text, "äXBC");
+        assert_eq!(cursor, 2);
+
+        let (text, cursor) = replace_text_in_range("abc", None, "XY");
+        assert_eq!(text, "abcXY");
+        assert_eq!(cursor, 5);
     }
 
     #[test]

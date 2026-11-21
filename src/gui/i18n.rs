@@ -460,6 +460,12 @@ impl Texts {
             "Tout sélectionner",
         )
     }
+    pub fn context_paste(&self) -> &'static str {
+        self.get("Paste", "Einfügen", "Yapıştır", "Pegar", "Coller")
+    }
+    pub fn context_cut(&self) -> &'static str {
+        self.get("Cut", "Ausschneiden", "Kes", "Cortar", "Couper")
+    }
     #[allow(dead_code)]
     pub fn retry_alternative(&self) -> &'static str {
         self.get(
@@ -1170,6 +1176,26 @@ mod tests {
         assert_eq!(Texts::new(Language::Tr).clear_url(), "URL'yi temizle");
         assert_eq!(Texts::new(Language::Es).clear_url(), "Borrar URL");
         assert_eq!(Texts::new(Language::Fr).clear_url(), "Effacer l'URL");
+    }
+
+    #[test]
+    fn url_kontextmenue_ist_in_allen_sprachen_vorhanden() {
+        let paste = [
+            Texts::new(Language::En).context_paste(),
+            Texts::new(Language::De).context_paste(),
+            Texts::new(Language::Tr).context_paste(),
+            Texts::new(Language::Es).context_paste(),
+            Texts::new(Language::Fr).context_paste(),
+        ];
+        assert_eq!(paste, ["Paste", "Einfügen", "Yapıştır", "Pegar", "Coller"]);
+        let cut = [
+            Texts::new(Language::En).context_cut(),
+            Texts::new(Language::De).context_cut(),
+            Texts::new(Language::Tr).context_cut(),
+            Texts::new(Language::Es).context_cut(),
+            Texts::new(Language::Fr).context_cut(),
+        ];
+        assert_eq!(cut, ["Cut", "Ausschneiden", "Kes", "Cortar", "Couper"]);
     }
 
     #[test]
