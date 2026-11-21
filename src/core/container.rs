@@ -398,6 +398,8 @@ pub struct BuildConfig {
     pub cstdint_fix: bool,
     /// Gelernter Fix für fehlende Git-Submodule.
     pub submodule_fix: bool,
+    /// Gelernter Self-Healing-Fix: stabile rustc-Toolchain via rustup.
+    pub rustup_fix: bool,
     /// Nach gescheitertem deps/-Vorbau: Hauptprojekt gegen Systembibliotheken bauen.
     pub skip_deps: bool,
     /// Vom GUI-Thread gesetzt, um einen laufenden Build sofort zu stoppen.
@@ -945,6 +947,13 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         config.cmake_compat |= mappings.build_fix("cmake_policy").is_some();
         config.cstdint_fix = mappings.build_fix("cstdint").is_some();
         config.submodule_fix = mappings.build_fix("submodules").is_some();
+        if !config.rustup_fix && mappings.build_fix("rustup_toolchain").is_some() {
+            let _ = tx.send(BuildEvent::Log(
+                "[heal] Veraltete rustc-Toolchain erkannt – installiere stable ueber rustup"
+                    .to_string(),
+            ));
+        }
+        config.rustup_fix = mappings.build_fix("rustup_toolchain").is_some();
 
         let missing = analyze_output(&last_output);
         if missing.is_empty() {
@@ -1262,6 +1271,36 @@ fn base_dependencies(family: &DistroFamily, system: &BuildSystem) -> String {
     } else {
         format!("{base} {tools}")
     }
+}
+
+/// Installiert bei zu alter System-`rustc` eine aktuelle stabile Toolchain
+/// ueber rustup und stellt deren `bin` vor `/usr/bin` im PATH.
+fn rustup_bootstrap_step(family: &DistroFamily) -> Vec<String> {
+    let base: &[&str] = match family {
+        DistroFamily::Debian => &["curl", "ca-certificates", "build-essential"],
+        DistroFamily::Fedora | DistroFamily::Suse => {
+            &["curl", "ca-certificates", "gcc", "glibc-devel"]
+        }
+        DistroFamily::Arch => &["curl", "ca-certificates", "base-devel"],
+        DistroFamily::Unknown => &["curl", "ca-certificates"],
+    };
+    let packages: Vec<String> = base.iter().map(|name| name.to_string()).collect();
+    let mut lines = Vec::new();
+    let command = install_packages_command(family, &packages);
+    if !command.is_empty() {
+        lines.push(command);
+    }
+    lines.extend([
+        "if [ ! -x \"$HOME/.cargo/bin/rustc\" ]; then".to_string(),
+        "  unset CARGO_HOME".to_string(),
+        "  export RUSTUP_HOME=\"$HOME/.rustup\"".to_string(),
+        "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal".to_string(),
+        "fi".to_string(),
+        "export PATH=\"$HOME/.cargo/bin:$PATH\"".to_string(),
+        "export CARGO_HOME=/work/cargo-home".to_string(),
+        "\"$HOME/.cargo/bin/cargo\" --version".to_string(),
+    ]);
+    lines
 }
 
 fn install_packages_command(family: &DistroFamily, packages: &[String]) -> String {
@@ -1749,6 +1788,9 @@ fn build_script_with(
         lines.push(echo_line(&texts.log_extra(&extra.join(" "))));
         lines.push(extra_cmd);
     }
+    if config.rustup_fix {
+        lines.extend(rustup_bootstrap_step(&target.family));
+    }
 
     lines.push("mkdir -p /work/out /work/dist".to_string());
 
@@ -1967,6 +2009,7 @@ mod tests {
             cmake_compat: false,
             cstdint_fix: false,
             submodule_fix: false,
+            rustup_fix: false,
             skip_deps: false,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             container_id: Arc::new(Mutex::new(None)),
@@ -2082,6 +2125,37 @@ mod tests {
             .unwrap_or(false);
         let _ = std::fs::remove_file(&path);
         assert!(ok, "ungueltiges Asset-Staging-Skript");
+    }
+
+    #[test]
+    fn rustup_healing_setzt_toolchain_vor_usr_bin() {
+        let identity = ProjectIdentity {
+            name: "sample-tool".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        for family in [
+            DistroFamily::Debian,
+            DistroFamily::Fedora,
+            DistroFamily::Suse,
+            DistroFamily::Arch,
+        ] {
+            let mut cfg = config(family, TargetFormat::NativePackage);
+            cfg.rustup_fix = true;
+            let script = build_script_with(
+                &cfg,
+                &BuildSystem::Cargo,
+                &[],
+                None,
+                &identity,
+                BuildStrategy::Default,
+                false,
+            );
+            assert!(script.contains(
+                "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal"
+            ));
+            assert!(script.contains("export PATH=\"$HOME/.cargo/bin:$PATH\""));
+            assert!(script.contains("\"$HOME/.cargo/bin/cargo\" --version"));
+        }
     }
 
     #[test]

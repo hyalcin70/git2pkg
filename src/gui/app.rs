@@ -368,6 +368,7 @@ impl Git2PkgApp {
             cmake_compat: false,
             cstdint_fix: false,
             submodule_fix: false,
+            rustup_fix: false,
             skip_deps: false,
             cancel_flag: self.cancel_flag.clone(),
             container_id: self.container_id.clone(),

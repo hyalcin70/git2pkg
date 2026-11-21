@@ -39,6 +39,7 @@ pub fn run_cli(url: &str) {
         cmake_compat: false,
         cstdint_fix: false,
         submodule_fix: false,
+        rustup_fix: false,
         skip_deps: false,
         cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         container_id: std::sync::Arc::new(std::sync::Mutex::new(None)),

@@ -659,6 +659,23 @@ pub fn valid_package_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "-_+.".contains(c))
 }
 
+/// Erkennt Fehler, bei denen die System-`rustc` zu alt für Crate-Anforderungen ist.
+///
+/// Deckt beide gaengigen Formulierungen ab:
+/// `rustc 1.85.1 is not supported by the following packages:` und
+/// `package ... cannot be built because it requires rustc 1.89.0`.
+pub fn detect_outdated_rustc(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    if !lower.contains("rustc") {
+        return false;
+    }
+    let unsupported = lower.contains("is not supported by the following packages")
+        || lower.contains("is not supported by the package");
+    let requires = lower.contains("requires rustc")
+        || (lower.contains("cannot be built") && lower.contains("rustc"));
+    unsupported || requires
+}
+
 /// Allgemeiner, dauerhaft lernbarer Build-Fix.
 #[derive(Debug, Clone)]
 pub struct BuildFix {
@@ -694,6 +711,14 @@ pub fn detect_build_fixes(output: &str) -> Vec<BuildFix> {
             description: "CMake-Policy-/Prefix-Fehler".to_string(),
             value: "-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON"
                 .to_string(),
+        });
+    }
+
+    if detect_outdated_rustc(output) {
+        fixes.push(BuildFix {
+            key: "rustup_toolchain".to_string(),
+            description: "Veraltete rustc-Toolchain der Distribution".to_string(),
+            value: "install stable toolchain via rustup".to_string(),
         });
     }
 
@@ -1061,6 +1086,26 @@ mod tests {
                 .any(|fix| fix.key == "submodules")
         );
         assert!(detect_build_fixes("all good").is_empty());
+    }
+
+    #[test]
+    fn erkennt_veraltete_rustc_toolchain() {
+        let unsupported = concat!(
+            "error: rustc 1.85.1 is not supported by the following packages:\n",
+            "  some_crate@1.2.3 requires rustc 1.89.0\n"
+        );
+        assert!(detect_outdated_rustc(unsupported));
+        assert!(detect_build_fixes(unsupported)
+            .iter()
+            .any(|fix| fix.key == "rustup_toolchain"));
+
+        let cannot_build = "error: some_crate cannot be built because it requires rustc 1.89.0";
+        assert!(detect_outdated_rustc(cannot_build));
+
+        assert!(!detect_outdated_rustc(
+            "error: could not compile some_crate"
+        ));
+        assert!(!detect_outdated_rustc("warning: rustc version is fine"));
     }
 
     #[test]
