@@ -1068,13 +1068,14 @@ impl eframe::App for Git2PkgApp {
             });
             ui.separator();
 
-            // Eingabeblock zentriert, Badge rechts daneben - ohne den Block zu verengen.
+            // Eingabeblock zentriert, Badge in der verbleibenden Breite dynamisch zentriert.
             ui.horizontal(|ui| {
-                let badge_area = 270.0_f32;
-                let input_width = (ui.available_width() - 32.0 - badge_area).min(820.0);
-                let left_space = ((ui.available_width() - input_width - badge_area) / 2.0).max(0.0);
+                let total_width = ui.available_width();
+                let badge_size = egui::vec2(166.0, 68.0);
+                let input_width = (total_width - 32.0 - badge_size.x).clamp(120.0, 820.0);
+                let left_space = ((total_width - input_width - badge_size.x) / 2.0).max(0.0);
                 ui.add_space(left_space);
-                ui.allocate_ui_with_layout(
+                let control = ui.allocate_ui_with_layout(
                     egui::vec2(input_width, ui.available_height()),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
@@ -1299,17 +1300,24 @@ impl eframe::App for Git2PkgApp {
                         });
                     },
                 );
+                let row_height = control.response.rect.height();
+                let badge_width = (total_width - left_space - input_width).max(badge_size.x);
                 ui.allocate_ui_with_layout(
-                    egui::vec2(badge_area, ui.available_height()),
-                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                    egui::vec2(badge_width, row_height),
+                    egui::Layout::top_down(egui::Align::LEFT),
                     |ui| {
-                        if let Some(texture) = &self.linux_badge {
-                            ui.add(
-                                egui::Image::from_texture(texture)
-                                    .max_size(egui::vec2(260.0, 107.0))
-                                    .maintain_aspect_ratio(true),
-                            );
-                        }
+                        let available = ui.available_size();
+                        ui.add_space(((available.y - badge_size.y).max(0.0)) * 0.5);
+                        ui.horizontal(|ui| {
+                            ui.add_space(((available.x - badge_size.x).max(0.0)) * 0.5);
+                            if let Some(texture) = &self.linux_badge {
+                                ui.add(
+                                    egui::Image::from_texture(texture)
+                                        .max_size(badge_size)
+                                        .maintain_aspect_ratio(true),
+                                );
+                            }
+                        });
                     },
                 );
             });
