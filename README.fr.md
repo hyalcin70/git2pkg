@@ -164,10 +164,7 @@ fonctionne exactement de la même manière avec ou sans tout cela.
 
 ## Remerciements et transparence
 
-J'ai conçu et dirigé ce projet, et je l'ai développé avec l'aide d'outils
-d'IA. Je préfère le dire ouvertement. Le programme `git2pkg` terminé fonctionne
-toutefois à 100 % en local et de manière déterministe, sans aucune IA ni API
-externe.
+J’ai eu l’idée de ce projet, j’en ai orienté le développement, effectué les tests et analysé les bugs — tandis que la quasi-totalité du code source a été générée à l’aide d’outils d’IA. Je tiens à le dire ouvertement et honnêtement. Le programme `git2pkg` final fonctionne toutefois de manière 100 % locale et déterministe, sans aucune IA ni API externe.
 
 ## Licence
 

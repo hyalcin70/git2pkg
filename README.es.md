@@ -159,9 +159,7 @@ funciona exactamente igual con o sin todo ello.
 
 ## Créditos y transparencia
 
-Diseñé y dirigí este proyecto y lo desarrollé con la ayuda de herramientas de
-IA. Quiero decirlo abiertamente. Sin embargo, el programa `git2pkg` terminado
-funciona al 100 % en local y de forma determinista, sin IA ni APIs externas.
+Tuve la idea de este proyecto, dirigí su rumbo, realicé las pruebas y analicé los errores, mientras que casi todo el código fuente fue escrito con la ayuda de herramientas de IA. Quiero decirlo de forma abierta y honesta. Sin embargo, el programa `git2pkg` terminado funciona de manera 100 % local y determinista, sin ningún tipo de IA ni API externas.
 
 ## Licencia
 

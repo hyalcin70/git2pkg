@@ -158,10 +158,7 @@ works exactly the same whether you do any of this or not.
 
 ## Credits & Transparency
 
-I designed and directed this project and developed it with the help of AI
-tools. I want to say that openly. The finished `git2pkg` program itself,
-however, works 100 % locally and deterministically, with no AI and no external
-APIs at all.
+I came up with the idea for this project, steered its direction, tested it, and analyzed bugs — while almost the entire source code was written with the help of AI tools. I want to state that openly and honestly. The finished `git2pkg` program itself, however, works 100 % locally and deterministically, with no AI and no external APIs at all.
 
 ## License
 

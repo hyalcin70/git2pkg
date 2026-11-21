@@ -161,10 +161,7 @@ olmadan da aynı şekilde çalışır.
 
 ## Teşekkürler ve şeffaflık
 
-Bu projeyi ben tasarladım ve yönlendirdim; geliştirirken yapay zekâ
-araçlarından yardım aldım. Bunu açıkça söylemek istiyorum. Ancak bitmiş
-`git2pkg` programı tamamen yerel ve deterministik çalışır; hiçbir yapay zekâ
-veya harici API kullanmaz.
+Bu projenin fikri bana ait; yönünü belirledim, testlerini yaptım ve hataları analiz ettim — ancak kaynak kodun neredeyse tamamı yapay zeka araçlarının yardımıyla oluşturuldu. Bunu özellikle açık ve dürüstçe belirtmek istiyorum. Bununla birlikte, ortaya çıkan `git2pkg` programının kendisi hiçbir yapay zeka veya harici API kullanmadan %100 yerel ve deterministik olarak çalışır.
 
 ## Lisans
 

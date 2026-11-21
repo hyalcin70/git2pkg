@@ -158,10 +158,7 @@ das Tool funktioniert unabhängig davon genau gleich.
 
 ## Danksagung & Transparenz
 
-Ich habe dieses Projekt konzipiert und geleitet und es mit Unterstützung von
-KI-Werkzeugen entwickelt. Das sage ich bewusst offen. Das fertige Programm
-`git2pkg` selbst arbeitet jedoch zu 100 % lokal und deterministisch, ohne
-jegliche KI und ohne externe APIs.
+Ich hatte die Idee zu diesem Projekt, habe die Richtung vorgegeben, getestet und Fehler analysiert — der eigentliche Quellcode wurde jedoch nahezu vollständig mithilfe von KI-Werkzeugen erstellt. Das möchte ich bewusst offen und ehrlich sagen. Das fertige Programm `git2pkg` selbst arbeitet jedoch zu 100 % lokal und deterministisch, ohne jegliche KI und ohne externe APIs.
 
 ## Lizenz
 
