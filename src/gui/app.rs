@@ -1069,7 +1069,7 @@ impl eframe::App for Git2PkgApp {
 
             // Eingabeblock zentriert, Badge rechts daneben - ohne den Block zu verengen.
             ui.horizontal(|ui| {
-                let badge_area = 140.0_f32;
+                let badge_area = 270.0_f32;
                 let input_width = (ui.available_width() - 32.0 - badge_area).min(820.0);
                 let left_space = ((ui.available_width() - input_width - badge_area) / 2.0).max(0.0);
                 ui.add_space(left_space);
@@ -1300,12 +1300,12 @@ impl eframe::App for Git2PkgApp {
                 );
                 ui.allocate_ui_with_layout(
                     egui::vec2(badge_area, ui.available_height()),
-                    egui::Layout::right_to_left(egui::Align::Center),
+                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                     |ui| {
                         if let Some(texture) = &self.linux_badge {
                             ui.add(
                                 egui::Image::from_texture(texture)
-                                    .max_size(egui::vec2(132.0, 52.0))
+                                    .max_size(egui::vec2(260.0, 107.0))
                                     .maintain_aspect_ratio(true),
                             );
                         }
