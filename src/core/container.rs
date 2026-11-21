@@ -1487,6 +1487,7 @@ find_repo_assets() {
     ! -path './node_modules/*' ! -path '*/node_modules/*' \
     ! -path './tests/*' ! -path '*/tests/*' \
     ! -path './docs/*' ! -path '*/docs/*' \
+    ! -path './ui/*' ! -path '*/ui/*' \
     -print0 2>/dev/null
 }
 png_dimensions() {
@@ -2004,6 +2005,7 @@ mod tests {
         assert!(script.contains("! -path '*/.git/*'"));
         assert!(script.contains("! -path '*/node_modules/*'"));
         assert!(script.contains("! -path '*/tests/*'"));
+        assert!(script.contains("! -path '*/ui/*'"));
         assert!(script.contains("! -path '*/docs/*'"));
         assert!(script.contains("app_icon.*|icon.*"));
         assert!(script.contains("*icon*|*logo*"));
@@ -2053,6 +2055,9 @@ mod tests {
         fs::write(repo.join("assets/app_icon.png"), png_bytes(16, 16)).unwrap();
         // Nicht-quadratischer Kandidat mit exakt erwartetem Namen muss ignoriert werden.
         fs::write(repo.join("assets/sample-tool.png"), png_bytes(300, 150)).unwrap();
+        // UI-Grafiken unter ui/ dürfen nie als Programm-Icon-Kandidaten.
+        fs::create_dir_all(repo.join("assets/ui")).unwrap();
+        fs::write(repo.join("assets/ui/icon.png"), png_bytes(64, 64)).unwrap();
 
         let command = format!(
             "pkgdir='{}'; cd '{}'; {}",
@@ -2073,6 +2078,11 @@ mod tests {
         assert!(
             icon.is_file(),
             "Icon wurde nicht unter dem erwarteten Namen installiert"
+        );
+        assert!(
+            !out.join("usr/share/icons/hicolor/64x64/apps/sample-tool.png")
+                .exists(),
+            "UI-Icon aus ui/ wurde faelschlich als Programm-Icon installiert"
         );
         assert!(fs::read_to_string(&desktop).unwrap().contains("Icon=sample-tool"));
         assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
