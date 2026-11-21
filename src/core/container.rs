@@ -330,10 +330,18 @@ fn remove_heavy_build_dirs(work: &Path) -> usize {
 }
 
 fn cleanup_successful_build(work: &Path, tx: &Sender<BuildEvent>) {
-    let _ = remove_heavy_build_dirs(work);
-    let _ = tx.send(BuildEvent::Log(
-        "[cache] Temporäre Build-Dateien automatisch bereinigt".to_string(),
-    ));
+    match fs::remove_dir_all(work) {
+        Ok(()) => {
+            let _ = tx.send(BuildEvent::Log(
+                "[cache] Vollständiger Build-Cache automatisch entfernt".to_string(),
+            ));
+        }
+        Err(error) => {
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[warn] Build-Cache konnte nicht vollständig entfernt werden: {error}"
+            )));
+        }
+    }
 }
 
 fn cleanup_failed_build_artifacts_in(root: &Path) -> usize {
@@ -1853,6 +1861,9 @@ fn build_script_with(
         "rm -rf /work/cargo-target /work/cargo-home /work/ccache /work/build /work/deps-build /work/out /work/pkg 2>/dev/null || true"
             .to_string(),
     );
+    // Der Host muss den gemounteten Ordner danach restlos loeschen koennen.
+    lines.push("chown -R --reference=/work /work 2>/dev/null || true".to_string());
+    lines.push("chmod -R u+rwX /work 2>/dev/null || true".to_string());
     lines.push(format!("echo '{}'", OK_MARKER));
     lines.join("\n")
 }
@@ -2779,6 +2790,8 @@ mod tests {
         assert!(script.contains("pkgname=example-app"));
         assert!(script.contains(OK_MARKER));
         assert!(script.contains("rm -rf /work/cargo-target /work/cargo-home"));
+        assert!(script.contains("chown -R --reference=/work /work"));
+        assert!(script.contains("chmod -R u+rwX /work"));
     }
 
     #[test]
@@ -2898,41 +2911,18 @@ mod tests {
     }
 
     #[test]
-    fn erfolgreicher_build_behaelt_nur_den_quellcode() {
+    fn erfolgreicher_build_entfernt_vollstaendigen_cacheordner() {
         let root =
             std::env::temp_dir().join(format!("git2pkg-success-cleanup-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        for name in [
-            "build",
-            "deps-build",
-            "cargo-target",
-            "cargo-home",
-            "ccache",
-            "out",
-            "dist",
-            "pkg",
-            "src",
-        ] {
-            fs::create_dir_all(root.join(name)).unwrap();
-        }
+        fs::create_dir_all(root.join("src/nested")).unwrap();
+        fs::create_dir_all(root.join("cargo-target")).unwrap();
         fs::write(root.join("src/README.md"), "source").unwrap();
+        fs::write(root.join("src/nested/data.txt"), "data").unwrap();
         fs::write(root.join("build.sh"), "script").unwrap();
-        fs::write(root.join("BUILD_LOG.txt"), "log").unwrap();
-        assert_eq!(remove_heavy_build_dirs(&root), 10);
-        assert!(root.join("src/README.md").is_file());
-        for name in [
-            "build",
-            "deps-build",
-            "cargo-target",
-            "cargo-home",
-            "ccache",
-            "out",
-            "dist",
-            "pkg",
-        ] {
-            assert!(!root.join(name).exists(), "{} wurde nicht entfernt", name);
-        }
-        let _ = fs::remove_dir_all(&root);
+        let (tx, _rx) = std::sync::mpsc::channel();
+        cleanup_successful_build(&root, &tx);
+        assert!(!root.exists(), "Build-Ordner wurde nicht restlos entfernt");
     }
 
     #[test]
