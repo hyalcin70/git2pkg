@@ -92,7 +92,11 @@ fn print_usage() {
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = env::args().collect();
-    if args.iter().skip(1).any(|arg| arg == "-h" || arg == "--help") {
+    if args
+        .iter()
+        .skip(1)
+        .any(|arg| arg == "-h" || arg == "--help")
+    {
         print_usage();
         return Ok(());
     }

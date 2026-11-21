@@ -42,11 +42,10 @@ impl MissingDep {
     pub fn search_term(&self) -> String {
         match self {
             MissingDep::Header(h) => h.trim_end_matches(".h").to_ascii_lowercase(),
-            MissingDep::PkgConfig(p) | MissingDep::CMakeModule(p) => {
-                p.trim_end_matches("-config")
-                    .trim_end_matches("Config")
-                    .to_ascii_lowercase()
-            }
+            MissingDep::PkgConfig(p) | MissingDep::CMakeModule(p) => p
+                .trim_end_matches("-config")
+                .trim_end_matches("Config")
+                .to_ascii_lowercase(),
             MissingDep::Tool(t) => t.to_ascii_lowercase(),
         }
     }
@@ -278,9 +277,19 @@ pub fn package_lacks_executable(listing: &str) -> bool {
 /// Nur kompilierte Build-Systeme werden für unvollständige Pakete profiliert.
 pub fn is_compiled_build_system(label: &str) -> bool {
     let value = label.to_ascii_lowercase();
-    ["cmake", "cargo", "rust", "meson", "ninja", "make", "qmake", "go", "autotools"]
-        .iter()
-        .any(|name| value.contains(name))
+    [
+        "cmake",
+        "cargo",
+        "rust",
+        "meson",
+        "ninja",
+        "make",
+        "qmake",
+        "go",
+        "autotools",
+    ]
+    .iter()
+    .any(|name| value.contains(name))
 }
 
 /// Erfolgreiche, generische Bauweise für ein Repo oder eine Strukturklasse.
@@ -303,8 +312,7 @@ pub struct BuildRecipe {
 }
 
 /// Lokale, dauerhafte Paket-Zuordnungen ("Live-Lernen" ohne KI).
-#[derive(Debug, Clone)]
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct LearnedFile {
     #[serde(default)]
     packages: HashMap<String, String>,
@@ -344,8 +352,9 @@ impl MappingStore {
         let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
 
         // Neue datei mit Sektionen; alte flache Dateien werden übernommen.
-        let (learned, negative_cache, build_fixes, repo_profiles, build_recipes) =
-            if value.get("packages").is_some()
+        let (learned, negative_cache, build_fixes, repo_profiles, build_recipes) = if value
+            .get("packages")
+            .is_some()
             || value.get("build_fixes").is_some()
             || value.get("negative_cache").is_some()
             || value.get("repo_profiles").is_some()
@@ -374,7 +383,13 @@ impl MappingStore {
             (packages, negative, fixes, profiles, recipes)
         } else {
             let flat = serde_json::from_value::<HashMap<String, String>>(value).unwrap_or_default();
-            (flat, Vec::new(), HashMap::new(), HashMap::new(), HashMap::new())
+            (
+                flat,
+                Vec::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+            )
         };
 
         let store = Self {
@@ -496,11 +511,7 @@ impl MappingStore {
     }
 
     /// Erst der exakte Repo-Treffer, dann die allgemeine Struktur-Signatur.
-    pub fn apply_learned_recipe(
-        &self,
-        url: &str,
-        signature: &str,
-    ) -> Option<(BuildRecipe, bool)> {
+    pub fn apply_learned_recipe(&self, url: &str, signature: &str) -> Option<(BuildRecipe, bool)> {
         self.build_recipes
             .get(&format!("repo:{}", repo_hash(url)))
             .cloned()
@@ -581,7 +592,10 @@ pub fn probe_commands(package_manager: &str, dep: &MissingDep) -> Vec<String> {
             files.push((format!("{}-config.cmake", module.to_lowercase()), false));
         }
         MissingDep::Header(header) => {
-            files.push((header.rsplit('/').next().unwrap_or(header).to_string(), true));
+            files.push((
+                header.rsplit('/').next().unwrap_or(header).to_string(),
+                true,
+            ));
         }
         MissingDep::PkgConfig(pkg) => files.push((format!("{}.pc", pkg.to_lowercase()), false)),
         MissingDep::Tool(tool) => {
@@ -645,7 +659,6 @@ pub fn valid_package_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "-_+.".contains(c))
 }
 
-
 /// Allgemeiner, dauerhaft lernbarer Build-Fix.
 #[derive(Debug, Clone)]
 pub struct BuildFix {
@@ -659,11 +672,14 @@ pub fn detect_build_fixes(output: &str) -> Vec<BuildFix> {
     let lower = output.to_ascii_lowercase();
     let mut fixes = Vec::new();
 
-    let missing_int_type = ["uint8_t", "uint16_t", "uint32_t", "int8_t", "int16_t", "int32_t"]
-        .iter()
-        .any(|name| lower.contains(name));
+    let missing_int_type = [
+        "uint8_t", "uint16_t", "uint32_t", "int8_t", "int16_t", "int32_t",
+    ]
+    .iter()
+    .any(|name| lower.contains(name));
     if missing_int_type
-        && (lower.contains("does not name a type") || lower.contains("was not declared in this scope"))
+        && (lower.contains("does not name a type")
+            || lower.contains("was not declared in this scope"))
     {
         fixes.push(BuildFix {
             key: "cstdint".to_string(),
@@ -682,7 +698,9 @@ pub fn detect_build_fixes(output: &str) -> Vec<BuildFix> {
     }
 
     if lower.contains("no such file or directory")
-        && ["third_party/", "extern/", "libs/"].iter().any(|dir| lower.contains(dir))
+        && ["third_party/", "extern/", "libs/"]
+            .iter()
+            .any(|dir| lower.contains(dir))
     {
         fixes.push(BuildFix {
             key: "submodules".to_string(),
@@ -693,7 +711,6 @@ pub fn detect_build_fixes(output: &str) -> Vec<BuildFix> {
 
     fixes
 }
-
 
 /// Spezifischer CMake-4.x-Fehler: source_group ist kein Prefix des Dateipfads.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -724,10 +741,11 @@ pub fn detect_source_group_error(output: &str) -> Option<SourceGroupError> {
 
         let end = (index + 6).min(lines.len());
         let window = &lines[index..end];
-        if !window
-            .iter()
-            .any(|candidate| candidate.to_ascii_lowercase().contains("is not a prefix of file"))
-        {
+        if !window.iter().any(|candidate| {
+            candidate
+                .to_ascii_lowercase()
+                .contains("is not a prefix of file")
+        }) {
             continue;
         }
         let window_text = window.join("\n");
@@ -892,13 +910,19 @@ mod tests {
     #[test]
     fn erkennt_fehlenden_header() {
         let out = "src/main.c:3:10: fatal error: openssl/sha.h: No such file or directory\ncompilation terminated.\n";
-        assert_eq!(analyze_output(out), vec![MissingDep::Header("openssl/sha.h".into())]);
+        assert_eq!(
+            analyze_output(out),
+            vec![MissingDep::Header("openssl/sha.h".into())]
+        );
     }
 
     #[test]
     fn erkennt_pkgconfig_fehler() {
         let out = "Package 'libcurl', required by 'virtual:world', not found\n";
-        assert_eq!(analyze_output(out), vec![MissingDep::PkgConfig("libcurl".into())]);
+        assert_eq!(
+            analyze_output(out),
+            vec![MissingDep::PkgConfig("libcurl".into())]
+        );
     }
 
     #[test]
@@ -911,10 +935,19 @@ mod tests {
 
     #[test]
     fn suchbegriffe_sind_kleingeschrieben() {
-        assert_eq!(MissingDep::CMakeModule("Boost".into()).search_term(), "boost");
-        assert_eq!(MissingDep::CMakeModule("OpenSSL".into()).search_term(), "openssl");
+        assert_eq!(
+            MissingDep::CMakeModule("Boost".into()).search_term(),
+            "boost"
+        );
+        assert_eq!(
+            MissingDep::CMakeModule("OpenSSL".into()).search_term(),
+            "openssl"
+        );
         assert_eq!(MissingDep::PkgConfig("CURL".into()).search_term(), "curl");
-        assert_eq!(MissingDep::CMakeModule("Eigen3Config".into()).search_term(), "eigen3");
+        assert_eq!(
+            MissingDep::CMakeModule("Eigen3Config".into()).search_term(),
+            "eigen3"
+        );
     }
 
     #[test]
@@ -925,7 +958,10 @@ mod tests {
         assert_eq!(distro_package_name("eigen3", "pacman"), Some("eigen"));
         assert_eq!(distro_package_name("eigen3", "apt"), Some("libeigen3-dev"));
         assert_eq!(distro_package_name("eigen3", "dnf"), Some("eigen3-devel"));
-        assert_eq!(distro_package_name("wxwidgets", "pacman"), Some("wxwidgets-gtk3"));
+        assert_eq!(
+            distro_package_name("wxwidgets", "pacman"),
+            Some("wxwidgets-gtk3")
+        );
         assert_eq!(distro_package_name("opengl", "apt"), Some("libgl-dev"));
         assert_eq!(distro_package_name("opengl", "pacman"), Some("libglvnd"));
     }
@@ -962,10 +998,22 @@ mod tests {
     #[test]
     fn standard_wissensbasis_enthlt_klassiker() {
         let defaults: HashMap<String, String> = serde_json::from_str(DEFAULT_MAPPINGS).unwrap();
-        assert_eq!(defaults.get("arch:Boost").map(String::as_str), Some("boost"));
-        assert_eq!(defaults.get("debian:Eigen3").map(String::as_str), Some("libeigen3-dev"));
-        assert_eq!(defaults.get("fedora:wxWidgets").map(String::as_str), Some("wxGTK-devel"));
-        assert_eq!(defaults.get("arch:OpenGL").map(String::as_str), Some("libglvnd"));
+        assert_eq!(
+            defaults.get("arch:Boost").map(String::as_str),
+            Some("boost")
+        );
+        assert_eq!(
+            defaults.get("debian:Eigen3").map(String::as_str),
+            Some("libeigen3-dev")
+        );
+        assert_eq!(
+            defaults.get("fedora:wxWidgets").map(String::as_str),
+            Some("wxGTK-devel")
+        );
+        assert_eq!(
+            defaults.get("arch:OpenGL").map(String::as_str),
+            Some("libglvnd")
+        );
     }
 
     #[test]
@@ -1002,12 +1050,16 @@ mod tests {
         let cstdint = "error: 'uint8_t' does not name a type";
         let fixes = detect_build_fixes(cstdint);
         assert!(fixes.iter().any(|fix| fix.key == "cstdint"));
-        assert!(detect_build_fixes("source_group \"x\" is not a prefix of file \"y\"")
-            .iter()
-            .any(|fix| fix.key == "cmake_policy"));
-        assert!(detect_build_fixes("third_party/foo.h: No such file or directory")
-            .iter()
-            .any(|fix| fix.key == "submodules"));
+        assert!(
+            detect_build_fixes("source_group \"x\" is not a prefix of file \"y\"")
+                .iter()
+                .any(|fix| fix.key == "cmake_policy")
+        );
+        assert!(
+            detect_build_fixes("third_party/foo.h: No such file or directory")
+                .iter()
+                .any(|fix| fix.key == "submodules")
+        );
         assert!(detect_build_fixes("all good").is_empty());
     }
 
@@ -1017,7 +1069,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("git2pkg-map-{}-{}.json", std::process::id(), nanos));
+        let path =
+            std::env::temp_dir().join(format!("git2pkg-map-{}-{}.json", std::process::id(), nanos));
         let mut store = MappingStore::from_path(path.clone());
         assert!(path.exists(), "Datei muss automatisch angelegt werden");
         assert_eq!(store.get("arch", "Boost").as_deref(), Some("boost"));
@@ -1026,7 +1079,10 @@ mod tests {
         store.learn_negative("bogus-pkg");
         assert!(store.is_negative("bogus-pkg"));
         assert!(store.learn_build_fix("cstdint", "-include cstdint"));
-        assert_eq!(store.build_fix("cstdint").as_deref(), Some("-include cstdint"));
+        assert_eq!(
+            store.build_fix("cstdint").as_deref(),
+            Some("-include cstdint")
+        );
         assert!(store.learned_rule_count() >= 3);
         let json = fs::read_to_string(&path).unwrap();
         assert!(json.contains("packages"));
@@ -1035,7 +1091,10 @@ mod tests {
         let reloaded = MappingStore::from_path(path.clone());
         assert_eq!(reloaded.get("arch", "MyLib").as_deref(), Some("mylib-dev"));
         assert!(reloaded.is_negative("bogus-pkg"));
-        assert_eq!(reloaded.build_fix("cstdint").as_deref(), Some("-include cstdint"));
+        assert_eq!(
+            reloaded.build_fix("cstdint").as_deref(),
+            Some("-include cstdint")
+        );
         let _ = fs::remove_file(path);
     }
 
@@ -1101,18 +1160,17 @@ mod tests {
         let deps = analyze_output(out);
         assert!(deps.contains(&MissingDep::Tool("nasm".to_string())));
         assert!(deps.contains(&MissingDep::Tool("yasm".to_string())));
-        assert!(!deps.iter().any(|dep| matches!(dep, MissingDep::Tool(t) if is_generic_tool_word(t))));
+        assert!(!deps
+            .iter()
+            .any(|dep| matches!(dep, MissingDep::Tool(t) if is_generic_tool_word(t))));
 
         let shell = analyze_output("/work/build.sh: line 11: cargo: command not found");
-    assert!(shell.contains(&MissingDep::Tool("cargo".to_string())));
-    let tool = MissingDep::Tool("nasm".to_string());
+        assert!(shell.contains(&MissingDep::Tool("cargo".to_string())));
+        let tool = MissingDep::Tool("nasm".to_string());
         assert_eq!(tool.search_term(), "nasm");
-        assert!(probe_commands("pacman", &tool)
-            .contains(&"pacman -Fx '/bin/nasm'".to_string()));
-        assert!(probe_commands("apt", &tool)
-            .contains(&"apt-file search '/bin/nasm'".to_string()));
-        assert!(probe_commands("dnf", &tool)
-            .contains(&"dnf provides '*/bin/nasm'".to_string()));
+        assert!(probe_commands("pacman", &tool).contains(&"pacman -Fx '/bin/nasm'".to_string()));
+        assert!(probe_commands("apt", &tool).contains(&"apt-file search '/bin/nasm'".to_string()));
+        assert!(probe_commands("dnf", &tool).contains(&"dnf provides '*/bin/nasm'".to_string()));
         assert!(probe_commands("zypper", &tool)
             .contains(&"zypper search --provides --match-exact 'bin/nasm'".to_string()));
     }
@@ -1186,18 +1244,12 @@ mod tests {
 
         let reloaded = MappingStore::from_path(path);
         let (exact, is_exact) = reloaded
-            .apply_learned_recipe(
-                "example-app",
-                "cmake+deps_dir+repo_script",
-            )
+            .apply_learned_recipe("example-app", "cmake+deps_dir+repo_script")
             .unwrap();
         assert!(is_exact);
         assert!(exact.skip_deps);
         let (similar, by_signature) = reloaded
-            .apply_learned_recipe(
-                "sample-tool",
-                "cmake+deps_dir+repo_script",
-            )
+            .apply_learned_recipe("sample-tool", "cmake+deps_dir+repo_script")
             .unwrap();
         assert!(!by_signature);
         assert_eq!(similar.strategy, "SystemLibsOnly");
@@ -1224,7 +1276,10 @@ mod tests {
         store.mark_incomplete_strategy(url, "Default");
         assert!(store.is_incomplete_strategy(url, "Default"));
         assert!(store.has_incomplete_default(url));
-        assert_eq!(store.incomplete_strategies(url), vec!["Default".to_string()]);
+        assert_eq!(
+            store.incomplete_strategies(url),
+            vec!["Default".to_string()]
+        );
 
         let reloaded = MappingStore::from_path(path);
         assert!(reloaded.is_incomplete_strategy(url, "Default"));
@@ -1232,11 +1287,12 @@ mod tests {
         assert_eq!(reloaded.learned_rule_count(), 1);
         assert_eq!(repo_profile_key(url), sha256_hex(&normalize_repo_url(url)));
 
-        assert!(package_lacks_executable("-rw-r--r-- 0 0 12 usr/share/repo/data.txt"));
+        assert!(package_lacks_executable(
+            "-rw-r--r-- 0 0 12 usr/share/repo/data.txt"
+        ));
         assert!(!package_lacks_executable("-rwxr-xr-x 0 0 12 usr/bin/repo"));
         assert!(is_compiled_build_system("Cargo (Rust)"));
         assert!(!is_compiled_build_system("Unknown"));
         let _ = fs::remove_dir_all(dir);
     }
-
 }

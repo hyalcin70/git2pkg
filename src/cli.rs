@@ -44,7 +44,10 @@ pub fn run_cli(url: &str) {
         container_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
-    println!("{}", texts.cli_header(config.engine.label(), &config.distro.name));
+    println!(
+        "{}",
+        texts.cli_header(config.engine.label(), &config.distro.name)
+    );
 
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || run_build(config, tx));

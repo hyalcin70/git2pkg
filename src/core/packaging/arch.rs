@@ -62,9 +62,7 @@ done"#.to_string(),
         arch = ctx.arch.arch(),
         install_body = install_body,
     ));
-    lines.push(
-        "chown -R builder:builder /work/pkg /work/src /work/out /work/dist".to_string(),
-    );
+    lines.push("chown -R builder:builder /work/pkg /work/src /work/out /work/dist".to_string());
     lines.push("su builder -c 'cd /work/pkg && makepkg -s --noconfirm'".to_string());
     lines.push("rm -f /work/pkg/*-debug-*.pkg.tar.zst".to_string());
     lines.push("cp /work/pkg/*.pkg.tar.zst /work/dist/".to_string());
@@ -74,9 +72,9 @@ done"#.to_string(),
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::packaging::PackageArch;
     use crate::core::container::BuildStrategy;
     use crate::core::distro::DistroFamily;
+    use crate::core::packaging::PackageArch;
 
     #[test]
     fn in_tree_pkgbuild_setzt_cargo_target_dir() {

@@ -3,17 +3,15 @@
 //! Fallback `docker run --rm`). Ausgaben werden über einen `mpsc::Sender`
 //! live an die GUI weitergeleitet.
 
-use crate::core::detector::{
-    detect_build_system, has_local_deps, BuildSystem, ProjectFingerprint,
-};
+use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem, ProjectFingerprint};
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
-use regex::Regex;
 use crate::core::resolver::{
     analyze_output, candidate_names, detect_build_fixes, detect_source_group_error, family_key,
     is_compiled_build_system, package_from_search, package_lacks_executable, probe_commands,
     search_command, valid_package_name, BuildRecipe, MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
+use regex::Regex;
 
 use std::collections::HashSet;
 use std::fs;
@@ -56,7 +54,6 @@ impl TargetFormat {
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContainerEngine {
@@ -121,7 +118,11 @@ impl BuildContainer {
         })
     }
 
-    pub(crate) fn exec(&self, command: &str, tx: &Sender<BuildEvent>) -> Result<CommandOutput, String> {
+    pub(crate) fn exec(
+        &self,
+        command: &str,
+        tx: &Sender<BuildEvent>,
+    ) -> Result<CommandOutput, String> {
         let args = vec![
             "exec".to_string(),
             self.name.clone(),
@@ -132,7 +133,7 @@ impl BuildContainer {
         run_streamed(self.engine.binary(), &args, tx)
     }
 
-     pub(crate) fn stop(&self) {
+    pub(crate) fn stop(&self) {
         let args = vec!["rm", "-f", &self.name];
         let _ = Command::new(self.engine.binary())
             .args(args)
@@ -259,7 +260,6 @@ pub fn default_output_dir() -> PathBuf {
     Path::new(&home).join("Downloads/git2pkg")
 }
 
-
 /// Markiert einen fehlgeschlagenen Build im Cache, damit die GUI beim Beenden
 /// gezielt aufräumen kann. Erfolgreiche Builds behalten ihren Quellcode.
 pub fn mark_failed_build(work: &Path) {
@@ -277,7 +277,9 @@ pub fn has_failed_build_cache() -> bool {
     let Ok(entries) = fs::read_dir(build_cache_root()) else {
         return false;
     };
-    entries.flatten().any(|entry| entry.path().join("FAILED").is_file())
+    entries
+        .flatten()
+        .any(|entry| entry.path().join("FAILED").is_file())
 }
 
 /// Löscht ausschließlich als fehlgeschlagen markierte Build-Ordner.
@@ -294,7 +296,6 @@ pub fn cleanup_failed_builds() -> usize {
     }
     removed
 }
-
 
 /// Löscht nur temporäre Build-/Paket-Verzeichnisse fehlgeschlagener Builds;
 /// der geklonte Quellcode bleibt für einen erneuten Versuch erhalten.
@@ -489,7 +490,6 @@ fn try_install(
     }
 }
 
-
 /// Findet eine im CMake-Fehler genannte Datei relativ zum Quellcode-Cache.
 fn find_source_file(root: &Path, relative: &str) -> Option<PathBuf> {
     let direct = root.join(relative);
@@ -568,7 +568,11 @@ fn heal_source_group(work: &Path, error: &SourceGroupError, tx: &Sender<BuildEve
             candidates.push(path);
         }
     }
-    for root in [work.join("deps-build"), work.join("src"), work.to_path_buf()] {
+    for root in [
+        work.join("deps-build"),
+        work.join("src"),
+        work.to_path_buf(),
+    ] {
         if let Some(path) = find_source_file(&root, &error.file) {
             if !candidates.contains(&path) {
                 candidates.push(path);
@@ -599,8 +603,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let work = temp_workdir(&config.url)?;
     let _ = fs::remove_file(work.join("FAILED"));
     // Ausgabeordner sofort anlegen – auch wenn der Clone später fehlschlägt.
-    fs::create_dir_all(&config.output_dir)
-        .map_err(|e| format!("output dir: {}", e))?;
+    fs::create_dir_all(&config.output_dir).map_err(|e| format!("output dir: {}", e))?;
 
     let src = work.join("src");
     if src.join(".git").is_dir() {
@@ -644,7 +647,10 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
     }
 
-    let repo_script = config.repo_script.clone().or_else(|| find_repo_script(&src));
+    let repo_script = config
+        .repo_script
+        .clone()
+        .or_else(|| find_repo_script(&src));
     let repo_pkgbuild = src.join("PKGBUILD").is_file();
     let identity = project_identity(&config.url, &src);
     let _ = tx.send(BuildEvent::Log(format!(
@@ -792,7 +798,10 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             effective_strategy,
             repo_pkgbuild,
         );
-        if deps_first && effective_strategy != BuildStrategy::DirectStagingFallback && !config.skip_deps {
+        if deps_first
+            && effective_strategy != BuildStrategy::DirectStagingFallback
+            && !config.skip_deps
+        {
             script = with_deps_prebuild(&script);
         }
         let result = match run_container(&container, &work, &script, tx) {
@@ -834,7 +843,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                             } else {
                                 continue;
                             };
-                            if let Ok(archive) = container.exec(&archive_listing_command(kind, path), tx) {
+                            if let Ok(archive) =
+                                container.exec(&archive_listing_command(kind, path), tx)
+                            {
                                 if package_lacks_executable(&archive.text) {
                                     let _ = tx.send(BuildEvent::Log(
                                         "[warn] Erzeugtes Paket enthält keine ausführbare Programmdatei — merke Strategie für dieses Repository als unvollständig".to_string(),
@@ -1109,7 +1120,10 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
     buffer: Arc<Mutex<String>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        for line in std::io::BufReader::new(reader).lines().map_while(Result::ok) {
+        for line in std::io::BufReader::new(reader)
+            .lines()
+            .map_while(Result::ok)
+        {
             let tag = if is_error_line(&line) { "err" } else { "out" };
             let _ = tx.send(BuildEvent::Log(format!("[{}] {}", tag, line)));
             if let Ok(mut shared) = buffer.lock() {
@@ -1120,7 +1134,11 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
     })
 }
 
-fn run_streamed(program: &str, args: &[String], tx: &Sender<BuildEvent>) -> Result<CommandOutput, String> {
+fn run_streamed(
+    program: &str,
+    args: &[String],
+    tx: &Sender<BuildEvent>,
+) -> Result<CommandOutput, String> {
     let mut child = Command::new(program)
         .args(args)
         .stdout(Stdio::piped())
@@ -1258,13 +1276,14 @@ fn install_packages_command(family: &DistroFamily, packages: &[String]) -> Strin
     let list = cleaned.join(" ");
     match family {
         DistroFamily::Arch => format!("yes '' | pacman -S --noconfirm --needed -- {}", list),
-        DistroFamily::Debian => format!("DEBIAN_FRONTEND=noninteractive apt-get install -y {}", list),
+        DistroFamily::Debian => {
+            format!("DEBIAN_FRONTEND=noninteractive apt-get install -y {}", list)
+        }
         DistroFamily::Fedora => format!("dnf install -y {}", list),
         DistroFamily::Suse => format!("zypper --non-interactive install {}", list),
         DistroFamily::Unknown => String::new(),
     }
 }
-
 
 /// Name und Version des gebauten Projekts, aus URL und Quellcode ermittelt.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1632,10 +1651,18 @@ fn shell_quote(value: &str) -> String {
 }
 
 fn asset_staging_step(pkg_name: &str) -> String {
-    format!("PKG_NAME={}\n{}", shell_quote(pkg_name), ASSET_STAGING_SCRIPT)
+    format!(
+        "PKG_NAME={}\n{}",
+        shell_quote(pkg_name),
+        ASSET_STAGING_SCRIPT
+    )
 }
 
-fn build_step_text(system: &BuildSystem, strategy: BuildStrategy, repo_script: Option<&str>) -> String {
+fn build_step_text(
+    system: &BuildSystem,
+    strategy: BuildStrategy,
+    repo_script: Option<&str>,
+) -> String {
     // Direkter Fallback ignoriert Repo-Skripte und Generator-Sonderwege.
     if strategy == BuildStrategy::DirectStagingFallback {
         if *system == BuildSystem::CMake {
@@ -1852,7 +1879,6 @@ fn install_command(config: &BuildConfig, artifacts: &[PathBuf]) -> String {
     }
 }
 
-
 #[allow(unused_imports)]
 pub use crate::core::packaging::verify::{
     archive_listing_command, listing_payload, verify_built_packages,
@@ -1972,14 +1998,17 @@ mod tests {
         assert!(script.lines().all(|line| !line.starts_with("==")));
     }
 
-
     #[test]
     fn desktop_dateien_und_icons_werden_generisch_gestaget() {
         let identity = ProjectIdentity {
             name: "repo".to_string(),
             version: "1.0.0".to_string(),
         };
-        for family in [DistroFamily::Arch, DistroFamily::Debian, DistroFamily::Fedora] {
+        for family in [
+            DistroFamily::Arch,
+            DistroFamily::Debian,
+            DistroFamily::Fedora,
+        ] {
             let cfg = config(family.clone(), TargetFormat::NativePackage);
             let script = build_script_with(
                 &cfg,
@@ -1992,7 +2021,11 @@ mod tests {
             );
             assert!(script.contains("*.desktop"), "{:?}", family);
             assert!(script.contains("usr/share/applications"), "{:?}", family);
-            assert!(script.contains("usr/share/icons/hicolor/scalable/apps"), "{:?}", family);
+            assert!(
+                script.contains("usr/share/icons/hicolor/scalable/apps"),
+                "{:?}",
+                family
+            );
             assert!(script.contains("usr/share/pixmaps"), "{:?}", family);
             assert!(script.contains("Icon="), "{:?}", family);
         }
@@ -2118,9 +2151,17 @@ mod tests {
             out.join("usr/share/pixmaps/sample-tool.png").is_file(),
             "Icon fehlt in /usr/share/pixmaps"
         );
-        assert!(fs::read_to_string(&desktop).unwrap().contains("Icon=sample-tool"));
-        assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
-        assert_eq!(fs::metadata(&icon).unwrap().permissions().mode() & 0o777, 0o644);
+        assert!(fs::read_to_string(&desktop)
+            .unwrap()
+            .contains("Icon=sample-tool"));
+        assert_eq!(
+            fs::metadata(&desktop).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(
+            fs::metadata(&icon).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2164,13 +2205,22 @@ mod tests {
         let desktop = out.join("usr/share/applications/sample-tool.desktop");
         let icon = out.join("usr/share/icons/hicolor/48x48/apps/sample-tool.png");
         assert!(desktop.is_file(), "Fallback-Desktop fehlt");
-        assert!(icon.is_file(), "Icon wurde nicht unter sample-tool.png installiert");
+        assert!(
+            icon.is_file(),
+            "Icon wurde nicht unter sample-tool.png installiert"
+        );
         let desktop_text = fs::read_to_string(&desktop).unwrap();
         assert!(desktop_text.contains("Name=sample-tool"));
         assert!(desktop_text.contains("Exec=sample-tool"));
         assert!(desktop_text.contains("Icon=sample-tool"));
-        assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
-        assert_eq!(fs::metadata(&icon).unwrap().permissions().mode() & 0o777, 0o644);
+        assert_eq!(
+            fs::metadata(&desktop).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(
+            fs::metadata(&icon).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
         assert!(
             out.join("usr/share/pixmaps/sample-tool.png").is_file(),
             "Fallback-Icon fehlt in /usr/share/pixmaps"
@@ -2210,18 +2260,12 @@ mod tests {
             BuildStrategy::RepoScript,
             BuildStrategy::DirectStagingFallback,
         ];
-        let path = std::env::temp_dir().join(format!("git2pkg-buildmatrix-{}.sh", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("git2pkg-buildmatrix-{}.sh", std::process::id()));
         for system in systems {
             for strategy in strategies {
-                let script = build_script_with(
-                    &config,
-                    &system,
-                    &[],
-                    None,
-                    &identity,
-                    strategy,
-                    false,
-                );
+                let script =
+                    build_script_with(&config, &system, &[], None, &identity, strategy, false);
                 std::fs::write(&path, script).unwrap();
                 let ok = std::process::Command::new("bash")
                     .arg("-n")
@@ -2267,7 +2311,11 @@ mod tests {
         assert_eq!(cmake.version, "2.20.0");
 
         fs::remove_file(root.join("CMakeLists.txt")).unwrap();
-        fs::write(root.join("pyproject.toml"), "[project]\nversion = \"1.2.3\"\n").unwrap();
+        fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nversion = \"1.2.3\"\n",
+        )
+        .unwrap();
         let python = project_identity("example-python", &root);
         assert_eq!(python.name, "example-python");
         assert_eq!(python.version, "1.2.3");
@@ -2290,21 +2338,13 @@ mod tests {
         ));
         let work = base.join("work");
         fs::create_dir_all(work.join("dist")).unwrap();
-        fs::write(
-            work.join("dist/repo-0.1.0-1-x86_64.pkg.tar.zst"),
-            "inhalt",
-        )
-        .unwrap();
+        fs::write(work.join("dist/repo-0.1.0-1-x86_64.pkg.tar.zst"), "inhalt").unwrap();
         fs::write(
             work.join("dist/repo-0.1.0-1-x86_64-debug-1-x86_64.pkg.tar.zst"),
             "debug",
         )
         .unwrap();
-        fs::write(
-            work.join("dist/repo-dbgsym_0.1.0_amd64.deb"),
-            "dbgsym",
-        )
-        .unwrap();
+        fs::write(work.join("dist/repo-dbgsym_0.1.0_amd64.deb"), "dbgsym").unwrap();
         let output = base.join("out");
         fs::create_dir_all(&output).unwrap();
 
@@ -2319,13 +2359,7 @@ mod tests {
         assert_eq!(outcome.artifacts.len(), 1);
         let names: Vec<String> = fs::read_dir(&output)
             .unwrap()
-            .map(|entry| {
-                entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .into_owned()
-            })
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names.len(), 1);
         assert!(names[0].ends_with(".pkg.tar.zst"));
@@ -2334,7 +2368,6 @@ mod tests {
         assert!(!output.join("BUILD_RECIPE.sh").exists());
         fs::remove_dir_all(base).unwrap();
     }
-
 
     #[test]
     fn sanierte_version_und_debug_pakete_in_allen_formaten() {
@@ -2431,25 +2464,57 @@ mod tests {
 
     #[test]
     fn cache_key_und_strategien_sind_stabil() {
-        assert_eq!(source_cache_key("sample-tool/y.git"), source_cache_key("sample-tool/y.git"));
-        assert_ne!(source_cache_key("sample-tool/y.git"), source_cache_key("sample-tool/z.git"));
-        assert_eq!(BuildStrategy::Default.next(true), BuildStrategy::SystemLibsOnly);
-        assert_eq!(BuildStrategy::Default.next(false), BuildStrategy::RepoScript);
-        assert_eq!(BuildStrategy::SystemLibsOnly.next(true), BuildStrategy::RepoScript);
-        assert_eq!(BuildStrategy::RepoScript.next(true), BuildStrategy::DirectStagingFallback);
-        assert_eq!(BuildStrategy::DirectStagingFallback.next(true), BuildStrategy::Default);
+        assert_eq!(
+            source_cache_key("sample-tool/y.git"),
+            source_cache_key("sample-tool/y.git")
+        );
+        assert_ne!(
+            source_cache_key("sample-tool/y.git"),
+            source_cache_key("sample-tool/z.git")
+        );
+        assert_eq!(
+            BuildStrategy::Default.next(true),
+            BuildStrategy::SystemLibsOnly
+        );
+        assert_eq!(
+            BuildStrategy::Default.next(false),
+            BuildStrategy::RepoScript
+        );
+        assert_eq!(
+            BuildStrategy::SystemLibsOnly.next(true),
+            BuildStrategy::RepoScript
+        );
+        assert_eq!(
+            BuildStrategy::RepoScript.next(true),
+            BuildStrategy::DirectStagingFallback
+        );
+        assert_eq!(
+            BuildStrategy::DirectStagingFallback.next(true),
+            BuildStrategy::Default
+        );
     }
 
     #[test]
     fn alternative_build_schritte() {
-        let script = build_step_text(&BuildSystem::CMake, BuildStrategy::RepoScript, Some("BuildLinux.sh"));
+        let script = build_step_text(
+            &BuildSystem::CMake,
+            BuildStrategy::RepoScript,
+            Some("BuildLinux.sh"),
+        );
         assert!(script.contains("./BuildLinux.sh"));
         assert!(script.contains("bash \"$script\""));
         assert!(script.contains("usage|and then"));
-        let default_with_script =
-            build_step_text(&BuildSystem::CMake, BuildStrategy::Default, Some("BuildLinux.sh"));
+        let default_with_script = build_step_text(
+            &BuildSystem::CMake,
+            BuildStrategy::Default,
+            Some("BuildLinux.sh"),
+        );
         assert!(!default_with_script.contains("BuildLinux.sh"));
-        let make = build_step_text(&BuildSystem::CMake, BuildStrategy::DirectStagingFallback, None);
+        let make = build_step_text(
+            &BuildSystem::CMake,
+            BuildStrategy::DirectStagingFallback,
+            None,
+        );
         assert!(make.contains("Unix Makefiles"));
         let default = build_step_text(&BuildSystem::CMake, BuildStrategy::Default, None);
         assert!(default.contains("cmake -S . -B build"));
@@ -2511,7 +2576,9 @@ mod tests {
             );
             assert!(script.contains("set -e"), "{:?}", family);
             assert!(script.contains("set -o pipefail"), "{:?}", family);
-            let check = script.find("__GIT2PKG_NO_ARTIFACT__").expect("artefaktcheck");
+            let check = script
+                .find("__GIT2PKG_NO_ARTIFACT__")
+                .expect("artefaktcheck");
             let ok = script.find(OK_MARKER).expect("ok-marker");
             assert!(check < ok, "{:?}: check muss vor OK stehen", family);
         }
@@ -2526,7 +2593,7 @@ mod tests {
         );
         assert!(script.contains("useradd -m -s /bin/bash builder"));
         assert!(script.contains("chown -R builder:builder"));
-                assert!(script.contains("su builder -c 'cd /work/pkg && makepkg -s --noconfirm'"));
+        assert!(script.contains("su builder -c 'cd /work/pkg && makepkg -s --noconfirm'"));
         assert!(!script.contains("--asroot"));
     }
 
@@ -2575,7 +2642,9 @@ mod tests {
         );
         assert!(deb.contains("Arch-PKGBUILD wird fuer dieses Zielformat ignoriert"));
         assert!(deb.contains("cmake --install build"));
-        assert!(deb.contains("cmake --build build -j$(nproc) && [ -f build/cmake_install.cmake ] && DESTDIR="));
+        assert!(deb.contains(
+            "cmake --build build -j$(nproc) && [ -f build/cmake_install.cmake ] && DESTDIR="
+        ));
         assert!(deb.contains("dpkg-deb --build /work/deb /work/dist/repo_0.1.0_amd64.deb"));
         assert!(!deb.contains("makepkg"));
 
@@ -2627,7 +2696,11 @@ mod tests {
 
     #[test]
     fn script_enthaelt_makerpkg_fuer_arch() {
-        let script = build_script(&config(DistroFamily::Arch, TargetFormat::NativePackage), &BuildSystem::Cargo, &[]);
+        let script = build_script(
+            &config(DistroFamily::Arch, TargetFormat::NativePackage),
+            &BuildSystem::Cargo,
+            &[],
+        );
         assert!(script.contains("makepkg"));
         assert!(script.contains("pkgname=example-app"));
         assert!(script.contains(OK_MARKER));
@@ -2636,14 +2709,22 @@ mod tests {
 
     #[test]
     fn script_enthaelt_dpkg_deb_fuer_debian() {
-        let script = build_script(&config(DistroFamily::Debian, TargetFormat::NativePackage), &BuildSystem::Cargo, &[]);
+        let script = build_script(
+            &config(DistroFamily::Debian, TargetFormat::NativePackage),
+            &BuildSystem::Cargo,
+            &[],
+        );
         assert!(script.contains("dpkg-deb"));
         assert!(script.contains("example-app_0.1.0_amd64.deb"));
     }
 
     #[test]
     fn script_enthaelt_rpmbuild_fuer_fedora() {
-        let script = build_script(&config(DistroFamily::Fedora, TargetFormat::NativePackage), &BuildSystem::Cargo, &[]);
+        let script = build_script(
+            &config(DistroFamily::Fedora, TargetFormat::NativePackage),
+            &BuildSystem::Cargo,
+            &[],
+        );
         assert!(script.contains("rpmbuild"));
         assert!(script.contains("example-app.spec"));
     }
@@ -2744,10 +2825,8 @@ mod tests {
 
     #[test]
     fn erfolgreicher_build_behaelt_nur_den_quellcode() {
-        let root = std::env::temp_dir().join(format!(
-            "git2pkg-success-cleanup-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("git2pkg-success-cleanup-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         for name in [
             "build",
@@ -2792,11 +2871,11 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let extension = root
-            .join("deps-build/dep_example-prefix/src/dep_example/libs/locale/include/boost");
+        let extension =
+            root.join("deps-build/dep_example-prefix/src/dep_example/libs/locale/include/boost");
         fs::create_dir_all(&extension).unwrap();
-        let cmakelists = root
-            .join("deps-build/dep_example-prefix/src/dep_example/libs/locale/CMakeLists.txt");
+        let cmakelists =
+            root.join("deps-build/dep_example-prefix/src/dep_example/libs/locale/CMakeLists.txt");
         fs::create_dir_all(cmakelists.parent().unwrap()).unwrap();
         fs::write(&cmakelists, "source_group(x)\n").unwrap();
         let hint = extension.join("locale.hpp");
@@ -2854,25 +2933,42 @@ mod tests {
 
     #[test]
     fn install_command_passt_zur_distro() {
-        let artifact = vec![PathBuf::from("/tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst")];
+        let artifact = vec![PathBuf::from(
+            "/tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst",
+        )];
         assert_eq!(
-            install_command(&config(DistroFamily::Arch, TargetFormat::NativePackage), &artifact),
+            install_command(
+                &config(DistroFamily::Arch, TargetFormat::NativePackage),
+                &artifact
+            ),
             "sudo pacman -U /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
         assert_eq!(
-            install_command(&config(DistroFamily::Debian, TargetFormat::NativePackage), &artifact),
+            install_command(
+                &config(DistroFamily::Debian, TargetFormat::NativePackage),
+                &artifact
+            ),
             "sudo apt install /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
         assert_eq!(
-            install_command(&config(DistroFamily::Suse, TargetFormat::NativePackage), &artifact),
+            install_command(
+                &config(DistroFamily::Suse, TargetFormat::NativePackage),
+                &artifact
+            ),
             "sudo zypper install /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
     }
 
     #[test]
     fn target_format_schluessel() {
-        assert_eq!(TargetFormat::from_key("binary"), TargetFormat::StandaloneBinary);
-        assert_eq!(TargetFormat::from_key("package"), TargetFormat::NativePackage);
+        assert_eq!(
+            TargetFormat::from_key("binary"),
+            TargetFormat::StandaloneBinary
+        );
+        assert_eq!(
+            TargetFormat::from_key("package"),
+            TargetFormat::NativePackage
+        );
         assert_eq!(TargetFormat::NativePackage.key(), "package");
     }
 }

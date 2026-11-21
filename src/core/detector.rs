@@ -167,8 +167,7 @@ fn uses_toolkit(text: &str, needles: &[&str]) -> bool {
 /// CMake-Projekte mit einem Unterverzeichnis `deps/` enthalten lokale Abhängigkeiten
 /// in `deps/CMakeLists.txt`, die vor dem Hauptprojekt gebaut werden müssen.
 pub fn has_local_deps(root: &Path) -> bool {
-    root.join("deps/CMakeLists.txt").is_file()
-        || root.join("third_party/CMakeLists.txt").is_file()
+    root.join("deps/CMakeLists.txt").is_file() || root.join("third_party/CMakeLists.txt").is_file()
 }
 
 /// Generische Erkennung von qmake-Projekten über `.pro`-Dateien.
@@ -223,7 +222,8 @@ mod tests {
     use std::fs;
 
     fn temp_root(name: &str, files: &[&str]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("git2pkg-detect-{}-{}", name, std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("git2pkg-detect-{}-{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         for f in files {
@@ -248,11 +248,7 @@ mod tests {
                 "app.desktop",
             ],
         );
-        fs::write(
-            root.join("CMakeLists.txt"),
-            "find_package(Qt6 REQUIRED)\n",
-        )
-        .unwrap();
+        fs::write(root.join("CMakeLists.txt"), "find_package(Qt6 REQUIRED)\n").unwrap();
         let first = ProjectFingerprint::from_root(&root);
         let second = ProjectFingerprint::from_root(&root);
         assert_eq!(first, second);

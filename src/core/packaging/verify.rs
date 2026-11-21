@@ -1,6 +1,6 @@
 //! Gemeinsame Inhaltsprüfung für `.pkg.tar.zst`, `.deb` und `.rpm`.
 
-use crate::core::container::{BuildContainer, BuildConfig};
+use crate::core::container::{BuildConfig, BuildContainer};
 use crate::core::resolver::MappingStore;
 use std::sync::mpsc::Sender;
 
@@ -68,10 +68,12 @@ pub fn listing_payload_with_size(
         } else {
             *tokens.last().unwrap()
         };
-        let path = raw_path
-            .trim_start_matches("./")
-            .trim_start_matches('/');
-        if path.ends_with('/') || metadata.iter().any(|m| path.split('/').any(|seg| seg == *m)) {
+        let path = raw_path.trim_start_matches("./").trim_start_matches('/');
+        if path.ends_with('/')
+            || metadata
+                .iter()
+                .any(|m| path.split('/').any(|seg| seg == *m))
+        {
             continue;
         }
         if !prefixes.iter().any(|prefix| path.starts_with(prefix)) {
@@ -98,13 +100,7 @@ pub fn listing_payload_with_size(
 
 /// Zählt echte Programmdateien in den ausführbaren Standardpfaden.
 pub fn listing_program_files(text: &str, kind: &str) -> usize {
-    let prefixes = [
-        "usr/bin/",
-        "usr/local/bin/",
-        "bin/",
-        "usr/sbin/",
-        "opt/",
-    ];
+    let prefixes = ["usr/bin/", "usr/local/bin/", "bin/", "usr/sbin/", "opt/"];
     let mut count = 0usize;
     for line in text.lines() {
         let tokens: Vec<&str> = line.split_whitespace().collect();
@@ -180,13 +176,16 @@ pub fn verify_built_packages(
                         .lines()
                         .filter_map(|line| line.trim().parse::<u64>().ok())
                         .sum();
-                    if total > 0 { Some(total) } else { None }
+                    if total > 0 {
+                        Some(total)
+                    } else {
+                        None
+                    }
                 })
         } else {
             None
         };
-        let (files, bytes, has_size) =
-            listing_payload_with_size(&output.text, kind, forced_bytes);
+        let (files, bytes, has_size) = listing_payload_with_size(&output.text, kind, forced_bytes);
         let program_files = listing_program_files(&output.text, kind);
         let plausible = if compiled {
             program_files > 0
@@ -267,7 +266,10 @@ mod tests {
     fn rpm_programmdatei_wird_erkannt() {
         let listing = "/usr/bin/repo\n/usr/share/repo/data.txt\n";
         assert_eq!(listing_program_files(listing, "rpm"), 1);
-        assert_eq!(listing_program_files("/usr/share/repo/data.txt\n", "rpm"), 0);
+        assert_eq!(
+            listing_program_files("/usr/share/repo/data.txt\n", "rpm"),
+            0
+        );
     }
 
     #[test]

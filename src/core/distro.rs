@@ -147,7 +147,10 @@ pub fn detect_distro() -> DistroInfo {
 }
 
 fn unquote(value: &str) -> String {
-    value.trim().trim_matches(|c| c == '"' || c == '\'').to_string()
+    value
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .to_string()
 }
 
 fn classify(id: &str, id_like: &[String]) -> DistroFamily {
@@ -156,16 +159,27 @@ fn classify(id: &str, id_like: &[String]) -> DistroFamily {
 
     if id == "arch" || id == "cachyos" || id == "manjaro" || likes.iter().any(|x| x == "arch") {
         DistroFamily::Arch
-    } else if id == "ubuntu" || id == "debian" || id == "linuxmint" || id == "pop"
+    } else if id == "ubuntu"
+        || id == "debian"
+        || id == "linuxmint"
+        || id == "pop"
         || likes.iter().any(|x| x == "debian" || x == "ubuntu")
     {
         DistroFamily::Debian
-    } else if id == "opensuse" || id == "opensuse-leap" || id == "opensuse-tumbleweed"
-        || id == "sles" || id == "sles_sap" || likes.iter().any(|x| x == "suse" || x == "opensuse")
+    } else if id == "opensuse"
+        || id == "opensuse-leap"
+        || id == "opensuse-tumbleweed"
+        || id == "sles"
+        || id == "sles_sap"
+        || likes.iter().any(|x| x == "suse" || x == "opensuse")
     {
         DistroFamily::Suse
-    } else if id == "fedora" || id == "rhel" || id == "centos" || id == "rocky"
-        || id == "almalinux" || likes.iter().any(|x| x == "fedora" || x == "rhel")
+    } else if id == "fedora"
+        || id == "rhel"
+        || id == "centos"
+        || id == "rocky"
+        || id == "almalinux"
+        || likes.iter().any(|x| x == "fedora" || x == "rhel")
     {
         DistroFamily::Fedora
     } else {
@@ -206,10 +220,19 @@ mod tests {
     fn ziel_distro_waehlt_passendes_image() {
         let host = DistroInfo::for_family(DistroFamily::Arch);
         assert_eq!(TargetDistro::Auto.info(&host).family, DistroFamily::Arch);
-        assert_eq!(TargetDistro::Arch.info(&host).base_image, "archlinux:latest");
-        assert_eq!(TargetDistro::Debian.info(&host).base_image, "debian:stable-slim");
+        assert_eq!(
+            TargetDistro::Arch.info(&host).base_image,
+            "archlinux:latest"
+        );
+        assert_eq!(
+            TargetDistro::Debian.info(&host).base_image,
+            "debian:stable-slim"
+        );
         assert_eq!(TargetDistro::Fedora.info(&host).base_image, "fedora:latest");
-        assert_eq!(TargetDistro::Suse.info(&host).base_image, "opensuse/leap:latest");
+        assert_eq!(
+            TargetDistro::Suse.info(&host).base_image,
+            "opensuse/leap:latest"
+        );
     }
 
     #[test]

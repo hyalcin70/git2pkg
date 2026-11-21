@@ -3,13 +3,13 @@
 
 use crate::core::container::{
     cached_repo_has_local_dependencies, cleanup_failed_build_artifacts, cleanup_failed_builds,
-    container_engine_available,
-    default_output_dir, detect_engine, run_build, BuildConfig, BuildEvent, BuildOutcome, BuildStrategy,
-    ContainerEngine, TargetFormat,
+    container_engine_available, default_output_dir, detect_engine, run_build, BuildConfig,
+    BuildEvent, BuildOutcome, BuildStrategy, ContainerEngine, TargetFormat,
 };
 use crate::core::distro::{detect_distro, DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::MappingStore;
 use crate::gui::i18n::{Language, Texts, ThemeMode};
+use crate::gui::settings::GuiSettings;
 use arboard::GetExtLinux;
 use eframe::egui;
 use std::fs;
@@ -133,7 +133,12 @@ impl Git2PkgApp {
         // Wissensdatei beim Programmstart anlegen/befüllen.
         let _ = MappingStore::load();
         let language = Language::detect();
-        let output_dir = default_output_dir();
+        let settings = GuiSettings::load();
+        let output_dir = settings
+            .output_dir
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(default_output_dir);
+        let theme_mode = settings.theme.unwrap_or(ThemeMode::Auto);
         Self {
             url: String::new(),
             target: TargetFormat::NativePackage,
@@ -141,7 +146,7 @@ impl Git2PkgApp {
             output_dir: output_dir.clone(),
             output_dir_text: output_dir.to_string_lossy().into_owned(),
             language,
-            theme_mode: ThemeMode::Auto,
+            theme_mode,
             theme_applied: false,
             last_theme_check: Instant::now(),
             engine_mode: EngineMode::Auto,
@@ -195,13 +200,11 @@ impl Git2PkgApp {
         };
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
-        let pixels =
-            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], rgba.as_raw());
-        self.logo = Some(ctx.load_texture(
-            "creator_logo",
-            pixels,
-            egui::TextureOptions::LINEAR,
-        ));
+        let pixels = egui::ColorImage::from_rgba_unmultiplied(
+            [width as usize, height as usize],
+            rgba.as_raw(),
+        );
+        self.logo = Some(ctx.load_texture("creator_logo", pixels, egui::TextureOptions::LINEAR));
     }
 
     /// Lädt das eingebettete Programm-Icon für den Info-Dialog.
@@ -214,13 +217,12 @@ impl Git2PkgApp {
         };
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
-        let pixels =
-            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], rgba.as_raw());
-        self.app_icon = Some(ctx.load_texture(
-            "git2pkg_app_icon",
-            pixels,
-            egui::TextureOptions::LINEAR,
-        ));
+        let pixels = egui::ColorImage::from_rgba_unmultiplied(
+            [width as usize, height as usize],
+            rgba.as_raw(),
+        );
+        self.app_icon =
+            Some(ctx.load_texture("git2pkg_app_icon", pixels, egui::TextureOptions::LINEAR));
     }
 
     /// Lädt das eingebettete "Made for Linux"-Badge für die Statusleiste.
@@ -233,13 +235,12 @@ impl Git2PkgApp {
         };
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
-        let pixels =
-            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], rgba.as_raw());
-        self.linux_badge = Some(ctx.load_texture(
-            "made_for_linux_badge",
-            pixels,
-            egui::TextureOptions::LINEAR,
-        ));
+        let pixels = egui::ColorImage::from_rgba_unmultiplied(
+            [width as usize, height as usize],
+            rgba.as_raw(),
+        );
+        self.linux_badge =
+            Some(ctx.load_texture("made_for_linux_badge", pixels, egui::TextureOptions::LINEAR));
     }
 
     fn apply_theme(&self, ctx: &egui::Context) {
@@ -267,11 +268,23 @@ impl Git2PkgApp {
         }
     }
 
+    fn persist_settings(&self) {
+        GuiSettings {
+            output_dir: Some(self.output_dir.clone()),
+            theme: Some(self.theme_mode),
+        }
+        .save();
+    }
+
     /// Übernimmt einen manuell eingegebenen Pfad als tatsächliches Ziel.
     fn sync_output_dir(&mut self) {
         let text = self.output_dir_text.trim();
         if !text.is_empty() {
-            self.output_dir = PathBuf::from(text);
+            let selected = PathBuf::from(text);
+            if selected != self.output_dir {
+                self.output_dir = selected;
+                self.persist_settings();
+            }
         }
     }
 
@@ -335,7 +348,11 @@ impl Git2PkgApp {
         self.confirm_install = false;
         self.log.clear();
         self.step = texts.starting().to_string();
-        self.log.push_str(&format!("$ git2pkg build {} ({})\n", url, self.target.key()));
+        self.log.push_str(&format!(
+            "$ git2pkg build {} ({})\n",
+            url,
+            self.target.key()
+        ));
 
         let (tx, rx) = mpsc::channel();
         let config = BuildConfig {
@@ -369,7 +386,8 @@ impl Git2PkgApp {
         self.build_progress = 0.0;
         self.retry_dialog = false;
         self.install_dialog = None;
-        self.log.push_str("[warn] Build vom Benutzer abgebrochen.\n");
+        self.log
+            .push_str("[warn] Build vom Benutzer abgebrochen.\n");
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
@@ -405,11 +423,8 @@ impl Git2PkgApp {
                         if text.trim_start().starts_with("Compiling ") {
                             self.cargo_crates += 1;
                         }
-                        self.build_progress = progress_from_line(
-                            self.build_progress,
-                            &text,
-                            self.cargo_crates,
-                        );
+                        self.build_progress =
+                            progress_from_line(self.build_progress, &text, self.cargo_crates);
                         changed = true;
                     }
                     Ok(BuildEvent::Finished(outcome)) => {
@@ -485,8 +500,8 @@ impl Git2PkgApp {
     fn run_confirmed_install(&mut self, command: String) {
         self.log.push_str(&format!("[install] $ {}\n", command));
         let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            match Command::new("sh").arg("-c").arg(&command).output() {
+        std::thread::spawn(
+            move || match Command::new("sh").arg("-c").arg(&command).output() {
                 Ok(output) => {
                     let mut text = String::new();
                     text.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -499,8 +514,8 @@ impl Git2PkgApp {
                 Err(error) => {
                     let _ = tx.send(format!("[install] {}", error));
                 }
-            }
-        });
+            },
+        );
         self.install_receiver = Some(rx);
         self.confirm_install = false;
     }
@@ -513,7 +528,6 @@ impl Default for Git2PkgApp {
 }
 
 impl Git2PkgApp {
-
     /// Distributionsspezifischer Installationsbefehl hinter `pkexec`.
     fn install_args(&self, path: &Path) -> Vec<String> {
         let package = path.to_string_lossy().into_owned();
@@ -597,7 +611,10 @@ impl Git2PkgApp {
 
 /// Nur echte Systempakete loesen den Installationsdialog aus.
 fn is_system_package(path: &Path) -> bool {
-    let name = path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_default();
     name.ends_with(".pkg.tar.zst") || name.ends_with(".deb") || name.ends_with(".rpm")
 }
 
@@ -656,9 +673,11 @@ impl eframe::App for Git2PkgApp {
                     if ui.button(theme_text).clicked() {
                         self.theme_mode = self.theme_mode.next();
                         self.apply_theme(ctx);
+                        self.persist_settings();
                     }
 
-                    let lang_text = format!("{} {}", texts.status_language(), self.language.label());
+                    let lang_text =
+                        format!("{} {}", texts.status_language(), self.language.label());
                     egui::ComboBox::from_id_salt("language")
                         .selected_text(lang_text)
                         .show_ui(ui, |ui| {
@@ -672,7 +691,8 @@ impl eframe::App for Git2PkgApp {
                             }
                         });
 
-                    let engine_text = format!("{} {}", texts.status_engine(), self.engine_mode.label());
+                    let engine_text =
+                        format!("{} {}", texts.status_engine(), self.engine_mode.label());
                     egui::ComboBox::from_id_salt("engine")
                         .selected_text(engine_text)
                         .show_ui(ui, |ui| {
@@ -841,7 +861,9 @@ impl eframe::App for Git2PkgApp {
             } else if open_clicked {
                 if let Err(error) = Command::new("xdg-open").arg(&self.output_dir).spawn() {
                     self.error = Some(
-                        self.texts().open_folder_error().replace("{}", &error.to_string()),
+                        self.texts()
+                            .open_folder_error()
+                            .replace("{}", &error.to_string()),
                     );
                 }
             } else if close_clicked {
@@ -878,10 +900,14 @@ impl eframe::App for Git2PkgApp {
         if self.retry_dialog {
             let title = self.texts().retry_failed_title().to_string();
             let reason_label = self.texts().retry_failed_reason().to_string();
-            let reason = self
-                .error
-                .clone()
-                .unwrap_or_else(|| self.log.lines().rev().find(|s| !s.trim().is_empty()).unwrap_or("").to_string());
+            let reason = self.error.clone().unwrap_or_else(|| {
+                self.log
+                    .lines()
+                    .rev()
+                    .find(|s| !s.trim().is_empty())
+                    .unwrap_or("")
+                    .to_string()
+            });
             let question = self.texts().retry_failed_question().to_string();
             let yes = self.texts().retry_failed_yes().to_string();
             let no = self.texts().retry_failed_cancel().to_string();
@@ -997,9 +1023,8 @@ impl eframe::App for Git2PkgApp {
                     if ui.button(texts.open_dir()).clicked() {
                         self.sync_output_dir();
                         if let Err(error) = Command::new("xdg-open").arg(&self.output_dir).spawn() {
-                            self.error = Some(
-                                texts.open_folder_error().replace("{}", &error.to_string()),
-                            );
+                            self.error =
+                                Some(texts.open_folder_error().replace("{}", &error.to_string()));
                         }
                     }
                     if ui.button(texts.save_recipe()).clicked() {
@@ -1055,7 +1080,8 @@ impl eframe::App for Git2PkgApp {
                         ui.group(|ui| {
                             let label_area = 130.0_f32;
                             let button_area = 130.0_f32;
-                            let field_width = (input_width - label_area - button_area - 16.0).max(120.0);
+                            let field_width =
+                                (input_width - label_area - button_area - 16.0).max(120.0);
 
                             // Zeile 1: Repository-URL + Build-Button rechts bündig.
                             ui.horizontal_wrapped(|ui| {
@@ -1073,8 +1099,7 @@ impl eframe::App for Git2PkgApp {
                                         .any(|event| matches!(event, egui::Event::Paste(_)))
                                 });
                                 let clear_width = 24.0_f32;
-                                let url_field_width =
-                                    (field_width - clear_width - 4.0).max(100.0);
+                                let url_field_width = (field_width - clear_width - 4.0).max(100.0);
                                 let mut response_slot = None;
                                 let mut clear_clicked = false;
                                 ui.allocate_ui_with_layout(
@@ -1100,8 +1125,8 @@ impl eframe::App for Git2PkgApp {
                                             .clicked();
                                     },
                                 );
-                                let url_response = response_slot
-                                    .expect("URL-Textfeld wurde nicht erzeugt");
+                                let url_response =
+                                    response_slot.expect("URL-Textfeld wurde nicht erzeugt");
                                 if clear_clicked {
                                     self.url.clear();
                                     url_response.request_focus();
@@ -1132,9 +1157,8 @@ impl eframe::App for Git2PkgApp {
                                     if let Some(mut state) =
                                         egui::TextEdit::load_state(ui.ctx(), id)
                                     {
-                                        let end = egui::text::CCursor::new(
-                                            self.url.chars().count(),
-                                        );
+                                        let end =
+                                            egui::text::CCursor::new(self.url.chars().count());
                                         state.cursor.set_char_range(Some(
                                             egui::text::CCursorRange::one(end),
                                         ));
@@ -1175,14 +1199,14 @@ impl eframe::App for Git2PkgApp {
                                         ui.label(texts.target_format());
                                     },
                                 );
-                                let extension = match self.target_distro.family(&self.distro.family) {
+                                let extension = match self.target_distro.family(&self.distro.family)
+                                {
                                     DistroFamily::Arch => ".pkg.tar.zst",
                                     DistroFamily::Debian => ".deb",
                                     DistroFamily::Fedora | DistroFamily::Suse => ".rpm",
                                     DistroFamily::Unknown => ".pkg.tar.zst",
                                 };
-                                let auto_label =
-                                    texts.target_auto(extension, &self.distro.name);
+                                let auto_label = texts.target_auto(extension, &self.distro.name);
                                 let selected = match self.target_distro {
                                     TargetDistro::Auto => auto_label.clone(),
                                     TargetDistro::Arch => texts.target_arch().to_string(),
@@ -1259,10 +1283,13 @@ impl eframe::App for Git2PkgApp {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         if ui.button(texts.browse()).clicked() {
-                                            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                            if let Some(folder) =
+                                                rfd::FileDialog::new().pick_folder()
+                                            {
                                                 self.output_dir = folder.clone();
                                                 self.output_dir_text =
                                                     folder.to_string_lossy().into_owned();
+                                                self.persist_settings();
                                             }
                                         }
                                     },
@@ -1347,6 +1374,8 @@ impl eframe::App for Git2PkgApp {
                 .map(|state| !state.cursor.is_empty())
                 .unwrap_or(false)
                 || (self.log_hovered && ui.input(|input| input.pointer.primary_down()));
+            let saved_selection = egui::TextEdit::load_state(ctx, log_id);
+            let secondary_click = ui.input(|input| input.pointer.secondary_clicked());
             let mut log_hovered = false;
             egui::ScrollArea::both()
                 .stick_to_bottom(self.building && !selection_active)
@@ -1364,6 +1393,51 @@ impl eframe::App for Git2PkgApp {
                             .text_color(log_line_color("", dark)),
                     );
                     log_hovered = response.hovered();
+                    if secondary_click && log_hovered {
+                        // Ein Secondary Click setzt bei egui sonst den Cursor
+                        // zurück und löscht die laufende Markierung.
+                        if let Some(saved) = saved_selection {
+                            egui::TextEdit::store_state(ctx, log_id, saved);
+                        }
+                        let texts = self.texts();
+                        let snapshot = self.log_snapshot.clone();
+                        response.context_menu(|ui| {
+                            if ui.button(texts.context_copy()).clicked() {
+                                let selected = egui::TextEdit::load_state(ui.ctx(), log_id)
+                                    .and_then(|state| state.cursor.char_range())
+                                    .and_then(|range| {
+                                        if range.is_empty() {
+                                            return None;
+                                        }
+                                        let char_range = range.as_sorted_char_range();
+                                        let chars: Vec<char> = snapshot.chars().collect();
+                                        if char_range.end > chars.len() {
+                                            return None;
+                                        }
+                                        Some(
+                                            chars[char_range.start..char_range.end]
+                                                .iter()
+                                                .collect::<String>(),
+                                        )
+                                    })
+                                    .filter(|text| !text.is_empty())
+                                    .unwrap_or_else(|| snapshot.clone());
+                                ui.ctx().copy_text(selected);
+                            }
+                            if ui.button(texts.context_select_all()).clicked() {
+                                let mut state = egui::TextEdit::load_state(ui.ctx(), log_id)
+                                    .unwrap_or_default();
+                                let end = egui::text::CCursor::new(snapshot.chars().count());
+                                state
+                                    .cursor
+                                    .set_char_range(Some(egui::text::CCursorRange::two(
+                                        egui::text::CCursor::new(0),
+                                        end,
+                                    )));
+                                egui::TextEdit::store_state(ui.ctx(), log_id, state);
+                            }
+                        });
+                    }
                     if self.building {
                         let dim = if dark {
                             egui::Color32::from_gray(150)
@@ -1384,45 +1458,43 @@ impl eframe::App for Git2PkgApp {
 
 /// Fortschritt aus echten Log-Signalen ableiten, monoton und nie rückwärts.
 fn progress_from_line(current: f32, line: &str, cargo_crates: u32) -> f32 {
-        let lower = line.to_ascii_lowercase();
-        let next = if lower.contains("clone")
-            || lower.contains("receiving objects")
-            || lower.contains("resolving deltas")
-        {
-            extract_percent(line)
-                .map(|value| 0.15 * value)
-                .unwrap_or_else(|| current.clamp(0.03, 0.15))
-        } else if lower.contains("setup") || lower.contains("install") {
-            0.15
-                + extract_percent(line)
-                    .map(|value| 0.15 * value)
-                    .unwrap_or(0.08)
-        } else if lower.contains("starting package()")
-            || lower.contains("dpkg-deb")
-            || lower.contains("rpmbuild")
-            || lower.contains("makepkg")
-        {
-            current.max(0.85)
-        } else if lower.contains("verif") || lower.contains("prüf") {
-            current.max(0.95)
-        } else if let Some((done, total)) = extract_fraction(line) {
-            0.30 + 0.55 * (done / total)
-        } else if let Some(value) = extract_percent(line) {
-            0.30 + 0.55 * value
-        } else if lower.contains("finished") && lower.contains("target(s)") {
-            0.85
-        } else if lower.contains("compiling") {
-            let crates = cargo_crates.max(1) as f32;
-            0.30 + 0.52 * (1.0 - 1.0 / (1.0 + crates / 120.0))
-        } else if lower.contains("[") {
-            (current + 0.012).min(0.83)
-        } else {
-            current
-        };
-        next.max(current)
+    let lower = line.to_ascii_lowercase();
+    let next = if lower.contains("clone")
+        || lower.contains("receiving objects")
+        || lower.contains("resolving deltas")
+    {
+        extract_percent(line)
+            .map(|value| 0.15 * value)
+            .unwrap_or_else(|| current.clamp(0.03, 0.15))
+    } else if lower.contains("setup") || lower.contains("install") {
+        0.15 + extract_percent(line)
+            .map(|value| 0.15 * value)
+            .unwrap_or(0.08)
+    } else if lower.contains("starting package()")
+        || lower.contains("dpkg-deb")
+        || lower.contains("rpmbuild")
+        || lower.contains("makepkg")
+    {
+        current.max(0.85)
+    } else if lower.contains("verif") || lower.contains("prüf") {
+        current.max(0.95)
+    } else if let Some((done, total)) = extract_fraction(line) {
+        0.30 + 0.55 * (done / total)
+    } else if let Some(value) = extract_percent(line) {
+        0.30 + 0.55 * value
+    } else if lower.contains("finished") && lower.contains("target(s)") {
+        0.85
+    } else if lower.contains("compiling") {
+        let crates = cargo_crates.max(1) as f32;
+        0.30 + 0.52 * (1.0 - 1.0 / (1.0 + crates / 120.0))
+    } else if lower.contains("[") {
+        (current + 0.012).min(0.83)
+    } else {
+        current
+    };
+    next.max(current)
         .min(if lower.contains("setup") { 0.30 } else { 1.0 })
 }
-
 
 /// Findet die erste Prozentangabe, z. B. `45%`, `[ 28%]` oder `100 %`.
 fn extract_percent(text: &str) -> Option<f32> {
@@ -1515,7 +1587,10 @@ mod tests {
 
     #[test]
     fn fortschritt_wird_aus_log_signalen_lesen() {
-        assert_eq!(extract_percent("Receiving objects: 45% (123/456)"), Some(0.45));
+        assert_eq!(
+            extract_percent("Receiving objects: 45% (123/456)"),
+            Some(0.45)
+        );
         assert_eq!(extract_percent("[ 28%] Building CXX object"), Some(0.28));
         assert_eq!(extract_fraction("[140/420] Linking"), Some((140.0, 420.0)));
         assert!(progress_from_line(0.2, "== git2pkg: Setup ==", 0) <= 0.30);
@@ -1542,7 +1617,9 @@ mod tests {
 
     #[test]
     fn erkennt_nur_systempakete_fuer_install_dialog() {
-        assert!(is_system_package(Path::new("/tmp/repo-1.0-1-x86_64.pkg.tar.zst")));
+        assert!(is_system_package(Path::new(
+            "/tmp/repo-1.0-1-x86_64.pkg.tar.zst"
+        )));
         assert!(is_system_package(Path::new("/tmp/repo_1.0_amd64.deb")));
         assert!(is_system_package(Path::new("/tmp/repo-1.0-1.x86_64.rpm")));
         assert!(!is_system_package(Path::new("/tmp/repo")));

@@ -51,9 +51,9 @@ done"#.to_string(),
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::packaging::PackageArch;
     use crate::core::container::BuildStrategy;
     use crate::core::distro::DistroFamily;
+    use crate::core::packaging::PackageArch;
 
     #[test]
     fn control_enthaelt_dynamic_depends() {

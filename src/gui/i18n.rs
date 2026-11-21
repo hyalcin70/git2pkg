@@ -5,6 +5,7 @@
 //! ermittelt; `de*` → Deutsch, `tr*` → Türkisch, `es*` → Spanisch,
 //! `fr*` → Französisch, alles andere → Englisch.
 
+use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +74,8 @@ impl Language {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
     Auto,
     Light,
@@ -218,11 +220,21 @@ impl Texts {
 
     pub fn target_auto(&self, extension: &str, distro: &str) -> String {
         match self.lang {
-            Language::En => format!("Auto \u{2014} native system package ({extension} \u{2014} {distro})"),
-            Language::De => format!("Auto \u{2014} Natives Systempaket ({extension} \u{2014} {distro})"),
-            Language::Tr => format!("Otomatik \u{2014} yerel sistem paketi ({extension} \u{2014} {distro})"),
-            Language::Es => format!("Auto \u{2014} paquete del sistema nativo ({extension} \u{2014} {distro})"),
-            Language::Fr => format!("Auto \u{2014} paquet système natif ({extension} \u{2014} {distro})"),
+            Language::En => {
+                format!("Auto \u{2014} native system package ({extension} \u{2014} {distro})")
+            }
+            Language::De => {
+                format!("Auto \u{2014} Natives Systempaket ({extension} \u{2014} {distro})")
+            }
+            Language::Tr => {
+                format!("Otomatik \u{2014} yerel sistem paketi ({extension} \u{2014} {distro})")
+            }
+            Language::Es => {
+                format!("Auto \u{2014} paquete del sistema nativo ({extension} \u{2014} {distro})")
+            }
+            Language::Fr => {
+                format!("Auto \u{2014} paquet système natif ({extension} \u{2014} {distro})")
+            }
         }
     }
 
@@ -436,6 +448,18 @@ impl Texts {
             "Copier le journal",
         )
     }
+    pub fn context_copy(&self) -> &'static str {
+        self.get("Copy", "Kopieren", "Kopyala", "Copiar", "Copier")
+    }
+    pub fn context_select_all(&self) -> &'static str {
+        self.get(
+            "Select all",
+            "Alles auswählen",
+            "Tümünü seç",
+            "Seleccionar todo",
+            "Tout sélectionner",
+        )
+    }
     #[allow(dead_code)]
     pub fn retry_alternative(&self) -> &'static str {
         self.get(
@@ -468,13 +492,7 @@ impl Texts {
         )
     }
     pub fn failed_step(&self) -> &'static str {
-        self.get(
-            "Failed",
-            "Fehlgeschlagen",
-            "Başarısız",
-            "Fallido",
-            "Échec",
-        )
+        self.get("Failed", "Fehlgeschlagen", "Başarısız", "Fallido", "Échec")
     }
     pub fn thread_error(&self) -> &'static str {
         self.get(
@@ -799,7 +817,13 @@ impl Texts {
     pub fn log_setup(&self, manager: &str) -> String {
         format!(
             "== git2pkg: {} ({}) ==",
-            self.get("Setup", "Setup", "Kurulum", "Configuración", "Configuration"),
+            self.get(
+                "Setup",
+                "Setup",
+                "Kurulum",
+                "Configuración",
+                "Configuration"
+            ),
             manager
         )
     }
@@ -870,14 +894,26 @@ impl Texts {
     pub fn cli_install(&self, command: &str) -> String {
         format!(
             "{} {}",
-            self.get("Install:", "Installieren:", "Kurulum:", "Instalar:", "Installer :"),
+            self.get(
+                "Install:",
+                "Installieren:",
+                "Kurulum:",
+                "Instalar:",
+                "Installer :"
+            ),
             command
         )
     }
     pub fn cli_failed(&self, error: &str) -> String {
         format!(
             "{} {}",
-            self.get("==> Error:", "==> Fehler:", "==> Hata:", "==> Error:", "==> Erreur :"),
+            self.get(
+                "==> Error:",
+                "==> Fehler:",
+                "==> Hata:",
+                "==> Error:",
+                "==> Erreur :"
+            ),
             error
         )
     }
@@ -983,13 +1019,7 @@ impl Texts {
         )
     }
     pub fn retry_failed_reason(&self) -> &'static str {
-        self.get(
-            "Reason:",
-            "Grund:",
-            "Neden:",
-            "Motivo:",
-            "Raison :",
-        )
+        self.get("Reason:", "Grund:", "Neden:", "Motivo:", "Raison :")
     }
     pub fn retry_failed_question(&self) -> &'static str {
         self.get(
@@ -1096,13 +1126,23 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for lang in Language::ALL {
             let texts = Texts::new(lang);
-            assert!(seen.insert(texts.build_start()), "doppelter Text für {:?}", lang);
+            assert!(
+                seen.insert(texts.build_start()),
+                "doppelter Text für {:?}",
+                lang
+            );
         }
         assert_eq!(Texts::new(Language::De).build_start(), "Build starten");
         assert_eq!(Texts::new(Language::En).build_start(), "Start build");
         assert_eq!(Texts::new(Language::Tr).build_start(), "Derlemeyi başlat");
-        assert_eq!(Texts::new(Language::Es).build_start(), "Iniciar compilación");
-        assert_eq!(Texts::new(Language::Fr).build_start(), "Lancer la compilation");
+        assert_eq!(
+            Texts::new(Language::Es).build_start(),
+            "Iniciar compilación"
+        );
+        assert_eq!(
+            Texts::new(Language::Fr).build_start(),
+            "Lancer la compilation"
+        );
     }
 
     #[test]
@@ -1163,13 +1203,7 @@ mod tests {
 
     #[test]
     fn strategie_und_runde_werden_angezeigt() {
-        let text = Texts::new(Language::De).step_strategy_round(
-            "System-Bibliotheken",
-            2,
-            4,
-            1,
-            10,
-        );
+        let text = Texts::new(Language::De).step_strategy_round("System-Bibliotheken", 2, 4, 1, 10);
         assert!(text.contains("Strategie 2/4"), "{}", text);
         assert!(text.contains("System-Bibliotheken"), "{}", text);
         assert!(text.contains("Runde 1/10"), "{}", text);
