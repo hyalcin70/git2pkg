@@ -87,11 +87,20 @@ fn print_usage() {
     println!("  --target=auto|arch|debian|fedora|opensuse");
     println!("                                  Target distribution (default: auto)");
     println!("  --binary                        Alias for --format=binary");
+    println!("  -V, --version                   Show the version");
     println!("  -h, --help                      Show this help");
 }
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = env::args().collect();
+    if args
+        .iter()
+        .skip(1)
+        .any(|arg| arg == "-V" || arg == "--version")
+    {
+        println!("git2pkg {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args
         .iter()
         .skip(1)
@@ -120,7 +129,7 @@ fn main() -> eframe::Result<()> {
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([1145.0, 780.0])
         .with_min_inner_size([785.0, 520.0])
-        .with_title("git2pkg");
+        .with_title(format!("git2pkg v{}", env!("CARGO_PKG_VERSION")));
     let viewport = match app_icon() {
         Some(icon) => viewport.with_icon(icon),
         None => viewport,
