@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=git2pkg
+GenericName=Package Builder
+Comment=Isolated package builds from Git repositories
+Exec=git2pkg
+Icon=git2pkg
+Terminal=false
+Categories=Development;
+Keywords=package;build;git;container;
+StartupNotify=true

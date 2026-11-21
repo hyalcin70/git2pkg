@@ -26,6 +26,8 @@ package() {
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/pixmaps/$pkgname.png"
 
+  install -Dm644 packaging/git2pkg.desktop "$pkgdir/usr/share/applications/git2pkg.desktop"
+
   # Desktop- und Icon-Dateien liegen je nach Projekt in assets/ oder packaging/.
   for f in assets/*.desktop packaging/*.desktop; do
     [ -f "$f" ] || continue

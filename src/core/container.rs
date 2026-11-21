@@ -1465,8 +1465,7 @@ fn build_script(config: &BuildConfig, system: &BuildSystem, extra: &[String]) ->
 ///
 /// Generisches Nachinstallieren von Desktop-Dateien und deren Icons.
 /// Wirkt für jedes Build-System und jede Distribution - ohne Projektname.
-fn asset_staging_step() -> &'static str {
-    r#"
+const ASSET_STAGING_SCRIPT: &str = r#"
 mkdir -p "$pkgdir/usr/share/applications" \
   "$pkgdir/usr/share/icons/hicolor/scalable/apps" \
   "$pkgdir/usr/share/icons/hicolor/256x256/apps" \
@@ -1608,9 +1607,26 @@ while IFS= read -r -d '' desktop; do
   install_icons "$icon" "$name"
 done < <(find_repo_assets | while IFS= read -r -d '' f; do case "$f" in *.desktop|*.desktop.in) printf '%s\0' "$f" ;; esac; done)
 if [ "$desktop_count" -eq 0 ]; then
-  install_icons "${PKG_NAME:-package}" "${PKG_NAME:-package}"
+  target="$pkgdir/usr/share/applications/$PKG_NAME.desktop"
+  cat > "$target" <<DESKTOP_EOF
+[Desktop Entry]
+Type=Application
+Name=$PKG_NAME
+Exec=$PKG_NAME
+Icon=$PKG_NAME
+Categories=Utility;
+DESKTOP_EOF
+  chmod 0644 "$target" 2>/dev/null || true
+  install_icons "$PKG_NAME" "$PKG_NAME"
 fi
-"#
+"#;
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\\''"))
+}
+
+fn asset_staging_step(pkg_name: &str) -> String {
+    format!("PKG_NAME={}\n{}", shell_quote(pkg_name), ASSET_STAGING_SCRIPT)
 }
 
 fn build_step_text(system: &BuildSystem, strategy: BuildStrategy, repo_script: Option<&str>) -> String {
@@ -1716,7 +1732,7 @@ fn build_script_with(
 
     let build_step = build_step_text(system, strategy, repo_script);
     let install_step = project_install_step(system, &identity.name);
-    let asset_step = asset_staging_step();
+    let asset_step = asset_staging_step(&identity.name);
     let pkg_ctx = crate::core::packaging::PackageContext {
         name: &identity.name,
         version: &identity.version,
@@ -1727,7 +1743,7 @@ fn build_script_with(
         build_step: &build_step,
         install_step: &install_step,
         is_cargo: system == &BuildSystem::Cargo,
-        asset_step,
+        asset_step: &asset_step,
     };
 
     match &config.target {
@@ -1993,7 +2009,9 @@ mod tests {
 
     #[test]
     fn asset_staging_findet_desktop_dateien_in_unterordnern() {
-        let script = asset_staging_step();
+        let script = asset_staging_step("example-app");
+        assert!(script.contains("PKG_NAME='example-app'"));
+        assert!(!script.contains(":-package"));
         assert!(script.contains("-maxdepth 4"));
         assert!(script.contains("*.desktop.in"));
         assert!(script.contains("@EXEC@"));
@@ -2063,7 +2081,7 @@ mod tests {
             "pkgdir='{}'; cd '{}'; {}",
             out.display(),
             repo.display(),
-            asset_staging_step()
+            asset_staging_step("example-app")
         );
         let status = std::process::Command::new("bash")
             .arg("-c")
@@ -2087,6 +2105,68 @@ mod tests {
         assert!(fs::read_to_string(&desktop).unwrap().contains("Icon=sample-tool"));
         assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
         assert_eq!(fs::metadata(&icon).unwrap().permissions().mode() & 0o777, 0o644);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn asset_staging_erzeugt_fallback_desktop_mit_pkg_name() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-fallback-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let repo = root.join("repo");
+        let out = root.join("out");
+        fs::create_dir_all(repo.join("assets")).unwrap();
+
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&48u32.to_be_bytes());
+        png.extend_from_slice(&48u32.to_be_bytes());
+        png.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+        fs::write(repo.join("assets/app_icon.png"), png).unwrap();
+
+        let command = format!(
+            "pkgdir='{}'; cd '{}'; {}",
+            out.display(),
+            repo.display(),
+            asset_staging_step("sample-tool")
+        );
+        let status = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(&command)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let desktop = out.join("usr/share/applications/sample-tool.desktop");
+        let icon = out.join("usr/share/icons/hicolor/48x48/apps/sample-tool.png");
+        assert!(desktop.is_file(), "Fallback-Desktop fehlt");
+        assert!(icon.is_file(), "Icon wurde nicht unter sample-tool.png installiert");
+        let desktop_text = fs::read_to_string(&desktop).unwrap();
+        assert!(desktop_text.contains("Name=sample-tool"));
+        assert!(desktop_text.contains("Exec=sample-tool"));
+        assert!(desktop_text.contains("Icon=sample-tool"));
+        assert_eq!(fs::metadata(&desktop).unwrap().permissions().mode() & 0o777, 0o644);
+        assert_eq!(fs::metadata(&icon).unwrap().permissions().mode() & 0o777, 0o644);
+
+        assert!(
+            !out.join("usr/share/pixmaps/package.png").exists(),
+            "Fallback-Name package.png darf nicht entstehen"
+        );
+        assert_eq!(
+            fs::read_dir(out.join("usr/share/applications"))
+                .unwrap()
+                .count(),
+            1,
+            "usr/share/applications darf nicht leer sein"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2592,7 +2672,7 @@ mod tests {
                 "Install-Schritt für {system:?} legt usr/bin nicht an"
             );
         }
-        let assets = asset_staging_step();
+        let assets = asset_staging_step("example-app");
         assert!(assets.contains("mkdir -p \"$pkgdir/usr/share/applications\""));
     }
 

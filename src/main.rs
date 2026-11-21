@@ -114,8 +114,8 @@ fn main() -> eframe::Result<()> {
     }
 
     let viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1120.0, 780.0])
-        .with_min_inner_size([760.0, 520.0])
+        .with_inner_size([1145.0, 780.0])
+        .with_min_inner_size([785.0, 520.0])
         .with_title("git2pkg");
     let viewport = match app_icon() {
         Some(icon) => viewport.with_icon(icon),
