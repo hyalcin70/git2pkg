@@ -510,6 +510,23 @@ impl MappingStore {
         }
     }
 
+    /// Merkt sich frisch gelernte Pakete pro Repository, damit sie im naechsten
+    /// Anlauf bereits im initialen Setup installiert werden koennen.
+    pub fn record_repo_packages(&mut self, url: &str, signature: &str, packages: &[String]) {
+        let key = format!("repo:{}", repo_hash(url));
+        let mut recipe = self
+            .build_recipes
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| BuildRecipe {
+                signature: signature.to_string(),
+                ..BuildRecipe::default()
+            });
+        recipe.packages = packages.to_vec();
+        self.build_recipes.insert(key, recipe);
+        self.save();
+    }
+
     /// Erst der exakte Repo-Treffer, dann die allgemeine Struktur-Signatur.
     pub fn apply_learned_recipe(&self, url: &str, signature: &str) -> Option<(BuildRecipe, bool)> {
         self.build_recipes
@@ -657,6 +674,20 @@ pub fn valid_package_name(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "-_+.".contains(c))
+}
+
+/// Erkennt, dass ein Repository-Buildskript die Linux-Distribution ablehnt.
+/// Der Runner soll dann auf das generische Build-System zurueckfallen.
+pub fn detect_repo_script_distro_rejection(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    [
+        "distribution does not appear to be currently supported",
+        "unsupported distribution",
+        "unsupported distro",
+        "not supported on this os",
+    ]
+    .iter()
+    .any(|pattern| lower.contains(pattern))
 }
 
 /// Erkennt Fehler, bei denen die System-`rustc` zu alt für Crate-Anforderungen ist.
@@ -1338,6 +1369,50 @@ mod tests {
         assert!(!package_lacks_executable("-rwxr-xr-x 0 0 12 usr/bin/repo"));
         assert!(is_compiled_build_system("Cargo (Rust)"));
         assert!(!is_compiled_build_system("Unknown"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn distro_ablehnung_von_repo_skripten_wird_erkannt() {
+        assert!(detect_repo_script_distro_rejection(
+            "Your distribution does not appear to be currently supported by these build scripts"
+        ));
+        assert!(detect_repo_script_distro_rejection(
+            "unsupported distribution"
+        ));
+        assert!(detect_repo_script_distro_rejection(
+            "Unsupported distro: example"
+        ));
+        assert!(detect_repo_script_distro_rejection(
+            "not supported on this os"
+        ));
+        assert!(!detect_repo_script_distro_rejection(
+            "error: could not compile"
+        ));
+    }
+
+    #[test]
+    fn gelernte_repo_pakete_werden_sofort_wiedergefunden() {
+        let dir = std::env::temp_dir().join(format!(
+            "git2pkg-repo-packages-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let path = dir.join("learned_mappings.json");
+        let mut store = MappingStore::from_path(path.clone());
+        let packages = vec!["libpng".to_string(), "pkgconf".to_string()];
+        store.record_repo_packages("example-app", "cmake", &packages);
+
+        let reloaded = MappingStore::from_path(path);
+        let (recipe, exact) = reloaded
+            .apply_learned_recipe("example-app", "cmake")
+            .unwrap();
+        assert!(exact);
+        assert_eq!(recipe.signature, "cmake");
+        assert_eq!(recipe.packages, packages);
         let _ = fs::remove_dir_all(dir);
     }
 }

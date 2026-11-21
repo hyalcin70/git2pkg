@@ -6,9 +6,10 @@
 use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem, ProjectFingerprint};
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::{
-    analyze_output, candidate_names, detect_build_fixes, detect_source_group_error, family_key,
-    is_compiled_build_system, package_from_search, package_lacks_executable, probe_commands,
-    search_command, valid_package_name, BuildRecipe, MappingStore, MissingDep, SourceGroupError,
+    analyze_output, candidate_names, detect_build_fixes, detect_repo_script_distro_rejection,
+    detect_source_group_error, family_key, is_compiled_build_system, package_from_search,
+    package_lacks_executable, probe_commands, search_command, valid_package_name, BuildRecipe,
+    MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -704,7 +705,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
     }
 
-    let repo_script = config
+    let mut repo_script = config
         .repo_script
         .clone()
         .or_else(|| find_repo_script(&src));
@@ -716,6 +717,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     )));
 
     let fingerprint = ProjectFingerprint::from_root(&src);
+    let mut learned_packages: Vec<String> = Vec::new();
     if let Some((recipe, _exact)) =
         mappings.apply_learned_recipe(&config.url, &fingerprint.signature)
     {
@@ -726,10 +728,21 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         config.cmake_compat |= recipe.cmake_compat;
         config.cstdint_fix |= recipe.cstdint_fix;
         config.submodule_fix |= recipe.submodule_fix;
+        learned_packages = recipe
+            .packages
+            .into_iter()
+            .filter(|name| valid_package_name(name))
+            .collect();
         let _ = tx.send(BuildEvent::Log(format!(
             "[learn] Bekannte Bauweise für Struktur '{}' angewendet",
             fingerprint.signature
         )));
+        if !learned_packages.is_empty() {
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[learn] Gespeicherte Pakete für diesen Build vorinstallieren: {}",
+                learned_packages.join(" ")
+            )));
+        }
     }
 
     if config.strategy == BuildStrategy::RepoScript {
@@ -777,7 +790,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         });
     }
     let mut db_synced = false;
-    let mut extra_packages: Vec<String> = Vec::new();
+    let mut extra_packages: Vec<String> = learned_packages;
     let mut last_output = String::new();
     let mut forced_strategy: Option<BuildStrategy> = None;
     let mut direct_tried = false;
@@ -875,6 +888,24 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
         last_output = result.text.clone();
         let deps_failed = deps_fallback_needed(&last_output, config.skip_deps);
+
+        // Repo-Skripte pruefen oft nur wenige Distributionen. Wenn sie diese
+        // Distro ablehnen, generisch weiterbauen statt den Lauf zu beenden.
+        if effective_strategy == BuildStrategy::RepoScript
+            && detect_repo_script_distro_rejection(&last_output)
+        {
+            let _ = tx.send(BuildEvent::Log(
+                "[fallback] Repo-Buildskript unterstuetzt diese Distribution nicht - wechsle zum generischen Build-System"
+                    .to_string(),
+            ));
+            repo_script = None;
+            strategy_attempt += 1;
+            heal_round = 1;
+            allowed_rounds = INITIAL_HEAL_ROUNDS;
+            config.skip_deps = false;
+            forced_strategy = Some(BuildStrategy::Default);
+            continue 'attempt;
+        }
 
         if result.text.contains(OK_MARKER) {
             if !verify_built_packages(
@@ -1145,8 +1176,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 )));
             }
             if !extra_packages.contains(&package) {
-                extra_packages.push(package);
+                extra_packages.push(package.clone());
             }
+            mappings.record_repo_packages(&config.url, &fingerprint.signature, &extra_packages);
         }
         if heal_round >= allowed_rounds {
             let next = effective_strategy.next(has_deps);
@@ -1369,7 +1401,9 @@ fn install_packages_command(family: &DistroFamily, packages: &[String]) -> Strin
     }
     let list = cleaned.join(" ");
     match family {
-        DistroFamily::Arch => format!("yes '' | pacman -S --noconfirm --needed -- {}", list),
+        // `pacman --noconfirm` reicht; `yes | pacman` liefert unter pipefail
+        // beim Schliessen der Pipe einen harmlosen SIGPIPE (141).
+        DistroFamily::Arch => format!("pacman -S --noconfirm --needed -- {}", list),
         DistroFamily::Debian => {
             format!("DEBIAN_FRONTEND=noninteractive apt-get install -y {}", list)
         }
@@ -2081,7 +2115,7 @@ mod tests {
             &BuildSystem::CMake,
             &["foo (bar)".to_string()],
         );
-        assert!(script.contains("yes '' | pacman -S --noconfirm --needed -- foo"));
+        assert!(script.contains("pacman -S --noconfirm --needed -- foo"));
         assert!(!script.contains("--needed foo (bar)"));
     }
 
@@ -2658,7 +2692,7 @@ mod tests {
             &DistroFamily::Arch,
             &["libpng".to_string(), "eigen".to_string()],
         );
-        assert!(cmd.contains("yes '' | pacman -S --noconfirm --needed -- libpng eigen"));
+        assert!(cmd.contains("pacman -S --noconfirm --needed -- libpng eigen"));
     }
 
     #[test]
@@ -2667,6 +2701,27 @@ mod tests {
         assert_eq!(sanitize_package("--foundexpat:/usr/lib/libexpat.so"), "");
         assert_eq!(sanitize_package("-boom"), "");
         assert_eq!(sanitize_package("libpng-dev"), "libpng-dev");
+    }
+
+    #[test]
+    fn paketinstallation_vermeidet_sippipe_pipelinen() {
+        assert_eq!(
+            install_packages_command(&DistroFamily::Arch, &["libpng".to_string()]),
+            "pacman -S --noconfirm --needed -- libpng"
+        );
+        for family in [
+            DistroFamily::Arch,
+            DistroFamily::Debian,
+            DistroFamily::Fedora,
+            DistroFamily::Suse,
+        ] {
+            let script = build_script(
+                &config(family.clone(), TargetFormat::NativePackage),
+                &BuildSystem::Cargo,
+                &["libpng".to_string()],
+            );
+            assert!(!script.contains("yes '' |"), "{:?}", family);
+        }
     }
 
     #[test]
@@ -2708,6 +2763,11 @@ mod tests {
             );
             assert!(script.contains("set -e"), "{:?}", family);
             assert!(script.contains("set -o pipefail"), "{:?}", family);
+            assert!(
+                !script.contains("yes '' |"),
+                "{:?}: SIGPIPE-Pipeline",
+                family
+            );
             let check = script
                 .find("__GIT2PKG_NO_ARTIFACT__")
                 .expect("artefaktcheck");
@@ -2870,7 +2930,7 @@ mod tests {
             &BuildSystem::CMake,
             &["openssl".to_string()],
         );
-        assert!(script.contains("yes '' | pacman -S --noconfirm --needed -- openssl"));
+        assert!(script.contains("pacman -S --noconfirm --needed -- openssl"));
         assert!(script.contains("cmake -S . -B build"));
         assert!(script.contains("export CMAKE_POLICY_VERSION_MINIMUM=3.5"));
         assert!(script.contains("-DCMAKE_POLICY_VERSION_MINIMUM=3.5"));
