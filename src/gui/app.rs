@@ -810,10 +810,11 @@ impl eframe::App for Git2PkgApp {
         let mut close_clicked = false;
         egui::Window::new(texts.info_title())
             .open(&mut about_open)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .default_pos(ctx.available_rect().center() - egui::vec2(220.0, 140.0))
             .resizable(false)
             .collapsible(false)
             .movable(true)
+            .constrain(true)
             .show(ctx, |ui| {
                 if let Some(texture) = &self.app_icon {
                     ui.vertical_centered(|ui| {
@@ -885,10 +886,11 @@ impl eframe::App for Git2PkgApp {
             let mut install_clicked = false;
             let mut open_clicked = false;
             egui::Window::new(&title)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .default_pos(ctx.available_rect().center() - egui::vec2(220.0, 140.0))
                 .resizable(false)
                 .collapsible(false)
                 .movable(true)
+                .constrain(true)
                 .show(ctx, |ui| {
                     ui.label(&body);
                     ui.monospace(package.to_string_lossy());
@@ -941,10 +943,11 @@ impl eframe::App for Git2PkgApp {
             let mut close = false;
             egui::Window::new(&title)
                 .open(&mut open)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .default_pos(ctx.available_rect().center() - egui::vec2(220.0, 140.0))
                 .resizable(false)
                 .collapsible(false)
                 .movable(true)
+                .constrain(true)
                 .show(ctx, |ui| {
                     ui.set_max_width(440.0);
                     ui.label(&body);
@@ -976,10 +979,11 @@ impl eframe::App for Git2PkgApp {
             let mut retry = false;
             let mut cancel = false;
             egui::Window::new(&title)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .default_pos(ctx.available_rect().center() - egui::vec2(220.0, 140.0))
                 .resizable(false)
                 .collapsible(false)
                 .movable(true)
+                .constrain(true)
                 .show(ctx, |ui| {
                     ui.label(&reason_label);
                     ui.monospace(&reason);
@@ -1016,10 +1020,11 @@ impl eframe::App for Git2PkgApp {
             // 1 = alles, 2 = nur Build-Reste, 3 = nichts.
             let mut choice: u8 = 0;
             egui::Window::new(&title)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .default_pos(ctx.available_rect().center() - egui::vec2(220.0, 140.0))
                 .resizable(false)
                 .collapsible(false)
                 .movable(true)
+                .constrain(true)
                 .show(ctx, |ui| {
                     ui.label(&body);
                     ui.add_space(8.0);
