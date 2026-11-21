@@ -159,6 +159,8 @@ mettez une étoile au dépôt, partagez-le, signalez un bug avec le journal copi
 ou contribuez à une traduction. Aucune télémétrie, aucune obligation : l'outil
 fonctionne exactement de la même manière avec ou sans tout cela.
 
+> **Périmètre du projet et développement en solo :** `git2pkg` est un projet personnel indépendant développé sur mon temps libre. À partir de la phase Beta, le support (selon disponibilité) se concentrera strictement sur les grandes familles de distributions prises en charge (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** et **openSUSE**). Les distributions exotiques ou de niche ne sont explicitement pas prises en charge.
+
 ## Remerciements et transparence
 
 J'ai conçu et dirigé ce projet, et je l'ai développé avec l'aide d'outils

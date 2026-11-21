@@ -153,6 +153,8 @@ Repository einen Stern, teile es, melde einen Fehler mit kopiertem Log oder
 trag eine Übersetzung bei. Es gibt keine Telemetrie und keine Verpflichtung –
 das Tool funktioniert unabhängig davon genau gleich.
 
+> **Projektumfang & Ein-Personen-Projekt:** `git2pkg` ist ein unabhängiges Ein-Personen-Freizeitprojekt. Ab der Beta-Phase konzentriert sich der freiwillige Support nach verfügbarer Zeit strikt auf die unterstützten Haupt-Distributionsfamilien (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** und **openSUSE**). Exotische Spezial- oder Nischen-Distributionen werden ausdrücklich nicht unterstützt.
+
 ## Danksagung & Transparenz
 
 Ich habe dieses Projekt konzipiert und geleitet und es mit Unterstützung von

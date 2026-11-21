@@ -154,6 +154,8 @@ al repositorio, compártalo, informe de un error con el registro copiado o
 contribuya con una traducción. No hay telemetría ni obligación: la herramienta
 funciona exactamente igual con o sin todo ello.
 
+> **Alcance del proyecto y desarrollo individual:** `git2pkg` es un proyecto independiente desarrollado en mi tiempo libre por una sola persona. A partir de la fase Beta, el soporte (según disponibilidad) se centrará estrictamente en las principales familias de distribuciones compatibles (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** y **openSUSE**). Las distribuciones exóticas o de nicho no cuentan con soporte.
+
 ## Créditos y transparencia
 
 Diseñé y dirigí este proyecto y lo desarrollé con la ayuda de herramientas de

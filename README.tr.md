@@ -156,6 +156,8 @@ verin, paylaşın, kopyalanan günlükle bir hata bildirin veya bir çeviri
 katkısında bulunun. Telemetri yok, zorunluluk yok — araç bunların hiçbiri
 olmadan da aynı şekilde çalışır.
 
+> **Proje Kapsamı ve Tek Kişilik Geliştirme:** `git2pkg`, boş zamanlarımda geliştirdiğim bağımsız bir tek kişilik hobi projesidir. Beta aşamasından itibaren sağlanacak destek yalnızca desteklenen ana dağıtım aileleriyle (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** ve **openSUSE**) sınırlıdır. Egzotik veya niş Linux dağıtımları kesinlikle desteklenmemektedir.
+
 ## Teşekkürler ve şeffaflık
 
 Bu projeyi ben tasarladım ve yönlendirdim; geliştirirken yapay zekâ
