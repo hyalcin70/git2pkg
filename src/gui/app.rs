@@ -1575,6 +1575,31 @@ impl eframe::App for Git2PkgApp {
                 if ui.button(texts.copy_log()).clicked() {
                     ctx.copy_text(self.log.clone());
                 }
+                if ui
+                    .add_enabled(!self.log.is_empty(), egui::Button::new(texts.save_log()))
+                    .clicked()
+                {
+                    let log_text = self.log.clone();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("git2pkg-build.log")
+                        .add_filter("Log files", &["log", "txt"])
+                        .save_file()
+                    {
+                        match fs::write(&path, log_text.as_bytes()) {
+                            Ok(()) => {
+                                self.hint = Some(
+                                    texts.log_saved().replace("{}", &path.display().to_string()),
+                                );
+                            }
+                            Err(error) => {
+                                let message =
+                                    texts.log_save_failed().replace("{}", &error.to_string());
+                                self.log.push_str(&format!("[warn] {message}\n"));
+                                self.error = Some(message);
+                            }
+                        }
+                    }
+                }
             });
 
             // Das Log nutzt den verbleibenden Platz dynamisch; die unteren

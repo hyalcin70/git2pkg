@@ -448,6 +448,33 @@ impl Texts {
             "Copier le journal",
         )
     }
+    pub fn save_log(&self) -> &'static str {
+        self.get(
+            "Save log",
+            "Log speichern",
+            "Günlüğü kaydet",
+            "Guardar registro",
+            "Enregistrer le journal",
+        )
+    }
+    pub fn log_saved(&self) -> &'static str {
+        self.get(
+            "Log saved: {}",
+            "Log gespeichert: {}",
+            "Günlük kaydedildi: {}",
+            "Registro guardado: {}",
+            "Journal enregistré : {}",
+        )
+    }
+    pub fn log_save_failed(&self) -> &'static str {
+        self.get(
+            "Could not save log: {}",
+            "Log konnte nicht gespeichert werden: {}",
+            "Günlük kaydedilemedi: {}",
+            "No se pudo guardar el registro: {}",
+            "Impossible d’enregistrer le journal : {}",
+        )
+    }
     pub fn context_copy(&self) -> &'static str {
         self.get("Copy", "Kopieren", "Kopyala", "Copiar", "Copier")
     }
@@ -1176,6 +1203,14 @@ mod tests {
         assert_eq!(Texts::new(Language::Tr).clear_url(), "URL'yi temizle");
         assert_eq!(Texts::new(Language::Es).clear_url(), "Borrar URL");
         assert_eq!(Texts::new(Language::Fr).clear_url(), "Effacer l'URL");
+        assert_eq!(Texts::new(Language::En).save_log(), "Save log");
+        assert_eq!(Texts::new(Language::De).save_log(), "Log speichern");
+        assert_eq!(Texts::new(Language::Tr).save_log(), "Günlüğü kaydet");
+        assert_eq!(Texts::new(Language::Es).save_log(), "Guardar registro");
+        assert_eq!(
+            Texts::new(Language::Fr).save_log(),
+            "Enregistrer le journal"
+        );
     }
 
     #[test]
