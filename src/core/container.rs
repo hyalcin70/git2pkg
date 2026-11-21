@@ -16,6 +16,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fs;
 use std::io::BufRead;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -329,8 +330,54 @@ fn remove_heavy_build_dirs(work: &Path) -> usize {
     cleaned
 }
 
+/// Setzt recursive `u+rwX`, damit auch schreibgeschuetzte Dateien aus
+/// `.git/objects/...` das Entfernen des Build-Ordners nicht blockieren.
+fn make_tree_writable(path: &Path) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.file_type().is_symlink() {
+        return;
+    }
+    let mut permissions = metadata.permissions();
+    let mode = permissions.mode();
+    let writable = if metadata.is_dir() {
+        mode | 0o700
+    } else {
+        mode | 0o600
+    };
+    if writable != mode {
+        permissions.set_mode(writable);
+        let _ = fs::set_permissions(path, permissions);
+    }
+    if metadata.is_dir() {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                make_tree_writable(&entry.path());
+            }
+        }
+    }
+}
+
+fn remove_build_dir_recursively(work: &Path) -> Result<(), String> {
+    make_tree_writable(work);
+    let result = match fs::remove_dir_all(work) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            make_tree_writable(work);
+            fs::remove_dir_all(work)
+                .map_err(|retry| format!("{error}; nach Permissions-Reset: {retry}"))
+        }
+    };
+    // Falls dies der letzte Build-Ordner war, auch das leere builds/ entfernen.
+    if let Some(parent) = work.parent() {
+        let _ = fs::remove_dir(parent);
+    }
+    result
+}
+
 fn cleanup_successful_build(work: &Path, tx: &Sender<BuildEvent>) {
-    match fs::remove_dir_all(work) {
+    match remove_build_dir_recursively(work) {
         Ok(()) => {
             let _ = tx.send(BuildEvent::Log(
                 "[cache] Vollständiger Build-Cache automatisch entfernt".to_string(),
@@ -2911,18 +2958,29 @@ mod tests {
     }
 
     #[test]
-    fn erfolgreicher_build_entfernt_vollstaendigen_cacheordner() {
-        let root =
-            std::env::temp_dir().join(format!("git2pkg-success-cleanup-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("src/nested")).unwrap();
-        fs::create_dir_all(root.join("cargo-target")).unwrap();
-        fs::write(root.join("src/README.md"), "source").unwrap();
-        fs::write(root.join("src/nested/data.txt"), "data").unwrap();
-        fs::write(root.join("build.sh"), "script").unwrap();
+    fn erfolgreicher_build_entfernt_hashordner_und_leeres_builds_verzeichnis() {
+        let builds = std::env::temp_dir().join(format!(
+            "git2pkg-success-cleanup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let build_dir = builds.join("abc123");
+        let _ = fs::remove_dir_all(&builds);
+        fs::create_dir_all(build_dir.join("src/.git/objects/aa")).unwrap();
+        fs::create_dir_all(build_dir.join("cargo-target")).unwrap();
+        fs::write(build_dir.join("src/README.md"), "source").unwrap();
+        fs::write(build_dir.join("src/.git/objects/aa/readonly"), "object").unwrap();
+        fs::write(build_dir.join("build.sh"), "script").unwrap();
+        let read_only = build_dir.join("src/.git/objects/aa/readonly");
+        fs::set_permissions(&read_only, fs::Permissions::from_mode(0o444)).unwrap();
+
         let (tx, _rx) = std::sync::mpsc::channel();
-        cleanup_successful_build(&root, &tx);
-        assert!(!root.exists(), "Build-Ordner wurde nicht restlos entfernt");
+        cleanup_successful_build(&build_dir, &tx);
+        assert!(!build_dir.exists(), "Hash-Ordner wurde nicht entfernt");
+        assert!(!builds.exists(), "Leeres builds/ wurde nicht entfernt");
     }
 
     #[test]
