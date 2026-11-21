@@ -1395,11 +1395,14 @@ impl eframe::App for Git2PkgApp {
             let dark = self.theme_mode.is_dark();
             let log_height = ui.available_height().max(120.0);
             let log_id = egui::Id::new("live-log-text");
+            let log_menu_id = egui::Id::new("live-log-context-menu");
             let selection_active = egui::TextEdit::load_state(ctx, log_id)
                 .map(|state| !state.cursor.is_empty())
                 .unwrap_or(false)
                 || (self.log_hovered && ui.input(|input| input.pointer.primary_down()));
             let secondary_pressed = ui.input(|input| input.pointer.secondary_pressed());
+            let secondary_clicked = ui.input(|input| input.pointer.secondary_clicked());
+            let pointer_pos = ui.input(|input| input.pointer.latest_pos());
             let mut log_hovered = false;
             egui::ScrollArea::both()
                 .stick_to_bottom(self.building && !selection_active)
@@ -1419,7 +1422,8 @@ impl eframe::App for Git2PkgApp {
                     log_hovered = response.hovered();
                     let mut state =
                         egui::TextEdit::load_state(ui.ctx(), response.id).unwrap_or_default();
-                    let menu_open = secondary_pressed || response.context_menu_opened();
+                    let popup_open = egui::Popup::is_id_open(ui.ctx(), log_menu_id);
+                    let menu_open = secondary_pressed || secondary_clicked || popup_open;
                     if !menu_open {
                         if let Some(range) = state.cursor.char_range() {
                             if range.primary != range.secondary {
@@ -1433,37 +1437,55 @@ impl eframe::App for Git2PkgApp {
                         state.store(ui.ctx(), response.id);
                     }
 
+                    // `TextEdit` kann secondary_clicked verbrauchen; daher das
+                    // Popup explizit anhand des globalen Pointer-Events oeffnen.
+                    if secondary_clicked {
+                        let over_log = pointer_pos
+                            .map(|pos| response.rect.contains(pos))
+                            .unwrap_or_else(|| response.hovered());
+                        if over_log {
+                            egui::Popup::open_id(ui.ctx(), log_menu_id);
+                        }
+                    }
+
                     let mut saved_selection = self.last_log_selection;
                     let has_selection = saved_selection
                         .map(|range| range.primary != range.secondary)
                         .unwrap_or(false);
-                    if secondary_pressed || response.context_menu_opened() {
+                    if egui::Popup::is_id_open(ui.ctx(), log_menu_id) {
                         let texts = self.texts();
                         let snapshot = self.log_snapshot.clone();
-                        response.context_menu(|ui| {
-                            if ui
-                                .add_enabled(has_selection, egui::Button::new(texts.context_copy()))
-                                .clicked()
-                            {
-                                if let Some(selected) =
-                                    selected_text_from_range(saved_selection, &snapshot)
+                        egui::Popup::context_menu(&response)
+                            .id(log_menu_id)
+                            .show(|ui| {
+                                if ui
+                                    .add_enabled(
+                                        has_selection,
+                                        egui::Button::new(texts.context_copy()),
+                                    )
+                                    .clicked()
                                 {
-                                    ui.ctx().copy_text(selected);
+                                    if let Some(selected) =
+                                        selected_text_from_range(saved_selection, &snapshot)
+                                    {
+                                        ui.ctx().copy_text(selected);
+                                    }
+                                    egui::Popup::close_id(ui.ctx(), log_menu_id);
                                 }
-                            }
-                            if ui.button(texts.context_select_all()).clicked() {
-                                let range = egui::text::CCursorRange::two(
-                                    egui::text::CCursor::new(0),
-                                    egui::text::CCursor::new(snapshot.chars().count()),
-                                );
-                                saved_selection = Some(range);
-                                let mut menu_state =
-                                    egui::TextEdit::load_state(ui.ctx(), response.id)
-                                        .unwrap_or_default();
-                                menu_state.cursor.set_char_range(Some(range));
-                                menu_state.store(ui.ctx(), response.id);
-                            }
-                        });
+                                if ui.button(texts.context_select_all()).clicked() {
+                                    let range = egui::text::CCursorRange::two(
+                                        egui::text::CCursor::new(0),
+                                        egui::text::CCursor::new(snapshot.chars().count()),
+                                    );
+                                    saved_selection = Some(range);
+                                    let mut menu_state =
+                                        egui::TextEdit::load_state(ui.ctx(), response.id)
+                                            .unwrap_or_default();
+                                    menu_state.cursor.set_char_range(Some(range));
+                                    menu_state.store(ui.ctx(), response.id);
+                                    egui::Popup::close_id(ui.ctx(), log_menu_id);
+                                }
+                            });
                         self.last_log_selection = saved_selection;
                     }
                     if self.building {
