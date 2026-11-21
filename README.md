@@ -153,6 +153,7 @@ share it with someone who builds from source, report a bug with the copied log,
 or contribute a translation. There is no telemetry and no obligation — the tool
 works exactly the same whether you do any of this or not.
 
+> [!IMPORTANT]
 > **Project Scope & Solo Maintenance:** `git2pkg` is an independent solo hobby project maintained in my spare time. Starting from the Beta stage, best-effort support will focus strictly on the supported mainstream distribution families (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat**, and **openSUSE**). Exotic or niche Linux distributions are explicitly not supported.
 
 ## Credits & Transparency
