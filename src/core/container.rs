@@ -1512,7 +1512,7 @@ install_icons() {
   local expected_lc fallback_lc
   expected_lc=$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')
   fallback_lc=$(printf '%s' "$fallback" | tr '[:upper:]' '[:lower:]')
-  local ext best best_score score base base_lc dir special dims
+  local ext best best_score score base base_lc dir special dims icon_w icon_h
   for ext in svg png ico xpm; do
     best=""
     best_score=99
@@ -1523,17 +1523,28 @@ install_icons() {
       case "$base_lc" in
         screenshot*|*screenshot*|banner*|*banner*|preview*|*preview*|bg*|background*|*background*|wallpaper*) continue ;;
       esac
+      if [ "$ext" = "png" ]; then
+        dims=$(png_dimensions "$candidate")
+        case "$dims" in
+          *x*)
+            icon_w=${dims%x*}
+            icon_h=${dims#*x}
+            [ "$icon_w" = "$icon_h" ] || continue
+            ;;
+        esac
+      fi
       score=9
       case "$base_lc" in
         "$expected_lc".*) score=0 ;;
-        "$fallback_lc".*) score=1 ;;
-        icon.*|app.*|logo.*) score=2 ;;
-        *icon*|*logo*) score=3 ;;
+        app_icon.*|icon.*) score=1 ;;
+        "$fallback_lc".*) score=2 ;;
+        app.*|logo.*) score=3 ;;
+        *icon*|*logo*) score=4 ;;
         *)
           dir=$(dirname "$candidate" | tr '[:upper:]' '[:lower:]')
           for special in icons assets data resources pixmaps; do
             case "$dir" in
-              */$special|*/$special/*|./$special|./$special/*) score=4 ;;
+              */$special|*/$special/*|./$special|./$special/*) score=5 ;;
             esac
           done
           ;;
@@ -1994,7 +2005,7 @@ mod tests {
         assert!(script.contains("! -path '*/node_modules/*'"));
         assert!(script.contains("! -path '*/tests/*'"));
         assert!(script.contains("! -path '*/docs/*'"));
-        assert!(script.contains("icon.*|app.*|logo.*"));
+        assert!(script.contains("app_icon.*|icon.*"));
         assert!(script.contains("*icon*|*logo*"));
         let path = std::env::temp_dir().join(format!("git2pkg-assets-{}.sh", std::process::id()));
         std::fs::write(&path, script).unwrap();
@@ -2030,13 +2041,18 @@ mod tests {
         )
         .unwrap();
 
-        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-        png.extend_from_slice(&13u32.to_be_bytes());
-        png.extend_from_slice(b"IHDR");
-        png.extend_from_slice(&16u32.to_be_bytes());
-        png.extend_from_slice(&16u32.to_be_bytes());
-        png.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
-        fs::write(repo.join("assets/icon.png"), png).unwrap();
+        let png_bytes = |width: u32, height: u32| {
+            let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+            png.extend_from_slice(&13u32.to_be_bytes());
+            png.extend_from_slice(b"IHDR");
+            png.extend_from_slice(&width.to_be_bytes());
+            png.extend_from_slice(&height.to_be_bytes());
+            png.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+            png
+        };
+        fs::write(repo.join("assets/app_icon.png"), png_bytes(16, 16)).unwrap();
+        // Nicht-quadratischer Kandidat mit exakt erwartetem Namen muss ignoriert werden.
+        fs::write(repo.join("assets/sample-tool.png"), png_bytes(300, 150)).unwrap();
 
         let command = format!(
             "pkgdir='{}'; cd '{}'; {}",

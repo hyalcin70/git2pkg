@@ -22,11 +22,11 @@ use std::time::{Duration, Instant};
 
 /// Eingebettetes Creator-Logo (PNG 600x160). Die Binary bleibt dadurch
 /// vollständig selbstständig und benötigt keine externe Bilddatei.
-const CREATOR_LOGO: &[u8] = include_bytes!("../../assets/creator_logo.png");
+const CREATOR_LOGO: &[u8] = include_bytes!("../../assets/ui/creator_logo.png");
 /// Eingebettetes Programm-Icon (256x256, transparenter Rand).
 const APP_ICON: &[u8] = include_bytes!("../../assets/app_icon.png");
 /// Eingebettetes "Made for Linux"-Badge für die Statusleiste.
-const LINUX_BADGE: &[u8] = include_bytes!("../../assets/made_for_linux.png");
+const LINUX_BADGE: &[u8] = include_bytes!("../../assets/ui/made_for_linux.png");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EngineMode {
@@ -1045,12 +1045,40 @@ impl eframe::App for Git2PkgApp {
                                         .iter()
                                         .any(|event| matches!(event, egui::Event::Paste(_)))
                                 });
-                                let url_response = ui.add(
-                                    egui::TextEdit::singleline(&mut self.url)
-                                        .id(egui::Id::new("repo-url"))
-                                        .hint_text(texts.repo_hint())
-                                        .desired_width(field_width),
+                                let clear_width = 24.0_f32;
+                                let url_field_width =
+                                    (field_width - clear_width - 4.0).max(100.0);
+                                let mut response_slot = None;
+                                let mut clear_clicked = false;
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(field_width, ui.available_height()),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        response_slot = Some(
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut self.url)
+                                                    .id(egui::Id::new("repo-url"))
+                                                    .hint_text(texts.repo_hint())
+                                                    .desired_width(url_field_width),
+                                            ),
+                                        );
+                                        clear_clicked = ui
+                                            .add_enabled(
+                                                !self.building && !self.url.is_empty(),
+                                                egui::Button::new(
+                                                    egui::RichText::new("×").size(15.0),
+                                                ),
+                                            )
+                                            .on_hover_text(texts.clear_url())
+                                            .clicked();
+                                    },
                                 );
+                                let url_response = response_slot
+                                    .expect("URL-Textfeld wurde nicht erzeugt");
+                                if clear_clicked {
+                                    self.url.clear();
+                                    url_response.request_focus();
+                                }
                                 // Linux: Mittelklick fügt die Primary-Selection ein.
                                 if !self.building
                                     && self.engine_available

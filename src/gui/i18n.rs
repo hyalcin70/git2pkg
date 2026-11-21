@@ -146,6 +146,15 @@ impl Texts {
             "URL du dépôt",
         )
     }
+    pub fn clear_url(&self) -> &'static str {
+        self.get(
+            "Clear URL",
+            "URL löschen",
+            "URL'yi temizle",
+            "Borrar URL",
+            "Effacer l'URL",
+        )
+    }
     pub fn repo_hint(&self) -> &'static str {
         self.get(
             "Git URL of the repository",
@@ -1116,6 +1125,11 @@ mod tests {
         assert_eq!(Texts::new(Language::Tr).ok_understood(), "Tamam, anladım");
         assert_eq!(Texts::new(Language::Es).ok_understood(), "Entendido");
         assert_eq!(Texts::new(Language::Fr).ok_understood(), "OK, compris");
+        assert_eq!(Texts::new(Language::En).clear_url(), "Clear URL");
+        assert_eq!(Texts::new(Language::De).clear_url(), "URL löschen");
+        assert_eq!(Texts::new(Language::Tr).clear_url(), "URL'yi temizle");
+        assert_eq!(Texts::new(Language::Es).clear_url(), "Borrar URL");
+        assert_eq!(Texts::new(Language::Fr).clear_url(), "Effacer l'URL");
     }
 
     #[test]
