@@ -14,7 +14,8 @@ keine KI, kein LLM und keine externen API-Aufrufe.** Build-Entscheidungen
 erfolgen durch Dateierkennung, reguläre Ausdrücke über Compiler-Ausgaben und
 den Paketmanager im Container.
 
-> **Alpha-Status:** Dieses Projekt befindet sich aktuell noch in der aktiven Testphase (Alpha). Jegliche Unterstützung, Hilfe oder Gewährleistung wird nicht gewährt.
+> [!WARNING]
+> **Alpha-Status:** Dieses Projekt befindet sich derzeit in der aktiven Testphase (Alpha). Klonen und Testen erfolgen auf eigenes Risiko. Während der Alpha-Phase wird keinerlei Support, Hilfestellung oder Gewährleistung übernommen — Support gibt es erst ab dem Beta-Status.
 
 ## Warum ich das gebaut habe
 

@@ -14,7 +14,8 @@ nunca necesita una cadena de compilación ni bibliotecas de build.
 se toman mediante detección de archivos, expresiones regulares sobre la salida
 del compilador y el gestor de paquetes del contenedor.
 
-> **Estado Alfa:** Este proyecto se encuentra actualmente en fase de pruebas activas (Alfa). No se ofrece ningún tipo de soporte, ayuda ni garantía.
+> [!WARNING]
+> **Estado Alfa:** Este proyecto se encuentra actualmente en fase de pruebas activas (Alfa). La clonación y las pruebas se realizan bajo su propio riesgo. Durante la fase Alfa no se ofrece soporte, asistencia ni garantía de ningún tipo; el soporte estará disponible a partir de la fase Beta.
 
 ## Por qué lo construí
 

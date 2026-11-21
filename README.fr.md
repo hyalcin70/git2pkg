@@ -15,7 +15,8 @@ Les décisions de compilation proviennent de la détection de fichiers, d'expres
 régulières appliquées à la sortie du compilateur et du gestionnaire de paquets du
 conteneur.
 
-> **Statut Alpha :** Ce projet est actuellement en phase de test active (Alpha). Aucun support, aucune assistance ni aucune garantie n'est fourni.
+> [!WARNING]
+> **Statut Alpha :** Ce projet est actuellement en phase de test actif (Alpha). Le clonage et les tests s'effectuent à vos propres risques. Aucun support, assistance ou garantie d'aucune sorte n'est fourni pendant la phase Alpha — le support sera disponible à partir du statut Beta.
 
 ## Pourquoi je l'ai créé
 

@@ -15,7 +15,8 @@ zekâ, LLM veya harici API çağrısı yoktur.** Derleme kararları dosya tespit
 derleyici çıktısı üzerinde düzenli ifadeler ve konteynerdeki paket yöneticisi
 ile alınır.
 
-> **Alfa Durumu:** Bu proje şu anda aktif test aşamasındadır (Alfa). Herhangi bir destek, yardım veya garanti sağlanmamaktadır.
+> [!WARNING]
+> **Alfa Durumu:** Bu proje şu anda aktif test aşamasındadır (Alfa). Klonlama ve test etme tamamen kendi sorumluluğunuzdadır. Alfa aşamasında hiçbir şekilde destek, yardım veya garanti sağlanmamaktadır — destek Beta aşamasından itibaren sunulacaktır.
 
 ## Neden bunu geliştirdim
 

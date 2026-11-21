@@ -13,7 +13,8 @@ toolchain or build libraries.
 no LLM and no external API calls.** Build decisions come from file detection,
 regular expressions over compiler output, and the container's package manager.
 
-> **Alpha Status:** This project is currently in active testing (Alpha). No support, assistance, or warranty of any kind is provided.
+> [!WARNING]
+> **Alpha Status:** This project is currently in active testing (Alpha). Cloning and testing are at your own risk. No support, assistance, or warranty of any kind is provided during Alpha — support will be available starting from the Beta stage.
 
 ## Why I Built This
 
