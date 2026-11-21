@@ -2742,8 +2742,8 @@ mod tests {
             &BuildSystem::Cargo,
             &[],
         );
-        assert!(rpm.contains("$HOME/rpmbuild"));
-        assert!(rpm.contains("rpmbuild -bb --clean"));
+        assert!(rpm.contains("/root/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}"));
+        assert!(rpm.contains("rpmbuild -bb --clean --define \"_topdir /root/rpmbuild\""));
     }
 
     #[test]

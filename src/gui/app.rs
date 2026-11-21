@@ -771,6 +771,7 @@ impl eframe::App for Git2PkgApp {
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .resizable(false)
             .collapsible(false)
+            .movable(true)
             .show(ctx, |ui| {
                 if let Some(texture) = &self.app_icon {
                     ui.vertical_centered(|ui| {
@@ -845,6 +846,7 @@ impl eframe::App for Git2PkgApp {
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .resizable(false)
                 .collapsible(false)
+                .movable(true)
                 .show(ctx, |ui| {
                     ui.label(&body);
                     ui.monospace(package.to_string_lossy());
@@ -900,6 +902,7 @@ impl eframe::App for Git2PkgApp {
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .resizable(false)
                 .collapsible(false)
+                .movable(true)
                 .show(ctx, |ui| {
                     ui.set_max_width(440.0);
                     ui.label(&body);
@@ -934,6 +937,7 @@ impl eframe::App for Git2PkgApp {
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .resizable(false)
                 .collapsible(false)
+                .movable(true)
                 .show(ctx, |ui| {
                     ui.label(&reason_label);
                     ui.monospace(&reason);
@@ -973,6 +977,7 @@ impl eframe::App for Git2PkgApp {
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .resizable(false)
                 .collapsible(false)
+                .movable(true)
                 .show(ctx, |ui| {
                     ui.label(&body);
                     ui.add_space(8.0);
