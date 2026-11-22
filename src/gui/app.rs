@@ -79,6 +79,7 @@ pub struct Git2PkgApp {
     build_progress: f32,
     cargo_crates: u32,
     building: bool,
+    build_attempt: u32,
     cancel_flag: Arc<AtomicBool>,
     container_id: Arc<Mutex<Option<String>>>,
     receiver: Option<Receiver<BuildEvent>>,
@@ -109,6 +110,11 @@ fn dialog_scroll_height(ctx: &egui::Context) -> f32 {
 }
 
 /// Einheitlicher, deckender Dialog-Rahmen mit ruhigem Innenabstand.
+/// Vorgeschlagener Dateiname fuer das aktuelle Build-Log.
+fn suggested_log_filename(attempt: u32) -> String {
+    format!("{}-build-{}.log", env!("CARGO_PKG_NAME"), attempt.max(1))
+}
+
 fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::window(&ctx.style())
         .fill(ctx.style().visuals.window_fill)
@@ -230,6 +236,7 @@ impl Git2PkgApp {
             build_progress: 0.0,
             cargo_crates: 0,
             building: false,
+            build_attempt: 1,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             container_id: Arc::new(Mutex::new(None)),
             receiver: None,
@@ -359,6 +366,7 @@ impl Git2PkgApp {
     }
 
     fn start_build(&mut self) {
+        self.build_attempt = 1;
         let url = self.url.trim().to_string();
         self.start_build_with(url, BuildStrategy::Default);
     }
@@ -380,6 +388,7 @@ impl Git2PkgApp {
             return;
         };
         let strategy = self.next_strategy;
+        self.build_attempt = self.build_attempt.saturating_add(1);
         self.start_build_with(url, strategy);
     }
 
@@ -1616,7 +1625,7 @@ impl eframe::App for Git2PkgApp {
                 {
                     let log_text = self.log.clone();
                     if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name("git2pkg-build.log")
+                        .set_file_name(suggested_log_filename(self.build_attempt))
                         .add_filter("Log files", &["log", "txt"])
                         .save_file()
                     {
@@ -1877,6 +1886,13 @@ fn log_line_color(line: &str, dark: bool) -> egui::Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_dateiname_enthält_den_versuch() {
+        assert_eq!(suggested_log_filename(1), "git2pkg-build-1.log");
+        assert_eq!(suggested_log_filename(3), "git2pkg-build-3.log");
+        assert_eq!(suggested_log_filename(0), "git2pkg-build-1.log");
+    }
 
     #[test]
     fn log_readonly_buffer_ist_nicht_editierbar() {
