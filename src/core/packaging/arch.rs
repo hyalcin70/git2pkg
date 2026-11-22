@@ -55,11 +55,17 @@ done"#.to_string(),
         "mkdir -p \"$pkgdir\" \"$pkgdir/usr/bin\" \"$pkgdir/usr/lib\" \"$pkgdir/usr/share\"\n  cp -a /work/out/. \"$pkgdir\"/".to_string()
     };
     let install_body = format!("{}\n  {}", install_body, super::strip_binaries_step());
+    let build_body = if ctx.build_step.contains("cmake") {
+        "set -e\n  true || return 1"
+    } else {
+        "true"
+    };
     lines.push(format!(
-        "cat > /work/pkg/PKGBUILD <<'PKGBUILD_EOF'\npkgname={name}\npkgver={version}\npkgrel=1\npkgdesc='Built by git2pkg'\narch=('{arch}')\nlicense=('GPL-3.0-or-later')\noptions=('!strip' '!debug')\ndepends=(${{dep_line}})\nbuild() {{\n  true\n}}\npackage() {{\n  {install_body}\n}}\nPKGBUILD_EOF",
+        "cat > /work/pkg/PKGBUILD <<'PKGBUILD_EOF'\npkgname={name}\npkgver={version}\npkgrel=1\npkgdesc='Built by git2pkg'\narch=('{arch}')\nlicense=('GPL-3.0-or-later')\noptions=('!strip' '!debug')\ndepends=(${{dep_line}})\nbuild() {{\n  {build_body}\n}}\npackage() {{\n  {install_body}\n}}\nPKGBUILD_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.arch(),
+        build_body = build_body,
         install_body = install_body,
     ));
     lines.push("chown -R builder:builder /work/pkg /work/src /work/out /work/dist".to_string());
@@ -122,6 +128,26 @@ mod tests {
         assert!(script.contains("pacman -Qoq"));
         assert!(script.contains("depends=(${dep_line})"));
         assert!(script.contains("ldd"));
+    }
+
+    #[test]
+    fn cmake_pkgbuild_bricht_build_block_schnell_ab() {
+        let family = DistroFamily::Arch;
+        let ctx = PackageContext {
+            name: "repo",
+            version: "1.0.0",
+            family: &family,
+            strategy: BuildStrategy::Default,
+            has_pkgbuild: false,
+            arch: PackageArch::Amd64,
+            build_step: "cmake -S . -B build && cmake --build build",
+            install_step: "true",
+            is_cargo: false,
+            asset_step: "true",
+        };
+        let script = script(&ctx).join("\n");
+        assert!(script.contains("set -e\n  true || return 1"));
+        assert!(script.contains("build() {\n  set -e"));
     }
 
     #[test]

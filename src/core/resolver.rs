@@ -904,8 +904,33 @@ pub fn detect_source_group_error(output: &str) -> Option<SourceGroupError> {
 pub fn is_cmake_policy_error(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
     (lower.contains("source_group") && lower.contains("is not a prefix of file"))
-        || lower.contains("compatibility with cmake < 3.10")
-        || lower.contains("compatibility with cmake <3.10")
+        || (lower.contains("compatibility with cmake <")
+            && (lower.contains("3.5") || lower.contains("3.10")))
+}
+
+/// Parst generische CMake-Hinweise wie `or pass -DFOO_BAR=ON`.
+pub fn cmake_alternative_flags(output: &str) -> Vec<String> {
+    let Ok(regex) = Regex::new(r"(?:or\s+)?(?:pass|set)\s+(-D[A-Za-z0-9_]+=[A-Za-z0-9_./-]+)")
+    else {
+        return Vec::new();
+    };
+    let mut flags: Vec<String> = Vec::new();
+    for found in regex.captures_iter(output) {
+        let flag = found[1].to_string();
+        if !flags.contains(&flag) {
+            flags.push(flag);
+        }
+    }
+    flags
+}
+
+/// Alter `FindEigen3.cmake` parst `Macros.h` statt `Version.h`. Ein Retry mit
+/// expliziten Version-Flags laesst `find_package(Eigen3)` das Systempaket akzeptieren.
+pub fn has_eigen_version_mismatch(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("eigen3 version")
+        && lower.contains("but at least version")
+        && lower.contains("is required")
 }
 
 /// Allgemeine Wörter sind keine Kommandozeilen-Werkzeuge.
@@ -969,6 +994,16 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
         // Erfolgsmeldungen wie `-- Found EXPAT: ... (found version "2.10.0")`
         // sind keine Fehler und dürfen nie in den Resolver gelangen.
         if trimmed.to_ascii_lowercase().starts_with("-- found ") {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        // Reine Statusmeldungen wie `-- XYZ NOT found, using bundled version...`
+        // sind keine fehlenden System-Dependencies.
+        if lower.starts_with("-- ")
+            && (lower.contains("using bundled")
+                || lower.contains("using internal")
+                || lower.contains("optional"))
+        {
             continue;
         }
 
@@ -1558,5 +1593,33 @@ mod tests {
         let list = store.repo_profiles.get("repo:abc").unwrap();
         assert_eq!(list, &vec!["Standard".to_string()]);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cmake_alternativ_flags_werden_aus_fehlermeldung_extrahiert() {
+        let output = "CMake Error at src/CMakeLists.txt:10 (find_package):\n  Some backend missing. Alternatively pass -DFOO_BAR=ON or pass -DENABLE_XYZ=OFF\nmirrors: set -DUSE_SYSTEM_FOO=ON\n";
+        let flags = cmake_alternative_flags(output);
+        assert_eq!(
+            flags,
+            vec![
+                "-DFOO_BAR=ON".to_string(),
+                "-DENABLE_XYZ=OFF".to_string(),
+                "-DUSE_SYSTEM_FOO=ON".to_string(),
+            ]
+        );
+        assert!(cmake_alternative_flags("no hint here").is_empty());
+    }
+
+    #[test]
+    fn cmake_status_mit_using_bundled_ist_keine_fehlende_dependency() {
+        let output = "-- IGL NOT found, using bundled version from third_party\n-- Optional plugin NOT found, using internal copy\n";
+        assert!(analyze_output(output).is_empty());
+        assert!(is_cmake_policy_error(
+            "Compatibility with CMake < 3.5 has been removed."
+        ));
+        assert!(!is_cmake_policy_error("Could NOT find PNG"));
+        assert!(has_eigen_version_mismatch(
+            "Eigen3 version 5.0.0 found in /usr/include/eigen3, but at least version 3.3 is required"
+        ));
     }
 }

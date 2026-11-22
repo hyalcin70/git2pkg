@@ -190,9 +190,9 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.20`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.21`)
 
-Current release: `v0.2.0-alpha.20`.
+Current release: `v0.2.0-alpha.21`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
   C++/CMake superbuilds (for example Bambu Studio), Meson/C projects (for

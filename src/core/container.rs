@@ -6,10 +6,11 @@
 use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem, ProjectFingerprint};
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::{
-    analyze_output, candidate_names, detect_build_fixes, detect_repo_script_distro_rejection,
-    detect_source_group_error, family_key, is_compiled_build_system, package_from_search,
-    package_lacks_executable, probe_commands, search_command, valid_package_name, BuildRecipe,
-    MappingStore, MissingDep, SourceGroupError,
+    analyze_output, candidate_names, cmake_alternative_flags, detect_build_fixes,
+    detect_repo_script_distro_rejection, detect_source_group_error, family_key,
+    has_eigen_version_mismatch, is_cmake_policy_error, is_compiled_build_system,
+    package_from_search, package_lacks_executable, probe_commands, search_command,
+    valid_package_name, BuildRecipe, MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -34,6 +35,51 @@ fn deps_fallback_needed(output: &str, skip_deps: bool) -> bool {
 const MAX_ATTEMPTS: u8 = 5;
 const INITIAL_HEAL_ROUNDS: u8 = 5;
 const MAX_HEAL_ROUNDS: u8 = 10;
+
+/// Zustand eines Selbstheilungs-Durchlaufs. Nur wenn er sich aendert, ist ein
+/// weiterer Retry derselben Strategie sinnvoll.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RetryState {
+    packages: Vec<String>,
+    cmake_flags: Vec<String>,
+}
+
+fn push_unique_string(list: &mut Vec<String>, value: String) {
+    if !list.contains(&value) {
+        list.push(value);
+    }
+}
+
+/// Alle CMake-Flags, die ein Configure-Fehler fuer den naechsten Versuch nahelegt.
+fn cmake_retry_flags(output: &str, current: &[String]) -> Vec<String> {
+    let mut flags: Vec<String> = Vec::new();
+    for flag in cmake_alternative_flags(output) {
+        push_unique_string(&mut flags, flag);
+    }
+    if is_cmake_policy_error(output)
+        && !current
+            .iter()
+            .chain(flags.iter())
+            .any(|flag| flag.starts_with("-DCMAKE_POLICY_VERSION_MINIMUM="))
+    {
+        push_unique_string(&mut flags, "-DCMAKE_POLICY_VERSION_MINIMUM=3.5".to_string());
+    }
+    if has_eigen_version_mismatch(output) {
+        for flag in [
+            "-DEigen3_FIND_VERSION_MAJOR=3",
+            "-DEigen3_FIND_VERSION_MINOR=3",
+            "-DEIGEN3_VERSION_OK=TRUE",
+        ] {
+            push_unique_string(&mut flags, flag.to_string());
+        }
+    }
+    flags.retain(|flag| !current.contains(flag));
+    flags
+}
+
+fn retry_state_changed(before: &RetryState, after: &RetryState) -> bool {
+    before != after
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetFormat {
@@ -798,6 +844,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     }
     let mut db_synced = false;
     let mut extra_packages: Vec<String> = learned_packages;
+    let mut cmake_flags: Vec<String> = Vec::new();
     let mut last_output = String::new();
     let mut forced_strategy: Option<BuildStrategy> = None;
     let mut direct_tried = false;
@@ -809,6 +856,10 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         if config.cancel_flag.load(Ordering::Relaxed) {
             return Err(abort_running_build(&container, config, tx));
         }
+        let round_state = RetryState {
+            packages: extra_packages.clone(),
+            cmake_flags: cmake_flags.clone(),
+        };
         let effective_strategy = forced_strategy.unwrap_or(config.strategy);
         let strategy_name = effective_strategy.label();
         let _ = tx.send(BuildEvent::ProgressReset);
@@ -867,7 +918,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     .to_string(),
             ));
         }
-        let mut script = build_script_with(
+        let mut script = build_script_with_flags(
             config,
             &system,
             &extra_packages,
@@ -875,12 +926,13 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             &identity,
             effective_strategy,
             repo_pkgbuild,
+            &cmake_flags,
         );
         if deps_first
             && effective_strategy != BuildStrategy::DirectStagingFallback
             && !config.skip_deps
         {
-            script = with_deps_prebuild(&script);
+            script = with_deps_prebuild_flags(&script, &cmake_flags);
         }
         let result = match run_container(&container, &work, &script, tx) {
             Ok(result) => result,
@@ -1011,6 +1063,22 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             let outcome = package_result(config, &work, &identity, &last_output, tx)?;
             cleanup_successful_build(&work, tx);
             return Ok(outcome);
+        }
+
+        // CMake nennt im Fehlertext oft alternative -D-Flags oder benoetigt
+        // Policy-/Eigen-Kompatibilitaetsflags. Das gilt nur fuer den naechsten
+        // Versuch derselben Strategie, nie fuer spaetere Laeufe.
+        let discovered_flags = cmake_retry_flags(&last_output, &cmake_flags);
+        if !discovered_flags.is_empty() {
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[cmake] Retry-Flags aus Fehlermeldung übernommen: {}",
+                discovered_flags.join(" ")
+            )));
+            for flag in discovered_flags {
+                push_unique_string(&mut cmake_flags, flag);
+            }
+            heal_round += 1;
+            continue;
         }
 
         if let Some(error) = detect_source_group_error(&last_output) {
@@ -1192,6 +1260,24 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             }
             mappings.record_repo_packages(&config.url, &fingerprint.signature, &extra_packages);
         }
+        let after_state = RetryState {
+            packages: extra_packages.clone(),
+            cmake_flags: cmake_flags.clone(),
+        };
+        if !retry_state_changed(&round_state, &after_state) {
+            let next = effective_strategy.next(has_deps);
+            strategy_attempt += 1;
+            heal_round = 1;
+            allowed_rounds = INITIAL_HEAL_ROUNDS;
+            config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+            forced_strategy = Some(next);
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[retry] Keine neuen Pakete oder Flags – wechsle zu Strategie {}",
+                next.label()
+            )));
+            continue;
+        }
+
         if heal_round >= allowed_rounds {
             let next = effective_strategy.next(has_deps);
             strategy_attempt += 1;
@@ -1302,9 +1388,28 @@ fn has_local_dependencies(src: &Path) -> bool {
     has_local_deps(src)
 }
 
+/// Standard-CMake-Flags plus alle aus Fehlermeldungen gelernten Zusatz-Flags.
+fn cmake_configure_flags(extra: &[String]) -> String {
+    let mut flags = vec![
+        "-DCMAKE_BUILD_TYPE=Release".to_string(),
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5".to_string(),
+        "-DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON".to_string(),
+    ];
+    for flag in extra {
+        push_unique_string(&mut flags, flag.clone());
+    }
+    flags.join(" ")
+}
+
 /// CMake-Projekte mit `deps/` oder `third_party/` erwarten vorgebaute lokale
 /// Abhängigkeiten. Das lokale Install-Prefix wird an das Hauptprojekt gereicht.
+#[cfg(test)]
 fn with_deps_prebuild(script: &str) -> String {
+    with_deps_prebuild_flags(script, &[])
+}
+
+fn with_deps_prebuild_flags(script: &str, flags: &[String]) -> String {
+    let configure_flags = cmake_configure_flags(flags);
     let mut lines: Vec<String> = script.lines().map(str::to_string).collect();
     let anchor = lines
         .iter()
@@ -1316,8 +1421,9 @@ fn with_deps_prebuild(script: &str) -> String {
         );
         lines.insert(
             index + 2,
-            "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] Nachinstallation abgeschlossen - konfiguriere lokale Abhaengigkeiten neu'; rm -rf /work/deps-build; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build /work/deps-build && cmake --install /work/deps-build || { echo '[deps] Bau fehlgeschlagen - Resolver uebernimmt'; exit 1; }; fi; done"
-                .to_string(),
+            format!(
+                "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] Nachinstallation abgeschlossen - konfiguriere lokale Abhaengigkeiten neu'; rm -rf /work/deps-build; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_INSTALL_PREFIX=/work/deps-install {configure_flags} && cmake --build /work/deps-build && cmake --install /work/deps-build || {{ echo '[deps] Bau fehlgeschlagen - Resolver uebernimmt'; exit 1; }}; fi; done"
+            ),
         );
     }
     lines.join("\n")
@@ -1588,6 +1694,16 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
     }
 }
 
+fn binary_build_step_with_flags(system: &BuildSystem, flags: &[String]) -> String {
+    if *system == BuildSystem::CMake {
+        return format!(
+            "cmake -S . -B build {} -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {{}} /work/dist/ \\;",
+            cmake_configure_flags(flags)
+        );
+    }
+    binary_build_step(system).to_string()
+}
+
 /// Logtexte niemals als nackte Shell-Zeilen einbetten: Klammern wie in
 /// `== Setup (pacman) ==` würden von `sh` als Syntaxfehler interpretiert.
 fn echo_line(text: &str) -> String {
@@ -1800,15 +1916,28 @@ fn asset_staging_step(pkg_name: &str) -> String {
     )
 }
 
+#[cfg(test)]
 fn build_step_text(
     system: &BuildSystem,
     strategy: BuildStrategy,
     repo_script: Option<&str>,
 ) -> String {
+    build_step_text_with_flags(system, strategy, repo_script, &[])
+}
+
+fn build_step_text_with_flags(
+    system: &BuildSystem,
+    strategy: BuildStrategy,
+    repo_script: Option<&str>,
+    flags: &[String],
+) -> String {
     // Direkter Fallback ignoriert Repo-Skripte und Generator-Sonderwege.
     if strategy == BuildStrategy::DirectStagingFallback {
         if *system == BuildSystem::CMake {
-            return r#"cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \;"#.to_string();
+            return format!(
+                r#"cmake -S . -B build -G "Unix Makefiles" {} -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {{}} /work/dist/ \;"#,
+                cmake_configure_flags(flags)
+            );
         }
         return binary_build_step(system).to_string();
     }
@@ -1841,7 +1970,7 @@ find . -maxdepth 3 -type f -perm -u+x -exec cp {{}} /work/dist/ \;"#,
             name = script
         );
     }
-    binary_build_step(system).to_string()
+    binary_build_step_with_flags(system, flags)
 }
 
 fn build_script_with(
@@ -1852,6 +1981,29 @@ fn build_script_with(
     identity: &ProjectIdentity,
     strategy: BuildStrategy,
     has_pkgbuild: bool,
+) -> String {
+    build_script_with_flags(
+        config,
+        system,
+        extra,
+        repo_script,
+        identity,
+        strategy,
+        has_pkgbuild,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_script_with_flags(
+    config: &BuildConfig,
+    system: &BuildSystem,
+    extra: &[String],
+    repo_script: Option<&str>,
+    identity: &ProjectIdentity,
+    strategy: BuildStrategy,
+    has_pkgbuild: bool,
+    cmake_flags: &[String],
 ) -> String {
     let texts = Texts::new(config.language);
     let target = config.target_distro.info(&config.distro);
@@ -1908,7 +2060,7 @@ fn build_script_with(
         ));
     }
 
-    let build_step = build_step_text(system, strategy, repo_script);
+    let build_step = build_step_text_with_flags(system, strategy, repo_script, cmake_flags);
     let install_step = project_install_step(system, &identity.name);
     let asset_step = asset_staging_step(&identity.name);
     let pkg_ctx = crate::core::packaging::PackageContext {
@@ -3236,5 +3388,50 @@ mod tests {
             TargetFormat::NativePackage
         );
         assert_eq!(TargetFormat::NativePackage.key(), "package");
+    }
+
+    #[test]
+    fn cmake_retry_flags_aus_fehlertext_und_policy() {
+        let output = "CMake Error: Missing backend, or pass -DFOO_BAR=ON\nmirrors: set -DUSE_SYSTEM_FOO=ON\nCompatibility with CMake < 3.5 has been removed.\nEigen3 version 5.0.0 found, but at least version 3.3 is required\n";
+        let flags = cmake_retry_flags(output, &[]);
+        assert!(flags.contains(&"-DFOO_BAR=ON".to_string()));
+        assert!(flags.contains(&"-DUSE_SYSTEM_FOO=ON".to_string()));
+        assert!(flags.contains(&"-DCMAKE_POLICY_VERSION_MINIMUM=3.5".to_string()));
+        assert!(flags.contains(&"-DEIGEN3_VERSION_OK=TRUE".to_string()));
+        let again = cmake_retry_flags(output, &flags);
+        assert!(again.is_empty());
+    }
+
+    #[test]
+    fn retry_state_erkennt_leerlauf() {
+        let before = RetryState {
+            packages: vec!["boost".to_string()],
+            cmake_flags: vec!["-DFOO=ON".to_string()],
+        };
+        let same = RetryState {
+            packages: vec!["boost".to_string()],
+            cmake_flags: vec!["-DFOO=ON".to_string()],
+        };
+        let changed = RetryState {
+            packages: vec!["boost".to_string(), "openssl".to_string()],
+            cmake_flags: vec!["-DFOO=ON".to_string()],
+        };
+        assert!(!retry_state_changed(&before, &same));
+        assert!(retry_state_changed(&before, &changed));
+    }
+
+    #[test]
+    fn cmake_retry_flags_landen_im_buildschritt() {
+        let flags = vec!["-DENABLE_XYZ=OFF".to_string()];
+        let step =
+            build_step_text_with_flags(&BuildSystem::CMake, BuildStrategy::Default, None, &flags);
+        assert!(step.contains("--build build"));
+        assert!(step.contains("-DENABLE_XYZ=OFF"));
+        let with_deps = with_deps_prebuild_flags(
+            "#!/usr/bin/env bash\nmkdir -p /work/out /work/dist\n",
+            &flags,
+        );
+        assert!(with_deps.contains("-DENABLE_XYZ=OFF"));
+        assert!(with_deps.contains("-DCMAKE_POLICY_VERSION_MINIMUM=3.5"));
     }
 }
