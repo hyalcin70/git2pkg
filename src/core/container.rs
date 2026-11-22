@@ -2664,7 +2664,6 @@ fn build_script_with_flags(
         arch: crate::core::packaging::PackageArch::detect(),
         build_step: &build_step,
         install_step: &install_step,
-        is_cargo: system == &BuildSystem::Cargo,
         asset_step: &asset_step,
     };
 
@@ -2691,22 +2690,23 @@ fn build_script_with_flags(
     // Erfolg nur melden, wenn wirklich ein Artefakt im Zielordner liegt.
     let artifact_glob = match &config.target {
         TargetFormat::NativePackage => {
-            "artifacts=(/work/dist/*.pkg.tar.zst /work/dist/*.deb /work/dist/*.rpm)"
+            "artifact=\"\"; for candidate in /work/dist/*.pkg.tar.zst /work/dist/*.deb /work/dist/*.rpm; do [ -f \"$candidate\" ] && artifact=\"$candidate\" && break; done"
         }
-        TargetFormat::StandaloneBinary => "artifacts=(/work/dist/*)",
+        TargetFormat::StandaloneBinary => {
+            "artifact=\"\"; for candidate in /work/dist/*; do [ -f \"$candidate\" ] && artifact=\"$candidate\" && break; done"
+        }
     };
     lines.push(artifact_glob.to_string());
     lines.push(
-        "if [ ! -f \"${artifacts[0]}\" ]; then echo '__GIT2PKG_AI_NO_ARTIFACT__' >&2; exit 1; fi"
+        "if [ -z \"$artifact\" ]; then echo '__GIT2PKG_AI_NO_ARTIFACT__' >&2; exit 1; fi"
             .to_string(),
     );
     // Ein bloß vorhandenes Paket ist kein Erfolg: nach einem CMake-/Compiler-
     // Fehler darf kein leeres Artefakt den OK-Marker ausloesen.
     lines.push(
-        r#"artifact="${artifacts[0]}"
-case "$artifact" in
+        r#"case "$artifact" in
   *.pkg.tar.zst|*.tar.zst)
-    if ! tar -tf "$artifact" 2>/dev/null | grep -Eq '(^|/)usr/(bin|lib|lib64)/'; then
+    if ! (tar -tf "$artifact" 2>/dev/null || tar --zstd -tf "$artifact" 2>/dev/null) | grep -Eq '(^|/)usr/(bin|lib|lib64)/'; then
       echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
@@ -3459,9 +3459,8 @@ mod tests {
             BuildStrategy::Default,
             false,
         );
-        assert!(arch.contains("pkgver=1.0.0.13"));
-        assert!(arch.contains("'!debug'"));
-        assert!(arch.contains("rm -f /work/pkg/*-debug-*.pkg.tar.zst"));
+        assert!(arch.contains("pkgver = 1.0.0.13-1"));
+        assert!(arch.contains("bsdtar --zstd"));
 
         let deb_config = config(DistroFamily::Debian, TargetFormat::NativePackage);
         let deb = build_script_with(
@@ -3711,15 +3710,21 @@ mod tests {
     }
 
     #[test]
-    fn arch_baut_als_unprivilegierter_benutzer() {
-        let script = build_script(
-            &config(DistroFamily::Arch, TargetFormat::NativePackage),
+    fn in_tree_pkgbuild_baut_als_unprivilegierter_benutzer() {
+        let cfg = config(DistroFamily::Arch, TargetFormat::NativePackage);
+        let identity = project_identity("example-app", Path::new(""));
+        let script = build_script_with(
+            &cfg,
             &BuildSystem::Cargo,
             &[],
+            None,
+            &identity,
+            BuildStrategy::Default,
+            true,
         );
         assert!(script.contains("useradd -m -s /bin/bash builder"));
         assert!(script.contains("chown -R builder:builder"));
-        assert!(script.contains("su builder -c 'cd /work/pkg && makepkg -s --noconfirm'"));
+        assert!(script.contains("cd /work/src && makepkg -s --noconfirm"));
         assert!(!script.contains("--asroot"));
     }
 
@@ -3817,18 +3822,19 @@ mod tests {
             BuildStrategy::Default,
             false,
         );
-        assert!(generated.contains("cat > /work/pkg/PKGBUILD"));
+        assert!(generated.contains(".PKGINFO"));
+        assert!(generated.contains("bsdtar --zstd"));
     }
 
     #[test]
-    fn script_enthaelt_makerpkg_fuer_arch() {
+    fn script_enthaelt_direkte_arch_paketierung() {
         let script = build_script(
             &config(DistroFamily::Arch, TargetFormat::NativePackage),
             &BuildSystem::Cargo,
             &[],
         );
-        assert!(script.contains("makepkg"));
-        assert!(script.contains("pkgname=example-app"));
+        assert!(script.contains("bsdtar --zstd"));
+        assert!(script.contains("pkgname = example-app"));
         assert!(script.contains(OK_MARKER));
         assert!(script.contains("rm -rf /work/cargo-target /work/cargo-home"));
         assert!(script.contains("chown -R --reference=/work /work"));

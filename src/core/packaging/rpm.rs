@@ -14,13 +14,13 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     )));
     lines.push("mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}".to_string());
     lines.push(format!(
-        "cat > /root/rpmbuild/SPECS/{name}.spec <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg-ai\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg-ai.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/package-files.list\n%files -f /tmp/package-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
+        "cat > /root/rpmbuild/SPECS/{name}.spec <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg-ai\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg-ai.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n[ -x /usr/lib/rpm/brp-compress ] && /usr/lib/rpm/brp-compress || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/package-files.list\n%files -f /tmp/package-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.rpm(),
     ));
     lines.push(format!(
-        "rpmbuild -bb --clean --define \"_topdir /root/rpmbuild\" /root/rpmbuild/SPECS/{}.spec",
+        "QA_RPATHS=0x0001 rpmbuild -bb --clean --define \"_topdir /root/rpmbuild\" /root/rpmbuild/SPECS/{}.spec",
         ctx.name
     ));
     lines.push(
@@ -57,11 +57,12 @@ mod tests {
                 arch: PackageArch::Amd64,
                 build_step: "true",
                 install_step: "true",
-                is_cargo: false,
                 asset_step: "true",
             };
             let script = script(&ctx).join("\n");
             assert!(script.contains("AutoReqProv: yes"));
+            assert!(script.contains("QA_RPATHS=0x0001"));
+            assert!(script.contains("brp-compress"));
             assert!(script.contains("%defattr(-,root,root,-)"));
             assert!(script.contains("%files -f /tmp/package-files.list"));
             assert!(script.contains("--strip-unneeded"));
@@ -81,7 +82,6 @@ mod tests {
             arch: PackageArch::Amd64,
             build_step: "true",
             install_step: crate::core::packaging::cargo_install_step(),
-            is_cargo: true,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
@@ -101,7 +101,6 @@ mod tests {
                 arch: PackageArch::Amd64,
                 build_step: "true",
                 install_step: "true",
-                is_cargo: false,
                 asset_step: "true",
             };
             let script = script(&ctx).join("\n");

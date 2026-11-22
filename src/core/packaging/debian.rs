@@ -70,7 +70,6 @@ mod tests {
             arch: PackageArch::Amd64,
             build_step: "true",
             install_step: "true",
-            is_cargo: false,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
@@ -93,7 +92,6 @@ mod tests {
             arch: PackageArch::Amd64,
             build_step: "true",
             install_step: crate::core::packaging::cargo_install_step(),
-            is_cargo: true,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");

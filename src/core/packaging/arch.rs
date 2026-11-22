@@ -48,36 +48,33 @@ for package in "${depends[@]}"; do
   dep_line="$dep_line $package"
 done"#.to_string(),
     );
-    lines.push("mkdir -p /work/pkg".to_string());
-    let install_body = if ctx.is_cargo {
-        format!(
-            "mkdir -p \"$pkgdir\"\n  cp -a /work/out/. \"$pkgdir\"/ 2>/dev/null || true\n  cd /work/src\n  {}",
-            super::cargo_install_step()
-        )
-    } else {
-        "mkdir -p \"$pkgdir\" \"$pkgdir/usr/bin\" \"$pkgdir/usr/lib\" \"$pkgdir/usr/share\"\n  cp -a /work/out/. \"$pkgdir\"/".to_string()
-    };
-    let install_body = format!("{}\n  {}", install_body, super::strip_binaries_step());
-    let build_body = if ctx.build_step.contains("cmake") {
-        "set -eo pipefail\n  true || return 1"
-    } else {
-        "true"
-    };
+    // Direkte Paketierung: Quellen sind bereits gebaut und nach /work/out
+    // gestagt. Ein .pkg.tar.zst mit .PKGINFO/.MTREE ist deterministisch und
+    // braucht weder makepkg noch fakeroot.
+    let version = ctx.version.replace('-', "_");
+    lines.push("mkdir -p /work/pkg /work/dist".to_string());
     lines.push(format!(
-        "cat > /work/pkg/PKGBUILD <<'PKGBUILD_EOF'\npkgname={name}\npkgver={version}\npkgrel=1\npkgdesc='Built by git2pkg-ai'\narch=('{arch}')\nlicense=('GPL-3.0-or-later')\noptions=('!strip' '!debug')\ndepends=(${{dep_line}})\nbuild() {{\n  {build_body}\n}}\npackage() {{\n  {install_body}\n}}\nPKGBUILD_EOF",
+        r#"installed_size=$(du -sb /work/out 2>/dev/null | cut -f1)
+cat > /work/out/.PKGINFO <<PKGINFO_EOF
+pkgname = {name}
+pkgbase = {name}
+pkgver = {version}-1
+pkgdesc = Built by git2pkg-ai
+url = https://example.invalid
+builddate = $(date +%s)
+packager = git2pkg-ai <noreply@example.invalid>
+size = $installed_size
+arch = {arch}
+license = GPL-3.0-or-later
+PKGINFO_EOF
+for dep in $dep_line; do echo "depend = $dep" >> /work/out/.PKGINFO; done
+(cd /work/out && bsdtar -czf .MTREE --format=mtree --options="!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link" .PKGINFO usr)
+(cd /work/out && bsdtar --zstd -cf "/work/dist/{name}-{version}-1-{arch}.pkg.tar.zst" .PKGINFO .MTREE usr)
+rm -f /work/out/.PKGINFO /work/out/.MTREE"#,
         name = ctx.name,
-        version = ctx.version,
+        version = version,
         arch = ctx.arch.arch(),
-        build_body = build_body,
-        install_body = install_body,
     ));
-    // Die Abhängigkeitszeile wird erst beim Schreiben eingesetzt; im
-    // Heredoc bleiben `${pkgdir}` usw. unangetastet.
-    lines.push("sed -i \"s|^depends=.*|depends=($dep_line)|\" /work/pkg/PKGBUILD".to_string());
-    lines.push("chown -R builder:builder /work/pkg /work/src /work/out /work/dist".to_string());
-    lines.push("su builder -c 'cd /work/pkg && makepkg -s --noconfirm'".to_string());
-    lines.push("rm -f /work/pkg/*-debug-*.pkg.tar.zst".to_string());
-    lines.push("cp /work/pkg/*.pkg.tar.zst /work/dist/".to_string());
     lines
 }
 
@@ -100,7 +97,6 @@ mod tests {
             arch: PackageArch::Amd64,
             build_step: "true",
             install_step: "true",
-            is_cargo: true,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
@@ -116,29 +112,31 @@ mod tests {
     }
 
     #[test]
-    fn generierte_pkgbuild_enthaelt_depends() {
+    fn generiertes_paket_enthaelt_pkginfo_und_depends() {
         let family = DistroFamily::Arch;
         let ctx = PackageContext {
             name: "repo",
-            version: "1.0.0",
+            version: "1.0.0-beta.1",
             family: &family,
             strategy: BuildStrategy::Default,
             has_pkgbuild: false,
             arch: PackageArch::Amd64,
             build_step: "true",
             install_step: "true",
-            is_cargo: false,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("pacman -Qoq"));
-        assert!(script.contains("depends=(${dep_line})"));
-        assert!(script.contains("sed -i \"s|^depends=.*|depends=($dep_line)|\""));
         assert!(script.contains("ldd"));
+        assert!(script.contains(".PKGINFO"));
+        assert!(script.contains("depend = $dep"));
+        assert!(script.contains("bsdtar --zstd"));
+        assert!(script.contains("pkgver = 1.0.0_beta.1-1"));
+        assert!(!script.contains("makepkg -s --noconfirm"));
     }
 
     #[test]
-    fn cmake_pkgbuild_bricht_build_block_schnell_ab() {
+    fn cmake_buildschritt_ist_fail_fast() {
         let family = DistroFamily::Arch;
         let ctx = PackageContext {
             name: "repo",
@@ -149,12 +147,11 @@ mod tests {
             arch: PackageArch::Amd64,
             build_step: "cmake -S . -B build && cmake --build build",
             install_step: "true",
-            is_cargo: false,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
-        assert!(script.contains("set -eo pipefail\n  true || return 1"));
-        assert!(script.contains("build() {\n  set -eo pipefail"));
+        assert!(script.contains("if ! ( cd /work/src && cmake -S . -B build"));
+        assert!(script.contains("step failed - aborting"));
     }
 
     #[test]
@@ -169,7 +166,6 @@ mod tests {
             arch: PackageArch::Amd64,
             build_step: "true",
             install_step: crate::core::packaging::cargo_install_step(),
-            is_cargo: true,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
@@ -178,6 +174,5 @@ mod tests {
         assert!(script.contains("/work/dist"));
         assert!(script.contains("install -Dm755"));
         assert!(script.contains("exit 1"));
-        assert!(script.contains("--strip-unneeded"));
     }
 }

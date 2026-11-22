@@ -59,8 +59,6 @@ pub struct PackageContext<'a> {
     pub arch: PackageArch,
     pub build_step: &'a str,
     pub install_step: &'a str,
-    /// Cargo-Projekte brauchen die robuste Binary-Übernahme im package()-Schritt.
-    pub is_cargo: bool,
     pub asset_step: &'a str,
 }
 
@@ -164,13 +162,12 @@ mod tests {
                 arch: PackageArch::Amd64,
                 build_step: "true",
                 install_step: install,
-                is_cargo: false,
                 asset_step: asset,
             };
             let script = generate(&ctx).join("\n");
             assert!(!script.trim().is_empty());
             match family {
-                DistroFamily::Arch => assert!(script.contains("makepkg")),
+                DistroFamily::Arch => assert!(script.contains("bsdtar --zstd")),
                 DistroFamily::Debian => assert!(script.contains("dpkg-deb --build")),
                 DistroFamily::Fedora | DistroFamily::Suse => {
                     assert!(script.contains("rpmbuild"))
