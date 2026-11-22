@@ -168,7 +168,10 @@ it applies to every project and never special-cases one.
 - `src/core/packaging/rpm.rs` — Fedora/RHEL and openSUSE `.rpm`
 - `src/core/packaging/verify.rs` — package verification
 - `packaging/PKGBUILD` — Arch source package template
+- `packaging/git2pkg.spec` — RPM spec for Fedora/RHEL/openSUSE
+- `packaging/build-rpm.sh` — local RPM build helper
 - `packaging/git2pkg.desktop` — desktop launcher
+- `debian/` — Debian/Ubuntu packaging (`dpkg-buildpackage`)
 
 ### GUI
 
@@ -206,6 +209,7 @@ it applies to every project and never special-cases one.
 - `.github/ISSUE_TEMPLATE/build_failure.md`
 - `.gitlab-ci.yml`
 - `scripts/test-corpus.sh` — manual smoke corpus; pass repository URLs as arguments
+- `debian/` — Debian/Ubuntu native packaging
 - `install.sh`, `uninstall.sh`
 
 ---
@@ -278,6 +282,9 @@ Version bumps happen **only when cutting a release**:
 - Update `packaging/PKGBUILD` with an Arch-compliant `pkgver` without hyphens
   (for example `0.2.0alpha26`). This PKGBUILD builds the local checkout and
   deliberately has no `_tag` or source archive.
+- Update `debian/changelog` and the fallback version in
+  `packaging/git2pkg.spec`; both native recipes build the local checkout, and
+  `packaging/build-rpm.sh` derives the RPM version from `Cargo.toml`.
 - Create an annotated tag: `git tag -a v<VERSION> -m "Release v<VERSION>"`.
 - Do not push tags unless the maintainer asks explicitly.
 
