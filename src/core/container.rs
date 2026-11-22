@@ -415,6 +415,7 @@ fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Resul
                 "clone".to_string(),
                 "--depth".to_string(),
                 "1".to_string(),
+                "--tags".to_string(),
                 url.to_string(),
                 cache.to_string_lossy().into_owned(),
             ],
@@ -425,7 +426,7 @@ fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Resul
         }
     } else {
         for args in [
-            vec!["-C", "fetch", "--all", "--prune"],
+            vec!["-C", "fetch", "--all", "--tags", "--prune"],
             vec!["-C", "reset", "--hard"],
             vec!["-C", "clean", "-fdx"],
         ] {
@@ -1979,6 +1980,14 @@ fn with_deps_prebuild_flags(script: &str, flags: &[String]) -> String {
     lines.join("\n")
 }
 
+/// Standard-Libdir der Ziel-Distribution (RPM-Distributionen nutzen lib64).
+fn target_libdir(family: &DistroFamily) -> &'static str {
+    match family {
+        DistroFamily::Fedora | DistroFamily::Suse => "/usr/lib64",
+        _ => "/usr/lib",
+    }
+}
+
 fn toolchain_packages(family: &DistroFamily, system: &BuildSystem) -> Vec<&'static str> {
     let mut packages: Vec<&'static str> = Vec::new();
     match system {
@@ -2160,6 +2169,18 @@ fn toml_version(text: &str) -> Option<String> {
     re.captures(text).map(|caps| caps[1].to_string())
 }
 
+fn autotools_version(text: &str) -> Option<String> {
+    let ac_init =
+        Regex::new(r#"(?is)AC_INIT\s*\(\s*\[?[^,\]]+\]?\s*,\s*\[?([0-9][0-9A-Za-z._\-+]*)"#)
+            .ok()?;
+    let package_version =
+        Regex::new(r#"(?m)PACKAGE_VERSION=['"]?([0-9][0-9A-Za-z._\-+]*)"#).ok()?;
+    ac_init
+        .captures(text)
+        .or_else(|| package_version.captures(text))
+        .map(|caps| caps[1].to_string())
+}
+
 fn cmake_version(text: &str) -> Option<String> {
     let re = Regex::new(r"(?is)project\s*\([^)]*?\bVERSION\s+([0-9][0-9A-Za-z.\-+]*)").unwrap();
     re.captures(text).map(|caps| caps[1].to_string())
@@ -2198,9 +2219,15 @@ fn project_identity(url: &str, src: &Path) -> ProjectIdentity {
         let from_python = fs::read_to_string(src.join("pyproject.toml"))
             .ok()
             .and_then(|text| toml_version(&text));
+        let from_autotools = ["configure.ac", "configure"].iter().find_map(|file| {
+            fs::read_to_string(src.join(file))
+                .ok()
+                .and_then(|text| autotools_version(&text))
+        });
         from_cargo
             .or(from_cmake)
             .or(from_python)
+            .or(from_autotools)
             .or_else(|| git_version(src))
     }
     .map(|raw| version_slug(&raw))
@@ -2246,14 +2273,14 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
             "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
         }
         BuildSystem::Meson => {
-            "meson setup build --prefix=/usr && ninja -C build && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
+            r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; meson setup build --prefix=/usr --libdir="${libdir##*/}" && ninja -C build && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \;"#
         }
         BuildSystem::Go => {
             r#"export GOCACHE=/work/go-cache; mkdir -p /work/dist /work/go-cache; found=0; for pkg in $(go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./... 2>/dev/null); do name=$(basename "$pkg"); go build -o "/work/dist/$name" "$pkg" && found=1; done; if [ "$found" = 0 ]; then go build -o /work/dist/app .; fi"#
         }
         BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .",
         BuildSystem::Autotools => {
-            "if [ -x ./configure ]; then ./configure --prefix=/usr; else autoreconf -fi && ./configure --prefix=/usr; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b \"$1\" | grep -q ELF && cp \"$1\" /work/dist/; else cp \"$1\" /work/dist/; fi' _ {} \\;"
+            r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; if [ -x ./configure ]; then ./configure --prefix=/usr --libdir="$libdir"; else autoreconf -fi && ./configure --prefix=/usr --libdir="$libdir"; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b "$1" | grep -q ELF && cp "$1" /work/dist/; else cp "$1" /work/dist/; fi' _ {} \;"#
         }
         BuildSystem::Make => {
             "make && find . -maxdepth 2 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b \"$1\" | grep -q ELF && cp \"$1\" /work/dist/; else cp \"$1\" /work/dist/; fi' _ {} \\;"
@@ -2578,6 +2605,17 @@ fn build_script_with_flags(
 ) -> String {
     let texts = Texts::new(config.language);
     let target = config.target_distro.info(&config.distro);
+    let mut cmake_flags: Vec<String> = cmake_flags.to_vec();
+    push_unique_string(
+        &mut cmake_flags,
+        format!(
+            "-DCMAKE_INSTALL_LIBDIR={}",
+            target_libdir(&target.family)
+                .rsplit('/')
+                .next()
+                .unwrap_or("lib")
+        ),
+    );
     let extra: Vec<String> = extra
         .iter()
         .map(|p| sanitize_package(p))
@@ -2598,6 +2636,7 @@ fn build_script_with_flags(
         // root. Ohne diese Ausnahme verweigert git seine Arbeit.
         "git config --global --add safe.directory '*' 2>/dev/null || true".to_string(),
         echo_line(&texts.log_setup(&target.package_manager)),
+        format!("export GIT2PKG_LIBDIR={}", target_libdir(&target.family)),
         base_dependencies(&target.family, system),
     ];
     if config.cmake_compat {
@@ -2654,7 +2693,7 @@ fn build_script_with_flags(
         ));
     }
 
-    let build_step = build_step_text_with_flags(system, strategy, repo_script, cmake_flags);
+    let build_step = build_step_text_with_flags(system, strategy, repo_script, &cmake_flags);
     let install_step = project_install_step(system, &identity.name);
     let asset_step = asset_staging_step(&identity.name);
     let pkg_ctx = crate::core::packaging::PackageContext {
@@ -3232,6 +3271,55 @@ mod tests {
             let install = project_install_step(&system, "example-app");
             assert!(install.contains("staging built binaries"), "{install}");
         }
+    }
+
+    #[test]
+    fn autotools_version_wird_gelesen() {
+        assert_eq!(
+            autotools_version("AC_INIT([example-app], [1.2.3], [bugs@example.invalid])"),
+            Some("1.2.3".to_string())
+        );
+        assert_eq!(
+            autotools_version("PACKAGE_VERSION='4.5.6'"),
+            Some("4.5.6".to_string())
+        );
+        assert_eq!(autotools_version("nothing here"), None);
+    }
+
+    #[test]
+    fn ziel_libdir_wird_gesetzt() {
+        assert_eq!(target_libdir(&DistroFamily::Fedora), "/usr/lib64");
+        assert_eq!(target_libdir(&DistroFamily::Suse), "/usr/lib64");
+        assert_eq!(target_libdir(&DistroFamily::Arch), "/usr/lib");
+        assert_eq!(target_libdir(&DistroFamily::Debian), "/usr/lib");
+
+        let fedora = build_script(
+            &config(DistroFamily::Fedora, TargetFormat::NativePackage),
+            &BuildSystem::Autotools,
+            &[],
+        );
+        assert!(fedora.contains("export GIT2PKG_LIBDIR=/usr/lib64"));
+        assert!(fedora.contains("--libdir=\"$libdir\""));
+
+        let fedora_cmake = build_script(
+            &config(DistroFamily::Fedora, TargetFormat::NativePackage),
+            &BuildSystem::CMake,
+            &[],
+        );
+        assert!(fedora_cmake.contains("-DCMAKE_INSTALL_LIBDIR=lib64"));
+
+        let arch = build_script(
+            &config(DistroFamily::Arch, TargetFormat::NativePackage),
+            &BuildSystem::Autotools,
+            &[],
+        );
+        assert!(arch.contains("export GIT2PKG_LIBDIR=/usr/lib"));
+        let arch_cmake = build_script(
+            &config(DistroFamily::Arch, TargetFormat::NativePackage),
+            &BuildSystem::CMake,
+            &[],
+        );
+        assert!(arch_cmake.contains("-DCMAKE_INSTALL_LIBDIR=lib"));
     }
 
     #[test]
