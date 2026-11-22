@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -489,6 +489,32 @@ impl Git2PkgApp {
             .push_str("[warn] Build vom Benutzer abgebrochen.\n");
     }
 
+    /// Beenden mit Cache-Loeschung: Build-Thread und Container zuerst stoppen,
+    /// damit der Hintergrund danach keine Cache-Dateien neu anlegt.
+    fn stop_active_build_for_exit(&mut self) {
+        if self.building {
+            self.cancel_flag.store(true, Ordering::Relaxed);
+            if let Some(id) = self.container_id.lock().unwrap().take() {
+                let _ = Command::new(self.engine.binary())
+                    .args(["rm", "-f", &id])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+            self.building = false;
+        }
+        if let Some(receiver) = self.receiver.take() {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                match receiver.try_recv() {
+                    Ok(_) => continue,
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => std::thread::sleep(Duration::from_millis(20)),
+                }
+            }
+        }
+    }
+
     fn poll(&mut self, ctx: &egui::Context) {
         let mut changed = false;
         let mut clear_receiver = false;
@@ -729,7 +755,7 @@ impl eframe::App for Git2PkgApp {
         if ctx.input(|i| i.viewport().close_requested())
             && !self.force_close
             && self.had_build_in_session
-            && self.last_build_failed
+            && (self.last_build_failed || self.building)
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.show_cleanup_dialog = true;
@@ -812,10 +838,10 @@ impl eframe::App for Git2PkgApp {
             });
         });
 
-        // Statusleiste: fest zwei Zeilen - Systeminfos oben, Fortschritt mittig darunter.
+        // Statusleiste: eine Zeile mit allen Systeminfos, darunter exakt zentrierter Balken.
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                let green = self.value_color();
+            let green = self.value_color();
+            ui.horizontal(|ui| {
                 ui.strong(texts.status_host());
                 ui.colored_label(green, self.distro.name.as_str());
                 ui.separator();
@@ -830,24 +856,27 @@ impl eframe::App for Git2PkgApp {
                 ui.separator();
                 ui.strong(texts.status_engine());
                 ui.colored_label(green, self.engine.label());
-            });
-            ui.add_space(3.0);
-            let total_w = ui.available_width();
-            let bar_w = (total_w * 0.55).clamp(240.0, 520.0);
-            ui.vertical_centered(|ui| {
+                ui.separator();
                 ui.strong(texts.status_step());
-                ui.colored_label(self.value_color(), self.step.as_str());
+                ui.colored_label(green, self.step.as_str());
             });
+            let panel_rect = ui.max_rect();
+            let bar_w = (panel_rect.width() * 0.55).clamp(240.0, 520.0);
+            let bar_h = 18.0;
+            let row_center_y = ui.cursor().top() + bar_h * 0.5 + 3.0;
+            let bar_rect = egui::Rect::from_center_size(
+                egui::pos2(panel_rect.center().x, row_center_y),
+                egui::vec2(bar_w, bar_h),
+            );
             let percent = (self.build_progress * 100.0).round() as u32;
             let label = texts.progress_label(percent);
-            ui.horizontal(|ui| {
-                ui.add_space(((total_w - bar_w) * 0.5).max(0.0));
-                ui.add(
-                    egui::ProgressBar::new(self.build_progress)
-                        .desired_width(bar_w)
-                        .text(label),
-                );
-            });
+            ui.put(
+                bar_rect,
+                egui::ProgressBar::new(self.build_progress)
+                    .desired_width(bar_w)
+                    .text(label),
+            );
+            ui.allocate_rect(bar_rect, egui::Sense::hover());
         });
 
         // Log-Aktionen und Status sind unten angedockt und bleiben auch nach
@@ -1118,6 +1147,7 @@ impl eframe::App for Git2PkgApp {
             if choice > 0 {
                 match choice {
                     1 => {
+                        self.stop_active_build_for_exit();
                         cleanup_all_cache_with(self.engine.clone(), &self.distro.base_image);
                         self.last_build_failed = false;
                     }
@@ -1707,6 +1737,31 @@ impl eframe::App for Git2PkgApp {
                             .text_color(log_line_color("", dark)),
                     );
                     log_hovered = response.hovered();
+
+                    // Beim Drag-Markieren automation stick_to_bottom pausieren und
+                    // an den Log-Rändern weiter scrollen.
+                    let drag_selecting =
+                        selection_active && ui.input(|input| input.pointer.primary_down());
+                    if drag_selecting {
+                        let pointer = ui
+                            .input(|input| input.pointer.interact_pos())
+                            .or_else(|| ui.input(|input| input.pointer.latest_pos()));
+                        if let Some(pos) = pointer {
+                            let edge = 28.0_f32;
+                            let delta_y = if pos.y <= response.rect.top() + edge {
+                                -12.0
+                            } else if pos.y >= response.rect.bottom() - edge {
+                                12.0
+                            } else {
+                                0.0
+                            };
+                            if delta_y != 0.0 {
+                                ui.scroll_with_delta(egui::vec2(0.0, delta_y));
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    }
+
                     let mut state =
                         egui::TextEdit::load_state(ui.ctx(), response.id).unwrap_or_default();
                     let popup_open = egui::Popup::is_id_open(ui.ctx(), log_menu_id);

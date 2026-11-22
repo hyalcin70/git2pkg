@@ -33,12 +33,13 @@ The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
 `src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
 
-Persistent Git clones live in `~/.cache/git2pkg/repos/<repo_hash>/` and are
-updated in place. Temporary build workspaces live in
-`~/.cache/git2pkg/builds/<build_id>/` and are removed after success. The exit
-dialog option "Delete everything" wipes the complete `~/.cache/git2pkg/` tree
-(including `repos/`), stopping build containers first and using a short-lived
-container if root-owned artifacts remain. Learned mappings in
+Persistent Git clones live in `~/.cache/git2pkg/repos/repo-<repo_hash>/` and
+are updated in place; build workspaces use the separate prefix
+`~/.cache/git2pkg/builds/build-<unix_millis>-<pid>/src/` and are complete
+independent copies (no symlink or shared clone). The exit dialog option
+"Delete everything" first cancels the active build and stops build containers,
+then wipes the complete `~/.cache/git2pkg/` tree (including `repos/`), using a
+short-lived container if root-owned artifacts remain. Learned mappings in
 `~/.config/git2pkg/learned_mappings.json` are never touched by cache cleanup;
 only verified build recipes are reused. The GUI has no learning-reset button;
 the CLI flag `--reset-learning` remains available. After package installs
@@ -66,7 +67,7 @@ classes instead.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.24`)
+## 3. Repository Map (as of `v0.2.0-alpha.25`)
 
 ### Entry points
 
@@ -207,9 +208,9 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.24`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.25`)
 
-Current release: `v0.2.0-alpha.24`.
+Current release: `v0.2.0-alpha.25`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
   C++/CMake superbuilds (for example Bambu Studio), Meson/C projects (for

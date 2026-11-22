@@ -345,8 +345,15 @@ fn build_cache_root() -> PathBuf {
 /// Dauerhafter, sauber gehaltener Klon-Cache. Er wird niemals vom Build-Cache-
 /// Cleanup geloescht und bei jedem Lauf nur aktualisiert.
 fn repo_cache_root() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join(".cache/git2pkg/repos")
+    git2pkg_cache_root().join("repos")
+}
+
+fn repo_cache_dir_name(url: &str) -> String {
+    format!("repo-{}", source_cache_key(url))
+}
+
+fn build_dir_name(millis: u128, pid: u32) -> String {
+    format!("build-{millis}-{pid}")
 }
 
 fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
@@ -444,7 +451,7 @@ fn prepare_source_workspace(
     tx: &Sender<BuildEvent>,
     texts: &Texts,
 ) -> Result<(), String> {
-    let cache = repo_cache_root().join(source_cache_key(url));
+    let cache = repo_cache_root().join(repo_cache_dir_name(url));
     step(tx, texts.step_clone());
     if let Err(error) = prepare_repo_cache(url, &cache, tx) {
         mark_failed_build(src.parent().unwrap_or(src));
@@ -2469,16 +2476,17 @@ fn source_cache_key(url: &str) -> String {
 /// Prüft im erhaltenen Quellcode-Cache, ob lokale deps/ vorhanden sind.
 /// Die GUI nutzt das, um Stufe 2 bei Bedarf zu überspringen.
 pub fn cached_repo_has_local_dependencies(url: &str) -> bool {
-    let src = repo_cache_root().join(source_cache_key(url));
+    let src = repo_cache_root().join(repo_cache_dir_name(url));
     has_local_dependencies(&src)
 }
 
-/// Arbeitsverzeichnis im Cache - bei Fehlschlag bleibt der Quellcode erhalten.
-fn temp_workdir(url: &str) -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let dir = Path::new(&home)
-        .join(".cache/git2pkg/builds")
-        .join(source_cache_key(url));
+/// Eindeutiges, vom Repo-Cache getrenntes Arbeitsverzeichnis pro Build.
+fn temp_workdir(_url: &str) -> Result<PathBuf, String> {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let dir = build_cache_root().join(build_dir_name(millis, std::process::id()));
     fs::create_dir_all(dir.join("out")).map_err(|e| e.to_string())?;
     fs::create_dir_all(dir.join("dist")).map_err(|e| e.to_string())?;
     Ok(dir)
@@ -3698,6 +3706,22 @@ mod tests {
             TargetFormat::NativePackage
         );
         assert_eq!(TargetFormat::NativePackage.key(), "package");
+    }
+
+    #[test]
+    fn cache_praefixe_sind_getrennt() {
+        let repo = repo_cache_dir_name("example-app");
+        assert!(repo.starts_with("repo-"));
+        assert_eq!(
+            build_dir_name(1732285620123, 4812),
+            "build-1732285620123-4812"
+        );
+        let work = temp_workdir("example-app").unwrap();
+        let name = work.file_name().unwrap().to_string_lossy();
+        assert!(name.starts_with("build-"));
+        assert!(!name.starts_with("repo-"));
+        make_tree_writable(&work);
+        let _ = fs::remove_dir_all(&work);
     }
 
     #[test]
