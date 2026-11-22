@@ -196,11 +196,30 @@ pub fn package_from_search(output: &str, term: &str, package_manager: &str) -> O
         if !valid_package_name(&name) {
             continue;
         }
-        if name.contains(term) || term.contains(&name) {
+        if package_name_matches(&name, term) {
             return Some(name);
         }
     }
     None
+}
+
+/// Prüft, ob ein Paketname wirklich zum Suchbegriff gehört. Reine
+/// Teilstring-Treffer sind zu unscharf (`ecm` steckt auch in `doublecmd`).
+fn package_name_matches(name: &str, term: &str) -> bool {
+    if name == term {
+        return true;
+    }
+    let tokens: Vec<&str> = name
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens.contains(&term) {
+        return true;
+    }
+    name.starts_with(&format!("lib{}", term))
+        || name.starts_with(&format!("{}-", term))
+        || name.contains(&format!("-{}-", term))
+        || name.ends_with(&format!("-{}", term))
 }
 
 /// Kurzschlüssel für die Wissensdatenbank, z. B. `arch` oder `debian`.
@@ -998,9 +1017,9 @@ pub fn tool_file_database_commands(package_manager: &str, tool: &str) -> Vec<Str
 
 /// Parst die Paketnamen aus der Ausgabe der Dateidatenbank.
 pub fn packages_from_file_database(output: &str, tool: &str) -> Vec<String> {
-    let Some(name) = safe_tool_name(tool) else {
+    if safe_tool_name(tool).is_none() {
         return Vec::new();
-    };
+    }
     let mut packages: Vec<String> = Vec::new();
     for line in output.lines() {
         let line = line.trim();
@@ -1011,10 +1030,12 @@ pub fn packages_from_file_database(output: &str, tool: &str) -> Vec<String> {
             rest.split_whitespace().next().unwrap_or("")
         } else if let Some((head, _)) = line.split_once(':') {
             head.rsplit('/').next().unwrap_or(head)
-        } else if line.starts_with(&format!("/usr/bin/{name}")) {
-            continue;
         } else {
-            line.split_whitespace().next().unwrap_or("")
+            let token = line.split_whitespace().next().unwrap_or("");
+            if token.starts_with('/') || looks_like_path(token) {
+                continue;
+            }
+            token
         };
         let candidate = candidate
             .rsplit('/')
@@ -1027,6 +1048,31 @@ pub fn packages_from_file_database(output: &str, tool: &str) -> Vec<String> {
         }
     }
     packages
+}
+
+/// Dateipfade aus Paketmanager-Ausgaben erkennen (z. B. die Pfadzeile unter
+/// einem `pacman -Fx`-Treffer).
+fn looks_like_path(token: &str) -> bool {
+    let first = token.split('/').next().unwrap_or(token);
+    matches!(
+        first,
+        "usr"
+            | "etc"
+            | "opt"
+            | "var"
+            | "lib"
+            | "lib64"
+            | "bin"
+            | "sbin"
+            | "boot"
+            | "dev"
+            | "proc"
+            | "sys"
+            | "run"
+            | "home"
+            | "root"
+            | "tmp"
+    )
 }
 
 pub fn probe_commands(package_manager: &str, dep: &MissingDep) -> Vec<String> {
@@ -1556,6 +1602,42 @@ mod tests {
         assert_eq!(
             package_from_search(plain, "boost", "pacman"),
             Some("boost".to_string())
+        );
+    }
+
+    #[test]
+    fn unscharfe_teilstring_treffer_werden_abgelehnt() {
+        // "ecm" steckt zufaellig in "doublecmd".
+        assert_eq!(
+            package_from_search("doublecmd-qt5\n", "ecm", "pacman"),
+            None
+        );
+        assert_eq!(
+            package_from_search("extra-cmake-modules\n", "ecm", "pacman"),
+            None
+        );
+        assert_eq!(
+            package_from_search("gmp-ecm\n", "ecm", "pacman"),
+            Some("gmp-ecm".to_string())
+        );
+        assert_eq!(
+            package_from_search("ecm-tools\n", "ecm", "pacman"),
+            Some("ecm-tools".to_string())
+        );
+    }
+
+    #[test]
+    fn dateidatenbank_ignoriert_pfadzeilen_und_erkennt_repo_pakete() {
+        let output =
+            "extra/extra-cmake-modules 6.32.0-1 (kf6)\n    usr/share/ECM/cmake/ECMConfig.cmake\n";
+        assert_eq!(
+            packages_from_file_database(output, "ECM"),
+            vec!["extra-cmake-modules".to_string()]
+        );
+        let owned = "usr/bin/vdb_print is owned by extra/openvdb 13.0.0-3\n";
+        assert_eq!(
+            packages_from_file_database(owned, "vdb_print"),
+            vec!["openvdb".to_string()]
         );
     }
 

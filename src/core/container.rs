@@ -33,7 +33,7 @@ const DEPS_FAILURE_MARKER: &str = "[deps] build failed";
 fn deps_fallback_needed(output: &str, skip_deps: bool) -> bool {
     !skip_deps && output.contains(DEPS_FAILURE_MARKER)
 }
-const MAX_ATTEMPTS: u8 = 5;
+const MAX_ATTEMPTS: u8 = 4;
 const INITIAL_HEAL_ROUNDS: u8 = 5;
 const MAX_HEAL_ROUNDS: u8 = 10;
 
@@ -272,15 +272,6 @@ pub enum BuildStrategy {
 }
 
 impl BuildStrategy {
-    pub fn index(self) -> u8 {
-        match self {
-            Self::Default => 1,
-            Self::SystemLibsOnly => 2,
-            Self::RepoScript => 3,
-            Self::DirectStagingFallback => 4,
-        }
-    }
-
     /// Nächste sinnvolle Stufe. Ohne lokale deps/ wird Stufe 2 übersprungen.
     pub fn next(self, has_deps: bool) -> Self {
         match self {
@@ -318,6 +309,35 @@ impl BuildStrategy {
             BuildStrategy::DirectStagingFallback => "Direct build-system fallback",
         }
     }
+}
+
+/// Nächste noch nicht versuchte Strategie. Es gibt keinen Rücksprung zum
+/// Anfang: Sind alle sinnvollen Stufen versucht, endet der Build.
+fn next_unvisited_strategy(
+    current: BuildStrategy,
+    has_deps: bool,
+    visited: &HashSet<&'static str>,
+) -> Option<BuildStrategy> {
+    let order: &[BuildStrategy] = if has_deps {
+        &[
+            BuildStrategy::Default,
+            BuildStrategy::SystemLibsOnly,
+            BuildStrategy::RepoScript,
+            BuildStrategy::DirectStagingFallback,
+        ]
+    } else {
+        &[
+            BuildStrategy::Default,
+            BuildStrategy::RepoScript,
+            BuildStrategy::DirectStagingFallback,
+        ]
+    };
+    let start = order.iter().position(|strategy| *strategy == current)?;
+    order
+        .iter()
+        .skip(start + 1)
+        .copied()
+        .find(|strategy| !visited.contains(strategy.key()))
 }
 
 /// Standard-Ausgabeordner: `~/Downloads/git2pkg-ai`, relativ zum Home-Verzeichnis
@@ -1146,9 +1166,10 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut forced_strategy: Option<BuildStrategy> = None;
 
     let mut strategy_attempt: u8 = 1;
+    let mut visited_strategies: HashSet<&'static str> = HashSet::new();
     let mut heal_round: u8 = 1;
     let mut allowed_rounds: u8 = INITIAL_HEAL_ROUNDS;
-    'attempt: while strategy_attempt <= MAX_ATTEMPTS {
+    'attempt: loop {
         if config.cancel_flag.load(Ordering::Relaxed) {
             return Err(abort_running_build(&container, config, tx));
         }
@@ -1163,7 +1184,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             tx,
             texts.step_strategy_round(
                 texts.strategy_label(effective_strategy),
-                effective_strategy.index(),
+                strategy_attempt,
                 MAX_ATTEMPTS,
                 heal_round,
                 allowed_rounds,
@@ -1181,22 +1202,20 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             && !skipped_incomplete.contains(strategy_name)
         {
             skipped_incomplete.insert(strategy_name.to_string());
-            let (next, message) = if effective_strategy == BuildStrategy::Default
+            let message = if effective_strategy == BuildStrategy::Default
                 && mappings.has_incomplete_default(&config.url)
             {
-                (
-                    BuildStrategy::SystemLibsOnly,
-                    "[learn] stored learning profile active - skipping deps/ and building against system libraries".to_string(),
-                )
+                "[learn] stored learning profile active - skipping deps/ and building against system libraries".to_string()
             } else {
-                let next = effective_strategy.next(has_deps);
-                (
-                    next,
-                    format!(
-                        "[learn] known incomplete profile for strategy '{}' skipped - starting with an alternative strategy",
-                        strategy_name
-                    ),
+                format!(
+                    "[learn] known incomplete profile for strategy '{}' skipped - starting with an alternative strategy",
+                    strategy_name
                 )
+            };
+            let Some(next) =
+                next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+            else {
+                break;
             };
             let _ = tx.send(BuildEvent::Log(message));
             config.skip_deps = next == BuildStrategy::SystemLibsOnly;
@@ -1206,6 +1225,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             forced_strategy = Some(next);
             continue 'attempt;
         }
+        visited_strategies.insert(effective_strategy.key());
         // Nur Stufe 1 baut lokale deps/ vor; alle späteren Stufen nutzen Systemlibs.
         let deps_first = has_deps && effective_strategy == BuildStrategy::Default;
         if deps_first {
@@ -1258,11 +1278,19 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     .to_string(),
             ));
             repo_script = None;
+            let next = if !visited_strategies.contains(BuildStrategy::Default.key()) {
+                Some(BuildStrategy::Default)
+            } else {
+                next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+            };
+            let Some(next) = next else {
+                break;
+            };
             strategy_attempt += 1;
             heal_round = 1;
             allowed_rounds = INITIAL_HEAL_ROUNDS;
             config.skip_deps = false;
-            forced_strategy = Some(BuildStrategy::Default);
+            forced_strategy = Some(next);
             continue 'attempt;
         }
 
@@ -1285,7 +1313,11 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                             .to_string(),
                     );
                 }
-                let next = effective_strategy.next(has_deps);
+                let next =
+                    next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies);
+                let Some(next) = next else {
+                    break;
+                };
                 strategy_attempt += 1;
                 heal_round = 1;
                 allowed_rounds = INITIAL_HEAL_ROUNDS;
@@ -1344,7 +1376,11 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             if heal_source_group(&work, &error, tx) {
                 heal_round += 1;
                 if heal_round > allowed_rounds {
-                    let next = effective_strategy.next(has_deps);
+                    let Some(next) =
+                        next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+                    else {
+                        break;
+                    };
                     strategy_attempt += 1;
                     heal_round = 1;
                     allowed_rounds = INITIAL_HEAL_ROUNDS;
@@ -1381,11 +1417,16 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
                         .to_string(),
                 ));
-                config.skip_deps = true;
+                let Some(next) =
+                    next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+                else {
+                    break;
+                };
+                config.skip_deps = next == BuildStrategy::SystemLibsOnly;
                 strategy_attempt += 1;
                 heal_round = 1;
                 allowed_rounds = INITIAL_HEAL_ROUNDS;
-                forced_strategy = Some(BuildStrategy::SystemLibsOnly);
+                forced_strategy = Some(next);
                 continue 'attempt;
             }
             mark_failed_build(&work);
@@ -1434,11 +1475,20 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     let Ok(found) = container.exec(&command, tx) else {
                         continue;
                     };
-                    for candidate in found
-                        .text
-                        .lines()
-                        .filter_map(|line| package_from_search(line, &term, manager))
-                    {
+                    // pacman liefert `repo/pkg` bzw. `is owned by repo/pkg`;
+                    // der Dateidatenbank-Parser versteht beide Formen. Für die
+                    // übrigen Manager bleibt der Suchparser zuständig.
+                    let mut probe_packages: Vec<String> = Vec::new();
+                    if manager == "pacman" {
+                        probe_packages.extend(packages_from_file_database(&found.text, &term));
+                    }
+                    probe_packages.extend(
+                        found
+                            .text
+                            .lines()
+                            .filter_map(|line| package_from_search(line, &term, manager)),
+                    );
+                    for candidate in probe_packages {
                         let package = sanitize_package(&candidate);
                         if package.is_empty() || failed_candidates.contains(&package) {
                             continue;
@@ -1512,11 +1562,16 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                         "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
                             .to_string(),
                     ));
-                    config.skip_deps = true;
+                    let Some(next) =
+                        next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+                    else {
+                        break;
+                    };
+                    config.skip_deps = next == BuildStrategy::SystemLibsOnly;
                     strategy_attempt += 1;
                     heal_round = 1;
                     allowed_rounds = INITIAL_HEAL_ROUNDS;
-                    forced_strategy = Some(BuildStrategy::SystemLibsOnly);
+                    forced_strategy = Some(next);
                     continue 'attempt;
                 }
                 mark_failed_build(&work);
@@ -1553,7 +1608,11 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             cmake_flags: cmake_flags.clone(),
         };
         if !retry_state_changed(&round_state, &after_state) {
-            let next = effective_strategy.next(has_deps);
+            let Some(next) =
+                next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+            else {
+                break;
+            };
             strategy_attempt += 1;
             heal_round = 1;
             allowed_rounds = INITIAL_HEAL_ROUNDS;
@@ -1567,7 +1626,11 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
 
         if heal_round >= allowed_rounds {
-            let next = effective_strategy.next(has_deps);
+            let Some(next) =
+                next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+            else {
+                break;
+            };
             strategy_attempt += 1;
             heal_round = 1;
             allowed_rounds = INITIAL_HEAL_ROUNDS;
@@ -1584,7 +1647,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
     mark_failed_build(&work);
     Err(texts.err_max_attempts(
-        strategy_attempt.saturating_sub(1),
+        visited_strategies.len().max(1) as u8,
         &tail_lines(&last_output, 80),
     ))
 }
@@ -2950,6 +3013,32 @@ mod tests {
             }
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn strategien_werden_nicht_wiederholt() {
+        let mut visited: HashSet<&'static str> = HashSet::new();
+        visited.insert(BuildStrategy::Default.key());
+        visited.insert(BuildStrategy::SystemLibsOnly.key());
+        assert_eq!(
+            next_unvisited_strategy(BuildStrategy::SystemLibsOnly, true, &visited),
+            Some(BuildStrategy::RepoScript)
+        );
+        visited.insert(BuildStrategy::RepoScript.key());
+        assert_eq!(
+            next_unvisited_strategy(BuildStrategy::RepoScript, true, &visited),
+            Some(BuildStrategy::DirectStagingFallback)
+        );
+        visited.insert(BuildStrategy::DirectStagingFallback.key());
+        assert_eq!(
+            next_unvisited_strategy(BuildStrategy::DirectStagingFallback, true, &visited),
+            None
+        );
+        let empty: HashSet<&'static str> = HashSet::new();
+        assert_eq!(
+            next_unvisited_strategy(BuildStrategy::Default, false, &empty),
+            Some(BuildStrategy::RepoScript)
+        );
     }
 
     #[test]
