@@ -674,6 +674,7 @@ fn cleanup_all_builds_in(builds: &Path) -> usize {
 
 /// Löscht nur temporäre Build-/Paket-Verzeichnisse fehlgeschlagener Builds;
 /// der geklonte Quellcode bleibt für einen erneuten Versuch erhalten.
+#[allow(dead_code)]
 pub fn cleanup_failed_build_artifacts() -> usize {
     cleanup_failed_build_artifacts_in(&build_cache_root())
 }
@@ -4059,6 +4060,29 @@ mod tests {
             assert!(!work.join(name).exists());
         }
         assert!(!work.join("FAILED").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn build_cache_loeschen_laesst_repo_cache_stehen() {
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-ai-builds-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let builds = root.join("builds");
+        let repos = root.join("repos");
+        fs::create_dir_all(builds.join("build-1/src")).unwrap();
+        fs::create_dir_all(&repos).unwrap();
+        fs::write(repos.join("keep"), "x").unwrap();
+
+        assert!(cleanup_all_builds_in(&builds) >= 1);
+        assert!(!builds.exists());
+        assert!(repos.join("keep").is_file());
+
         let _ = fs::remove_dir_all(root);
     }
 

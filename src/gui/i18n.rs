@@ -1063,11 +1063,11 @@ impl Texts {
     }
     pub fn cleanup_body(&self) -> &'static str {
         self.get(
-            "The last build failed. Do you want to clean up the temporary build and source files in the cache before git2pkg-ai exits?",
-            "Der letzte Build ist fehlgeschlagen. Möchtest du die temporären Build- und Quellcode-Dateien im Cache aufräumen, bevor git2pkg-ai beendet wird?",
-            "Son derleme başarısız oldu. git2pkg-ai kapanmadan önce önbellekteki geçici derleme ve kaynak kod dosyalarını temizlemek istiyor musun?",
-            "La última compilación falló. ¿Quieres limpiar los archivos temporales de compilación y el código fuente en la caché antes de que se cierre git2pkg-ai?",
-            "La dernière compilation a échoué. Voulez-vous nettoyer les fichiers temporaires de compilation et les sources dans le cache avant que git2pkg-ai ne se ferme ?",
+            "The last build failed. You can delete the build cache (the Git repository cache is kept) or everything in the cache before git2pkg-ai exits.",
+            "Der letzte Build ist fehlgeschlagen. Du kannst den Build-Cache löschen (der Git-Repository-Cache bleibt erhalten) oder alles im Cache, bevor git2pkg-ai beendet wird.",
+            "Son derleme başarısız oldu. git2pkg-ai kapanmadan önce derleme önbelleğini (Git deposu önbelleği korunur) veya önbellekteki her şeyi silebilirsin.",
+            "La última compilación falló. Puedes eliminar la caché de compilación (la caché del repositorio Git se conserva) o todo en la caché antes de que se cierre git2pkg-ai.",
+            "La dernière compilation a échoué. Vous pouvez supprimer le cache de compilation (le cache du dépôt Git est conservé) ou tout le cache avant la fermeture de git2pkg-ai.",
         )
     }
 
@@ -1129,11 +1129,11 @@ impl Texts {
     }
     pub fn cleanup_delete_artifacts(&self) -> &'static str {
         self.get(
-            "Delete build artifacts only & exit",
-            "Nur Build-Reste löschen & beenden",
-            "Sadece derleme kalıntılarını sil ve çık",
-            "Eliminar solo restos de compilación y salir",
-            "Supprimer uniquement les artefacts de compilation et quitter",
+            "Delete build cache & exit",
+            "Build-Cache löschen & beenden",
+            "Derleme önbelleğini sil ve çık",
+            "Eliminar caché de compilación y salir",
+            "Supprimer le cache de compilation et quitter",
         )
     }
     pub fn cleanup_delete_nothing(&self) -> &'static str {
