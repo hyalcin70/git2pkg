@@ -466,6 +466,7 @@ impl Git2PkgAiApp {
             submodule_fix: false,
             rustup_fix: false,
             skip_deps: false,
+            include_dirs: Vec::new(),
             cancel_flag: self.cancel_flag.clone(),
             container_id: self.container_id.clone(),
         };

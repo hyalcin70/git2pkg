@@ -43,6 +43,7 @@ const MAX_HEAL_ROUNDS: u8 = 10;
 struct RetryState {
     packages: Vec<String>,
     cmake_flags: Vec<String>,
+    include_dirs: Vec<String>,
 }
 
 fn push_unique_string(list: &mut Vec<String>, value: String) {
@@ -876,6 +877,8 @@ pub struct BuildConfig {
     pub rustup_fix: bool,
     /// Nach gescheitertem deps/-Vorbau: Hauptprojekt gegen Systembibliotheken bauen.
     pub skip_deps: bool,
+    /// Zusätzliche Include-Pfade, die aus fehlenden Headern/pkg-config ermittelt wurden.
+    pub include_dirs: Vec<String>,
     /// Vom GUI-Thread gesetzt, um einen laufenden Build sofort zu stoppen.
     pub cancel_flag: Arc<AtomicBool>,
     /// ID des aktuellen Wegwerf-Containers für den sofortigen Stopp.
@@ -957,6 +960,69 @@ pub fn run_build(mut config: BuildConfig, tx: Sender<BuildEvent>) {
             let _ = tx.send(BuildEvent::Failed(err));
         }
     }
+}
+
+/// Findet den Include-Pfad eines fehlenden Headers in den Systemverzeichnissen.
+fn header_include_dirs(
+    container: &BuildContainer,
+    header: &str,
+    tx: &Sender<BuildEvent>,
+) -> Vec<String> {
+    let base = Path::new(header)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(header);
+    if base.is_empty()
+        || !base
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c))
+    {
+        return Vec::new();
+    }
+    let command = format!(
+        "find /usr/include /usr/local/include -maxdepth 3 -name {} -printf '%h\\n' 2>/dev/null | sort -u",
+        shell_quote(base)
+    );
+    include_dirs_from_command(container, &command, tx)
+}
+
+/// Fragt pkg-config nach den Include-Pfaden eines erkannten Moduls.
+fn pkgconfig_include_dirs(
+    container: &BuildContainer,
+    name: &str,
+    tx: &Sender<BuildEvent>,
+) -> Vec<String> {
+    if !valid_package_name(name) {
+        return Vec::new();
+    }
+    let command = format!("pkg-config --cflags {}", shell_quote(name));
+    let Ok(output) = container.exec(&command, tx) else {
+        return Vec::new();
+    };
+    output
+        .text
+        .split_whitespace()
+        .filter_map(|token| token.strip_prefix("-I"))
+        .filter(|dir| dir.starts_with('/') && *dir != "/usr/include")
+        .map(str::to_string)
+        .collect()
+}
+
+fn include_dirs_from_command(
+    container: &BuildContainer,
+    command: &str,
+    tx: &Sender<BuildEvent>,
+) -> Vec<String> {
+    let Ok(output) = container.exec(command, tx) else {
+        return Vec::new();
+    };
+    output
+        .text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('/') && !line.contains(' ') && *line != "/usr/include")
+        .map(str::to_string)
+        .collect()
 }
 
 /// Paketprobe im laufenden Container. Erfolg = exit code 0.
@@ -1206,6 +1272,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         let round_state = RetryState {
             packages: extra_packages.clone(),
             cmake_flags: cmake_flags.clone(),
+            include_dirs: config.include_dirs.clone(),
         };
         let effective_strategy = forced_strategy.unwrap_or(config.strategy);
         let strategy_name = effective_strategy.label();
@@ -1494,6 +1561,30 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
         let mut unresolved: Option<MissingDep> = None;
         for dep in &missing {
+            // Fehlt ein Header, obwohl das Paket installiert ist, liegt er oft
+            // in einem Unterordner von /usr/include. Diesen Pfad ergänzen.
+            if let MissingDep::Header(header) = dep {
+                for dir in header_include_dirs(&container, header, tx) {
+                    if !config.include_dirs.contains(&dir) {
+                        let _ = tx.send(BuildEvent::Log(format!(
+                            "[include] header '{}' found in {} - adding include path",
+                            header, dir
+                        )));
+                        config.include_dirs.push(dir);
+                    }
+                }
+            }
+            if let MissingDep::PkgConfig(name) = dep {
+                for dir in pkgconfig_include_dirs(&container, name, tx) {
+                    if !config.include_dirs.contains(&dir) {
+                        let _ = tx.send(BuildEvent::Log(format!(
+                            "[include] pkg-config '{}' adds include path {}",
+                            name, dir
+                        )));
+                        config.include_dirs.push(dir);
+                    }
+                }
+            }
             step(tx, texts.step_search(&dep.label()));
             let term = dep.search_term();
             let raw_name = dep.raw_name().to_string();
@@ -1651,6 +1742,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 let after_state = RetryState {
                     packages: extra_packages.clone(),
                     cmake_flags: cmake_flags.clone(),
+                    include_dirs: config.include_dirs.clone(),
                 };
                 if retry_state_changed(&round_state, &after_state) && heal_round < allowed_rounds {
                     heal_round += 1;
@@ -1693,6 +1785,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         let after_state = RetryState {
             packages: extra_packages.clone(),
             cmake_flags: cmake_flags.clone(),
+            include_dirs: config.include_dirs.clone(),
         };
         if !retry_state_changed(&round_state, &after_state) {
             // Pakete sind installiert, aber CMake hat den alten Stand noch im
@@ -1904,6 +1997,13 @@ fn toolchain_packages(family: &DistroFamily, system: &BuildSystem) -> Vec<&'stat
             DistroFamily::Arch => packages.push("qt6-base"),
             DistroFamily::Debian => packages.push("qt6-base-dev"),
             DistroFamily::Fedora | DistroFamily::Suse => packages.push("qt6-qtbase-devel"),
+            DistroFamily::Unknown => {}
+        },
+        BuildSystem::Autotools => match family {
+            DistroFamily::Arch
+            | DistroFamily::Debian
+            | DistroFamily::Fedora
+            | DistroFamily::Suse => packages.extend(["autoconf", "automake", "libtool"]),
             DistroFamily::Unknown => {}
         },
         _ => {}
@@ -2121,6 +2221,7 @@ fn project_install_step(system: &BuildSystem, name: &str) -> String {
         BuildSystem::Python => {
             "python3 -m pip install --no-deps --prefix=\"$pkgdir/usr\" .".to_string()
         }
+        BuildSystem::Autotools => "make DESTDIR=\"$pkgdir\" install".to_string(),
         BuildSystem::Make => "make DESTDIR=\"$pkgdir\" PREFIX=/usr install".to_string(),
         BuildSystem::Qmake => "make INSTALL_ROOT=\"$pkgdir\" install".to_string(),
         BuildSystem::Unknown => "true".to_string(),
@@ -2143,6 +2244,9 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
         }
         BuildSystem::Go => "go build -o /work/dist/app .",
         BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .",
+        BuildSystem::Autotools => {
+            "if [ -x ./configure ]; then ./configure --prefix=/usr; else autoreconf -fi && ./configure --prefix=/usr; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
+        }
         BuildSystem::Make => "make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;",
         BuildSystem::Qmake => {
             "(qmake6 . 2>/dev/null || qmake .) && make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
@@ -2495,6 +2599,24 @@ fn build_script_with_flags(
                 .to_string(),
         );
     }
+    if !config.include_dirs.is_empty() {
+        let flags: Vec<String> = config
+            .include_dirs
+            .iter()
+            .map(|dir| format!("-I{}", shell_quote(dir)))
+            .collect();
+        let flags = flags.join(" ");
+        lines.push(format!("export CFLAGS=\"${{CFLAGS:+$CFLAGS }} {flags}\""));
+        lines.push(format!(
+            "export CXXFLAGS=\"${{CXXFLAGS:+$CXXFLAGS }} {flags}\""
+        ));
+        lines.push(format!(
+            "export CMAKE_C_FLAGS=\"${{CMAKE_C_FLAGS:+$CMAKE_C_FLAGS }} {flags}\""
+        ));
+        lines.push(format!(
+            "export CMAKE_CXX_FLAGS=\"${{CMAKE_CXX_FLAGS:+$CMAKE_CXX_FLAGS }} {flags}\""
+        ));
+    }
     if config.submodule_fix {
         lines.push("git -C /work/src submodule update --init --recursive || true".to_string());
     }
@@ -2771,6 +2893,7 @@ mod tests {
             submodule_fix: false,
             rustup_fix: false,
             skip_deps: false,
+            include_dirs: Vec::new(),
             cancel_flag: Arc::new(AtomicBool::new(false)),
             container_id: Arc::new(Mutex::new(None)),
         }
@@ -3083,6 +3206,24 @@ mod tests {
     }
 
     #[test]
+    fn include_pfade_landen_im_buildskript() {
+        let mut config = config(DistroFamily::Arch, TargetFormat::NativePackage);
+        config.include_dirs = vec!["/usr/include/example".to_string()];
+        let identity = project_identity("example-app", Path::new(""));
+        let script = build_script_with(
+            &config,
+            &BuildSystem::CMake,
+            &[],
+            None,
+            &identity,
+            BuildStrategy::Default,
+            false,
+        );
+        assert!(script.contains("-I'/usr/include/example'"), "{}", script);
+        assert!(script.contains("export CXXFLAGS="), "{}", script);
+    }
+
+    #[test]
     fn alle_buildsysteme_und_strategien_erzeugen_gueltige_skripte() {
         let config = config(DistroFamily::Arch, TargetFormat::NativePackage);
         let identity = project_identity("example-app", Path::new(""));
@@ -3093,6 +3234,7 @@ mod tests {
             BuildSystem::Qmake,
             BuildSystem::Go,
             BuildSystem::Python,
+            BuildSystem::Autotools,
             BuildSystem::Make,
             BuildSystem::Unknown,
         ];
@@ -4040,14 +4182,17 @@ mod tests {
         let before = RetryState {
             packages: vec!["boost".to_string()],
             cmake_flags: vec!["-DFOO=ON".to_string()],
+            include_dirs: Vec::new(),
         };
         let same = RetryState {
             packages: vec!["boost".to_string()],
             cmake_flags: vec!["-DFOO=ON".to_string()],
+            include_dirs: Vec::new(),
         };
         let changed = RetryState {
             packages: vec!["boost".to_string(), "openssl".to_string()],
             cmake_flags: vec!["-DFOO=ON".to_string()],
+            include_dirs: Vec::new(),
         };
         assert!(!retry_state_changed(&before, &same));
         assert!(retry_state_changed(&before, &changed));

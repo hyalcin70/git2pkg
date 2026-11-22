@@ -51,6 +51,7 @@ pub fn run_cli(url: &str) {
         submodule_fix: false,
         rustup_fix: false,
         skip_deps: false,
+        include_dirs: Vec::new(),
         cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         container_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };

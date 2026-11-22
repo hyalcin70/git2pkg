@@ -11,6 +11,7 @@ pub enum BuildSystem {
     Qmake,
     Go,
     Python,
+    Autotools,
     Make,
     Unknown,
 }
@@ -24,6 +25,7 @@ impl BuildSystem {
             BuildSystem::Qmake => "qmake (.pro)",
             BuildSystem::Go => "Go Modules",
             BuildSystem::Python => "Python (pyproject.toml)",
+            BuildSystem::Autotools => "Autotools (configure)",
             BuildSystem::Make => "Makefile",
             BuildSystem::Unknown => "Unknown",
         }
@@ -38,6 +40,7 @@ impl BuildSystem {
             BuildSystem::Qmake => "qmake6 . 2>/dev/null || qmake .; make",
             BuildSystem::Go => "go build -o app .",
             BuildSystem::Python => "python3 -m pip wheel --no-deps -w dist .",
+            BuildSystem::Autotools => "./configure --prefix=/usr && make",
             BuildSystem::Make => "make",
             BuildSystem::Unknown => "true",
         }
@@ -109,6 +112,7 @@ fn fingerprint_build_system(root: &Path) -> &'static str {
         BuildSystem::Qmake => "qmake",
         BuildSystem::Go => "go",
         BuildSystem::Python => "python",
+        BuildSystem::Autotools => "autotools",
         BuildSystem::Make => "make",
         BuildSystem::Unknown => "unknown",
     }
@@ -199,6 +203,9 @@ pub fn detect_build_system(root: &Path) -> BuildSystem {
     if has_qmake_project(root) {
         return BuildSystem::Qmake;
     }
+    if root.join("configure.ac").is_file() || root.join("configure").is_file() {
+        return BuildSystem::Autotools;
+    }
 
     let markers: [(&str, BuildSystem); 5] = [
         ("go.mod", BuildSystem::Go),
@@ -263,6 +270,13 @@ mod tests {
     fn erkennt_cargo() {
         let root = temp_root("cargo", &["Cargo.toml", "Makefile"]);
         assert_eq!(detect_build_system(&root), BuildSystem::Cargo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn erkennt_autotools() {
+        let root = temp_root("autotools", &["configure.ac", "Makefile.am"]);
+        assert_eq!(detect_build_system(&root), BuildSystem::Autotools);
         fs::remove_dir_all(root).unwrap();
     }
 

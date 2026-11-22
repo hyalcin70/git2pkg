@@ -47,6 +47,13 @@ German log strings; the strategy display names in the GUI come from
 `Texts::strategy_label`, while `BuildStrategy::label()` is the English
 canonical name used in logs and stored profiles.
 
+**Generic include fallback:** when a compiler reports a missing header, the
+dependency resolution looks for the header below `/usr/include` /
+`/usr/local/include` and adds that directory via `BuildConfig::include_dirs`
+(exported as `CFLAGS`/`CXXFLAGS`). For pkg-config dependencies the `cflags`
+from `pkg-config` are added the same way. This is intentionally generic: never
+add project-specific include paths or macro definitions by name.
+
 The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
 `src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
