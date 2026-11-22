@@ -1,7 +1,8 @@
 [package]
 name = "git2pkg"
-version = "0.2.0-alpha.25"
+version = "0.2.0-alpha.26"
 edition = "2021"
+rust-version = "1.89"
 authors = ["SattNEK"]
 license = "GPL-3.0-or-later"
 description = "Isolated package builder from Git repositories for Linux distributions"

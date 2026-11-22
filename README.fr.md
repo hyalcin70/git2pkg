@@ -4,6 +4,9 @@
 
 # git2pkg
 
+[![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
+
 L'interface est localisée en cinq langues ; les journaux de compilation en
 direct sont des diagnostics techniques en anglais.
 
@@ -19,7 +22,7 @@ régulières appliquées à la sortie du compilateur et du gestionnaire de paque
 conteneur.
 
 > [!WARNING]
-> **Statut Alpha :** Ce projet est actuellement en phase de test actif (Alpha). Le clonage et les tests s'effectuent à vos propres risques. Aucun support, assistance ou garantie d'aucune sorte n'est fourni pendant la phase Alpha — le support sera disponible à partir du statut Beta.
+> **Statut alpha :** `git2pkg` est en cours de développement actif. Des changements incompatibles et des fonctionnalités incomplètes sont à prévoir. Testez dans des conteneurs jetables, conservez des sauvegardes et signalez les échecs avec le journal complet.
 
 ## Périmètre et exclusions
 
@@ -54,7 +57,8 @@ simple interface graphique.
   Ubuntu/Debian, Fedora, openSUSE) avec les commandes d'installation adaptées
   (`pacman -U`, `apt install`, `dnf install`, `zypper install`).
 - Détection automatique du système de compilation (`Cargo.toml`, `CMakeLists.txt`,
-  `meson.build`, `go.mod`, `pyproject.toml`, `Makefile`).
+  `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
+  `pyproject.toml`, `Makefile`).
 - Journal de compilation en direct, défilable, avec bouton de copie.
 - Résolution des dépendances manquantes : la sortie du compilateur est analysée
   pour les en-têtes, paquets pkg-config, modules CMake, outils et bibliothèques
@@ -63,7 +67,12 @@ simple interface graphique.
   le module ou la bibliothèque doit réellement exister), puis la compilation est
   relancée (5 tentatives maximum). Seules les correspondances vérifiées sont
   mémorisées.
-- Paquets natifs : `.pkg.tar.zst` (Arch), `.deb` (Debian/Ubuntu), `.rpm`
+- Diagnostic des échecs : les compilations sont classées (dépendance manquante,
+  incompatibilité de version/ABI, code embarqué, erreur de compilation, erreur
+  d'empaquetage). Si les paquets ne peuvent pas aider, la compilation s'arrête
+  avec un diagnostic clair au lieu d'essayer des paquets au hasard.
+- Paquets natifs : `.pkg.tar.zst` (Arch ; généré directement, `PKGBUILD` du
+  dépôt via `makepkg` s'il existe), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).
 - **Dossier de sortie** : les artefacts sont écrits dans `~/Downloads/git2pkg`
   par défaut. Modifiable dans l'interface avec le sélecteur natif (`rfd`) ou
@@ -76,7 +85,7 @@ simple interface graphique.
 
 ## Prérequis
 
-- Rust 1.80+ (pour compiler depuis les sources)
+- Rust 1.89+ (pour compiler depuis les sources)
 - Podman (préféré) ou Docker
 - Une session graphique (Wayland ou X11) pour l'interface
 
@@ -119,14 +128,17 @@ src/
     detector.rs      détection du système de compilation
     resolver.rs      analyse regex des erreurs + commandes de recherche
     container.rs     orchestration des conteneurs et empaquetage
+    packaging/       backends d'empaquetage Arch/Debian/RPM
   gui/
     app.rs           application eframe/egui
     fonts.rs         polices Noto intégrées
     i18n.rs          textes EN/DE/TR/ES/FR, détection langue et thème
-assets/              Noto Sans + Noto Sans Mono intégrées (OFL 1.1)
-.github/workflows/   workflow de release GitHub déclenché par les tags
+    settings.rs      réglages de l'interface (dossier de sortie, thème)
+assets/              polices, icône, base de connaissances des dépendances
+scripts/             corpus de tests manuel (URLs en arguments)
+packaging/           PKGBUILD et fichier .desktop pour git2pkg
+.github/workflows/   workflows CI et release déclenchés par les tags
 .gitlab-ci.yml       compilation et paquetage GitLab CI
-packaging/PKGBUILD   recette Arch pour git2pkg
 ```
 
 ## CI / Releases
@@ -135,7 +147,8 @@ Un tag `v*` déclenche `.github/workflows/release.yml` : le binaire Linux
 `x86_64` est compilé sur `ubuntu-latest`, `git2pkg-linux-x86_64.tar.gz` et son
 `.sha256` sont générés, puis les deux sont joints à la release GitHub.
 `.gitlab-ci.yml` construit la même archive sur GitLab et l'expose comme artefact
-de tâche.
+de tâche. Les étiquettes alpha, bêta et release candidate sont publiées comme
+pré-releases GitHub.
 
 ## Contribuer et traductions
 
@@ -172,7 +185,7 @@ ou contribuez à une traduction. Aucune télémétrie, aucune obligation : l'out
 fonctionne exactement de la même manière avec ou sans tout cela.
 
 > [!IMPORTANT]
-> **Périmètre du projet et développement en solo :** `git2pkg` est un projet personnel indépendant développé sur mon temps libre. À partir de la phase Beta, le support (selon disponibilité) se concentrera strictement sur les grandes familles de distributions prises en charge (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** et **openSUSE**). Les distributions exotiques ou de niche ne sont explicitement pas prises en charge.
+> **Périmètre du projet et développement en solo :** `git2pkg` est un projet personnel indépendant développé sur mon temps libre. À partir de la phase Beta, le support (selon disponibilité) se concentrera strictement sur les grandes familles de distributions prises en charge (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** et **openSUSE**). D'autres distributions peuvent fonctionner, mais ne font pas partie de la matrice de support testée.
 
 ## Remerciements et transparence
 

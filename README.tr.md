@@ -4,6 +4,9 @@
 
 # git2pkg
 
+[![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
+
 Arayüz beş dilde yerelleştirilmiştir; canlı derleme günlükleri İngilizce teknik
 tanılama mesajlarıdır.
 
@@ -19,7 +22,7 @@ derleyici çıktısı üzerinde düzenli ifadeler ve konteynerdeki paket yöneti
 ile alınır.
 
 > [!WARNING]
-> **Alfa Durumu:** Bu proje şu anda aktif test aşamasındadır (Alfa). Klonlama ve test etme tamamen kendi sorumluluğunuzdadır. Alfa aşamasında hiçbir şekilde destek, yardım veya garanti sağlanmamaktadır — destek Beta aşamasından itibaren sunulacaktır.
+> **Alfa durumu:** `git2pkg` aktif geliştirme aşamasındadır. Uyumsuz değişiklikler ve tamamlanmamış özellikler beklenmelidir. Lütfen tek kullanımlık konteynerlerde test edin, yedeklerinizi saklayın ve hataları tam günlükle bildirin.
 
 ## Kapsam ve Kapsam Dışı Alanlar
 
@@ -52,7 +55,8 @@ arayüzle herkes kullanabiliyor.
   Ubuntu/Debian, Fedora, openSUSE) ve uygun kurulum komutları (`pacman -U`,
   `apt install`, `dnf install`, `zypper install`).
 - Otomatik derleme sistemi algılama (`Cargo.toml`, `CMakeLists.txt`,
-  `meson.build`, `go.mod`, `pyproject.toml`, `Makefile`).
+  `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
+  `pyproject.toml`, `Makefile`).
 - Konteynerden canlı, kaydırılabilir derleme günlüğü ve kopyalama düğmesi.
 - Eksik bağımlılık çözümü: derleyici çıktısı eksik başlıklar, pkg-config
   paketleri, CMake modülleri, araçlar ve bağlayıcı kitaplıkları için taranır;
@@ -60,8 +64,12 @@ arayüzle herkes kullanabiliyor.
   sağlamadığı doğrulanır (başlık/modül/kitaplık gerçekten var olmalı), ardından
   derleme yeniden denenir (en fazla 5 deneme). Yalnızca doğrulanmış eşleşmeler
   kalıcı olarak saklanır.
-- Yerel paketler: `.pkg.tar.zst` (Arch), `.deb` (Debian/Ubuntu), `.rpm`
-  (Fedora/openSUSE).
+- Hata teşhisi: derlemeler sınıflandırılır (eksik bağımlılık, sürüm/ABI
+  uyuşmazlığı, paketlenmiş kod, derleyici hatası, paketleme hatası). Paketler
+  yardımcı olamıyorsa derleme rastgele paketler denemek yerine net bir tanıyla
+  durur.
+- Yerel paketler: `.pkg.tar.zst` (Arch; doğrudan üretilir, depoda varsa
+  `PKGBUILD` ile `makepkg`), `.deb` (Debian/Ubuntu), `.rpm` (Fedora/openSUSE).
 - **Çıktı klasörü**: sonuçlar varsayılan olarak `~/Downloads/git2pkg` içine
   yazılır. GUI'deki yerel klasör seçici (`rfd`) veya doğrudan yol girişiyle
   değiştirilebilir.
@@ -73,7 +81,7 @@ arayüzle herkes kullanabiliyor.
 
 ## Gereksinimler
 
-- Rust 1.80+ (kaynaktan derlemek için)
+- Rust 1.89+ (kaynaktan derlemek için)
 - Podman (tercihen) veya Docker
 - GUI için grafik oturum (Wayland veya X11)
 
@@ -116,14 +124,17 @@ src/
     detector.rs      derleme sistemi algılama
     resolver.rs      regex hata analizi + arama komutları
     container.rs     konteyner yönetimi ve paketleme
+    packaging/       Arch/Debian/RPM paketleme arka uçları
   gui/
     app.rs           eframe/egui uygulaması
     fonts.rs         gömülü Noto yazı tipleri
     i18n.rs          EN/DE/TR/ES/FR metinleri, dil ve tema algılama
-assets/              gömülü Noto Sans + Noto Sans Mono (OFL 1.1)
-.github/workflows/   etiket tetikli GitHub release akışı
+    settings.rs      GUI ayarları (çıktı klasörü, tema)
+assets/              yazı tipleri, simge, bağımlılık bilgi tabanı
+scripts/             elle duman testi korpusu (argüman olarak depo URL'leri)
+packaging/           git2pkg için PKGBUILD ve masaüstü dosyası
+.github/workflows/   CI ve etiket tetikli release akışları
 .gitlab-ci.yml       GitLab CI derleme ve paketleme işi
-packaging/PKGBUILD   git2pkg için Arch paket tarifi
 ```
 
 ## CI / Sürümler
@@ -132,7 +143,8 @@ packaging/PKGBUILD   git2pkg için Arch paket tarifi
 `ubuntu-latest` üzerinde Linux `x86_64` ikilisi derlenir,
 `git2pkg-linux-x86_64.tar.gz` ve `.sha256` dosyası oluşturulur ve ikisi de
 GitHub sürümüne eklenir. `.gitlab-ci.yml` aynı arşivi GitLab'da derler ve iş
-çıktısı olarak sunar.
+çıktısı olarak sunar. Alfa, beta ve sürüm adayı etiketleri GitHub ön sürümü
+olarak yayımlanır.
 
 ## Katkı ve çeviriler
 
@@ -169,7 +181,7 @@ katkısında bulunun. Telemetri yok, zorunluluk yok — araç bunların hiçbiri
 olmadan da aynı şekilde çalışır.
 
 > [!IMPORTANT]
-> **Proje Kapsamı ve Tek Kişilik Geliştirme:** `git2pkg`, boş zamanlarımda geliştirdiğim bağımsız bir tek kişilik hobi projesidir. Beta aşamasından itibaren sağlanacak destek yalnızca desteklenen ana dağıtım aileleriyle (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** ve **openSUSE**) sınırlıdır. Egzotik veya niş Linux dağıtımları kesinlikle desteklenmemektedir.
+> **Proje Kapsamı ve Tek Kişilik Geliştirme:** `git2pkg`, boş zamanlarımda geliştirdiğim bağımsız bir tek kişilik hobi projesidir. Beta aşamasından itibaren sağlanacak destek yalnızca desteklenen ana dağıtım aileleriyle (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** ve **openSUSE**) sınırlıdır. Diğer dağıtımlar çalışabilir ancak test edilen destek matrisinin dışındadır.
 
 ## Teşekkürler ve şeffaflık
 

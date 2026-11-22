@@ -142,7 +142,7 @@ it applies to every project and never special-cases one.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.25`)
+## 3. Repository Map (as of `v0.2.0-alpha.26`)
 
 ### Entry points
 
@@ -276,7 +276,7 @@ Version bumps happen **only when cutting a release**:
 
 - Update `Cargo.toml` and `Cargo.lock` (via `cargo check`).
 - Update `packaging/PKGBUILD` with an Arch-compliant `pkgver` without hyphens
-  (for example `0.2.0alpha25`). This PKGBUILD builds the local checkout and
+  (for example `0.2.0alpha26`). This PKGBUILD builds the local checkout and
   deliberately has no `_tag` or source archive.
 - Create an annotated tag: `git tag -a v<VERSION> -m "Release v<VERSION>"`.
 - Do not push tags unless the maintainer asks explicitly.
@@ -288,9 +288,9 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.25`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.26`)
 
-Current release: `v0.2.0-alpha.25`.
+Current release: `v0.2.0-alpha.26`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
   C++/CMake superbuilds, Meson/C projects and Go projects. Fix real failures

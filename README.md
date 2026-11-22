@@ -4,6 +4,9 @@
 
 # git2pkg
 
+[![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
+
 The GUI is localized in five languages; live build logs are English technical
 diagnostics.
 
@@ -17,7 +20,7 @@ no LLM and no external API calls.** Build decisions come from file detection,
 regular expressions over compiler output, and the container's package manager.
 
 > [!WARNING]
-> **Alpha Status:** This project is currently in active testing (Alpha). Cloning and testing are at your own risk. No support, assistance, or warranty of any kind is provided during Alpha — support will be available starting from the Beta stage.
+> **Alpha status:** `git2pkg` is under active development. Expect breaking changes and incomplete features. Please test with disposable containers, keep backups, and report failures with the complete log.
 
 ## Scope & Non-Goals
 
@@ -48,15 +51,21 @@ anyone through a simple GUI.
   Fedora, openSUSE) with matching install commands (`pacman -U`, `apt install`,
   `dnf install`, `zypper install`).
 - Automatic build-system detection (`Cargo.toml`, `CMakeLists.txt`, `meson.build`,
-  `go.mod`, `pyproject.toml`, `Makefile`).
+  Autotools (`configure.ac`), qmake (`.pro`), `go.mod`, `pyproject.toml`,
+  `Makefile`).
 - Live, scrollable build log streamed from the container, with a copy button.
 - Missing-dependency resolution: the compiler output is scanned for missing
   headers, pkg-config packages, CMake modules, tools and linker libraries; the
   matching package is installed **inside the throwaway container** and then
   verified (the header/module/library must really exist) before the build is
   retried (max. 5 attempts). Only verified matches are remembered.
-- Native packages: `.pkg.tar.zst` (Arch, via `PKGBUILD` + `makepkg`), `.deb`
-  (Debian/Ubuntu, via `dpkg-deb`), `.rpm` (Fedora/openSUSE, via `rpmbuild`).
+- Failure diagnosis: builds are classified (missing dependency, version/ABI
+  mismatch, bundled code, compiler error, packaging error). If packages cannot
+  help, the build stops with a clear diagnosis instead of trying random
+  packages.
+- Native packages: `.pkg.tar.zst` (Arch; assembled directly, in-tree `PKGBUILD`
+  via `makepkg` when present), `.deb` (Debian/Ubuntu, via `dpkg-deb`), `.rpm`
+  (Fedora/openSUSE, via `rpmbuild`).
 - **Output folder**: finished artifacts land in `~/Downloads/git2pkg` by default.
   Change it in the GUI with the native folder picker (`rfd`) or type a path.
 - Result actions: open the output folder, save the build recipe, and see the
@@ -67,7 +76,7 @@ anyone through a simple GUI.
 
 ## Requirements
 
-- Rust 1.80+ (for building from source)
+- Rust 1.89+ (for building from source)
 - Podman (preferred) or Docker
 - A graphical session (Wayland or X11) for the GUI
 
@@ -110,14 +119,17 @@ src/
     detector.rs      build-system detection
     resolver.rs      regex error analysis + search commands
     container.rs     container orchestration and packaging
+    packaging/       Arch/Debian/RPM packaging backends
   gui/
     app.rs           eframe/egui application
     fonts.rs         embedded Noto fonts
     i18n.rs          EN/DE/TR/ES/FR texts, locale and theme detection
-assets/              bundled Noto Sans + Noto Sans Mono (OFL 1.1)
-.github/workflows/   tag-driven GitHub release workflow
+    settings.rs      GUI settings (output folder, theme)
+assets/              fonts, icon, dependency knowledge base
+scripts/             manual smoke corpus (repository URLs as arguments)
+packaging/           PKGBUILD and desktop entry for git2pkg itself
+.github/workflows/   CI and tag-driven release workflows
 .gitlab-ci.yml       GitLab CI build and package job
-packaging/PKGBUILD   Arch package recipe for git2pkg itself
 ```
 
 ## CI / Releases
@@ -125,8 +137,9 @@ packaging/PKGBUILD   Arch package recipe for git2pkg itself
 Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which
 builds the Linux `x86_64` binary on `ubuntu-latest`, produces
 `git2pkg-linux-x86_64.tar.gz` plus a `.sha256` file, and attaches both to the
-GitHub release. `.gitlab-ci.yml` builds the same tarball on GitLab and exposes
-it as a job artifact.
+GitHub release. Alpha, beta and release-candidate tags are published as GitHub
+pre-releases. `.gitlab-ci.yml` builds the same tarball on GitLab and exposes it
+as a job artifact.
 
 ## Contributing & Translations
 
@@ -164,7 +177,7 @@ or contribute a translation. There is no telemetry and no obligation — the too
 works exactly the same whether you do any of this or not.
 
 > [!IMPORTANT]
-> **Project Scope & Solo Maintenance:** `git2pkg` is an independent solo hobby project maintained in my spare time. Starting from the Beta stage, best-effort support will focus strictly on the supported mainstream distribution families (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat**, and **openSUSE**). Exotic or niche Linux distributions are explicitly not supported.
+> **Project Scope & Solo Maintenance:** `git2pkg` is an independent solo hobby project maintained in my spare time. Starting from the Beta stage, best-effort support will focus strictly on the supported mainstream distribution families (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat**, and **openSUSE**). Other distributions may work, but they are outside the tested support matrix.
 
 ## Credits & Transparency
 

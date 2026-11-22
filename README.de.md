@@ -4,6 +4,9 @@
 
 # git2pkg
 
+[![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
+
 Die Oberfläche ist in fünf Sprachen lokalisiert; die Live-Build-Logs sind
 englische technische Diagnosemeldungen.
 
@@ -18,7 +21,7 @@ erfolgen durch Dateierkennung, reguläre Ausdrücke über Compiler-Ausgaben und
 den Paketmanager im Container.
 
 > [!WARNING]
-> **Alpha-Status:** Dieses Projekt befindet sich derzeit in der aktiven Testphase (Alpha). Klonen und Testen erfolgen auf eigenes Risiko. Während der Alpha-Phase wird keinerlei Support, Hilfestellung oder Gewährleistung übernommen — Support gibt es erst ab dem Beta-Status.
+> **Alpha-Status:** `git2pkg` befindet sich in aktiver Entwicklung. Mit Änderungen an Schnittstellen und unfertigen Funktionen ist zu rechnen. Bitte in Wegwerf-Containern testen, Backups behalten und Fehler mit dem vollständigen Log melden.
 
 ## Anwendungsbereich & Nicht-Ziele
 
@@ -50,7 +53,8 @@ einzelne Binary – per GUI für jeden nutzbar.
   Ubuntu/Debian, Fedora, openSUSE) mit passenden Installationsbefehlen
   (`pacman -U`, `apt install`, `dnf install`, `zypper install`).
 - Automatische Build-System-Erkennung (`Cargo.toml`, `CMakeLists.txt`,
-  `meson.build`, `go.mod`, `pyproject.toml`, `Makefile`).
+  `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
+  `pyproject.toml`, `Makefile`).
 - Live-Log aus dem Container, scrollbar, mit „Log kopieren"-Button.
 - Auflösung fehlender Abhängigkeiten: Die Compiler-Ausgabe wird nach fehlenden
   Headern, pkg-config-Paketen, CMake-Modulen, Werkzeugen und Linker-Bibliotheken
@@ -58,8 +62,13 @@ einzelne Binary – per GUI für jeden nutzbar.
   anschließend geprüft (Header/Modul/Bibliothek muss wirklich vorhanden sein),
   bevor der Build erneut startet (max. 5 Versuche). Nur geprüfte Treffer werden
   dauerhaft gemerkt.
-- Native Pakete: `.pkg.tar.zst` (Arch via `PKGBUILD` + `makepkg`), `.deb`
-  (Debian/Ubuntu via `dpkg-deb`), `.rpm` (Fedora/openSUSE via `rpmbuild`).
+- Fehlerdiagnose: Builds werden klassifiziert (fehlende Abhängigkeit,
+  Versions-/ABI-Konflikt, gebündelter Code, Compilerfehler, Paketierungsfehler).
+  Wenn Pakete nicht helfen können, endet der Build mit einer klaren Diagnose
+  statt weiterer Zufallsversuche.
+- Native Pakete: `.pkg.tar.zst` (Arch; direkt erzeugt, vorhandenes `PKGBUILD`
+  über `makepkg`), `.deb` (Debian/Ubuntu via `dpkg-deb`), `.rpm`
+  (Fedora/openSUSE via `rpmbuild`).
 - **Ausgabeordner**: Fertige Artefakte landen standardmäßig in
   `~/Downloads/git2pkg`. Die GUI bietet einen nativen Ordnerdialog (`rfd`)
   oder die direkte Eingabe eines Pfads.
@@ -71,7 +80,7 @@ einzelne Binary – per GUI für jeden nutzbar.
 
 ## Voraussetzungen
 
-- Rust 1.80+ (zum Bauen aus dem Quellcode)
+- Rust 1.89+ (zum Bauen aus dem Quellcode)
 - Podman (bevorzugt) oder Docker
 - Eine grafische Sitzung (Wayland oder X11) für die GUI
 
@@ -115,22 +124,27 @@ src/
     detector.rs      Build-System-Erkennung
     resolver.rs      Regex-Fehleranalyse + Suchbefehle
     container.rs     Container-Steuerung und Paketierung
+    packaging/       Paket-Backends für Arch/Debian/RPM
   gui/
     app.rs           eframe/egui-Anwendung
     fonts.rs         eingebettete Noto-Schriften
     i18n.rs          EN/DE/TR/ES/FR-Texte, Locale- und Theme-Erkennung
-assets/              gebündelte Noto Sans + Noto Sans Mono (OFL 1.1)
-.github/workflows/   GitHub-Release-Workflow bei Tags
+    settings.rs      GUI-Einstellungen (Ausgabeordner, Theme)
+assets/              Schriften, Icon, Abhängigkeits-Wissensbasis
+scripts/             manueller Smoke-Test-Korpus (Repo-URLs als Argumente)
+packaging/           PKGBUILD und Desktop-Datei für git2pkg selbst
+.github/workflows/   CI- und taggesteuerter Release-Workflow
 .gitlab-ci.yml       GitLab-CI-Build und -Paketierung
-packaging/PKGBUILD   Arch-Paketrezept für git2pkg selbst
 ```
 
 ## CI / Releases
 
 Ein Tag `v*` löst `.github/workflows/release.yml` aus: Auf `ubuntu-latest` wird
 die Linux-`x86_64`-Binary gebaut, `git2pkg-linux-x86_64.tar.gz` samt `.sha256`
-erzeugt und beides am GitHub-Release angehängt. `.gitlab-ci.yml` baut dasselbe
-Archiv auf GitLab und stellt es als Job-Artefakt bereit.
+erzeugt und beides am GitHub-Release angehängt. Alpha-, Beta- und
+Release-Candidate-Tags werden als GitHub-Pre-Releases veröffentlicht.
+`.gitlab-ci.yml` baut dasselbe Archiv auf GitLab und stellt es als Job-Artefakt
+bereit.
 
 ## Mitwirken & Übersetzungen
 
@@ -165,7 +179,7 @@ trag eine Übersetzung bei. Es gibt keine Telemetrie und keine Verpflichtung –
 das Tool funktioniert unabhängig davon genau gleich.
 
 > [!IMPORTANT]
-> **Projektumfang & Ein-Personen-Projekt:** `git2pkg` ist ein unabhängiges Ein-Personen-Freizeitprojekt. Ab der Beta-Phase konzentriert sich der freiwillige Support nach verfügbarer Zeit strikt auf die unterstützten Haupt-Distributionsfamilien (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** und **openSUSE**). Exotische Spezial- oder Nischen-Distributionen werden ausdrücklich nicht unterstützt.
+> **Projektumfang & Ein-Personen-Projekt:** `git2pkg` ist ein unabhängiges Ein-Personen-Freizeitprojekt. Ab der Beta-Phase konzentriert sich der freiwillige Support nach verfügbarer Zeit strikt auf die unterstützten Haupt-Distributionsfamilien (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** und **openSUSE**). Andere Distributionen können funktionieren, gehören aber nicht zur getesteten Support-Matrix.
 
 ## Danksagung & Transparenz
 
