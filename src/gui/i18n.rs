@@ -467,6 +467,15 @@ impl Texts {
             "Enregistrer le journal",
         )
     }
+    pub fn log_jump_to_end(&self) -> &'static str {
+        self.get(
+            "Jump to end",
+            "Zum Ende",
+            "Sona git",
+            "Ir al final",
+            "Aller à la fin",
+        )
+    }
     pub fn log_saved(&self) -> &'static str {
         self.get(
             "Log saved: {}",

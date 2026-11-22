@@ -75,6 +75,8 @@ pub struct Git2PkgAiApp {
     log: String,
     log_snapshot: String,
     log_hovered: bool,
+    log_at_bottom: bool,
+    log_jump_to_end: bool,
     last_log_selection: Option<egui::text::CCursorRange>,
     last_primary_selection: Option<String>,
     last_url_selection: Option<egui::text::CCursorRange>,
@@ -248,6 +250,8 @@ impl Git2PkgAiApp {
             log: String::new(),
             log_snapshot: String::new(),
             log_hovered: false,
+            log_at_bottom: true,
+            log_jump_to_end: false,
             last_log_selection: None,
             last_primary_selection: None,
             last_url_selection: None,
@@ -1693,6 +1697,12 @@ impl eframe::App for Git2PkgAiApp {
                         }
                     }
                 }
+                if self.building
+                    && !self.log_at_bottom
+                    && ui.button(texts.log_jump_to_end()).clicked()
+                {
+                    self.log_jump_to_end = true;
+                }
             });
             ui.separator();
 
@@ -1705,17 +1715,19 @@ impl eframe::App for Git2PkgAiApp {
             let log_height = ui.available_height().max(120.0);
             let log_id = egui::Id::new("live-log-text");
             let log_menu_id = egui::Id::new("live-log-context-menu");
-            let selection_active = egui::TextEdit::load_state(ctx, log_id)
-                .map(|state| !state.cursor.is_empty())
-                .unwrap_or(false)
-                || (self.log_hovered && ui.input(|input| input.pointer.primary_down()));
+            let selection_dragging = ui.input(|input| input.pointer.primary_down())
+                && (self.log_hovered
+                    || egui::TextEdit::load_state(ctx, log_id)
+                        .and_then(|state| state.cursor.char_range())
+                        .map(|range| range.primary != range.secondary)
+                        .unwrap_or(false));
             let secondary_pressed = ui.input(|input| input.pointer.secondary_pressed());
             let secondary_clicked = ui.input(|input| input.pointer.secondary_clicked());
             let pointer_pos = ui.input(|input| input.pointer.latest_pos());
             let mut log_hovered = false;
-            egui::ScrollArea::vertical()
+            let scroll_output = egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .stick_to_bottom(self.building && !selection_active)
+                .stick_to_bottom(self.building && !selection_dragging)
                 .max_height(log_height)
                 .show(ui, |ui| {
                     // Read-only TextEdit: volle Textauswahl mit Maus, Doppelklick
@@ -1731,25 +1743,29 @@ impl eframe::App for Git2PkgAiApp {
                     );
                     log_hovered = response.hovered();
 
-                    // Beim Drag-Markieren automation stick_to_bottom pausieren und
-                    // an den Log-Rändern weiter scrollen.
-                    let drag_selecting =
-                        selection_active && ui.input(|input| input.pointer.primary_down());
-                    if drag_selecting {
+                    // Beim Drag-Markieren an den sichtbaren Rändern weiterrollen.
+                    // Bezug ist der Viewport, nicht die (potenziell sehr hohe)
+                    // Textfläche. Positive Y-Werte bewegen den Inhalt nach unten
+                    // (weiter nach oben im Log), negative nach oben.
+                    if selection_dragging {
+                        let view = ui.clip_rect();
                         let pointer = ui
                             .input(|input| input.pointer.interact_pos())
                             .or_else(|| ui.input(|input| input.pointer.latest_pos()));
                         if let Some(pos) = pointer {
                             let edge = 28.0_f32;
-                            let delta_y = if pos.y <= response.rect.top() + edge {
-                                -12.0
-                            } else if pos.y >= response.rect.bottom() - edge {
-                                12.0
+                            let delta_y = if pos.y <= view.top() + edge {
+                                14.0
+                            } else if pos.y >= view.bottom() - edge {
+                                -14.0
                             } else {
                                 0.0
                             };
                             if delta_y != 0.0 {
-                                ui.scroll_with_delta(egui::vec2(0.0, delta_y));
+                                ui.scroll_with_delta_animation(
+                                    egui::vec2(0.0, delta_y),
+                                    egui::style::ScrollAnimation::none(),
+                                );
                                 ui.ctx().request_repaint();
                             }
                         }
@@ -1834,8 +1850,21 @@ impl eframe::App for Git2PkgAiApp {
                             ui.colored_label(dim, self.texts().build_running());
                         });
                     }
+                    // „Zum Ende“ springt an das aktuelle Log-Ende und aktiviert
+                    // damit wieder das automatische Mitlaufen.
+                    if self.log_jump_to_end {
+                        self.log_jump_to_end = false;
+                        ui.scroll_to_rect_animation(
+                            ui.min_rect(),
+                            Some(egui::Align::BOTTOM),
+                            egui::style::ScrollAnimation::none(),
+                        );
+                    }
                 });
             self.log_hovered = log_hovered;
+            let max_offset =
+                (scroll_output.content_size.y - scroll_output.inner_rect.height()).max(0.0);
+            self.log_at_bottom = scroll_output.state.offset.y >= max_offset - 2.0;
             let primary_text =
                 selected_text_from_range(self.last_log_selection, &self.log_snapshot);
             match primary_text {
