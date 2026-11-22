@@ -205,21 +205,21 @@ pub fn package_from_search(output: &str, term: &str, package_manager: &str) -> O
 
 /// Prüft, ob ein Paketname wirklich zum Suchbegriff gehört. Reine
 /// Teilstring-Treffer sind zu unscharf (`ecm` steckt auch in `doublecmd`).
+/// Prüft, ob ein Paketname wirklich zum Suchbegriff gehört. Der Begriff muss
+/// am Anfang oder Ende stehen (inkl. `lib`-Präfix); Treffer mitten im Namen
+/// sind zu unscharf (`ecm` steckt auch in `doublecmd`).
 fn package_name_matches(name: &str, term: &str) -> bool {
     if name == term {
         return true;
     }
-    let tokens: Vec<&str> = name
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .collect();
-    if tokens.contains(&term) {
+    if name.starts_with(term) || name.starts_with(&format!("lib{}", term)) {
         return true;
     }
-    name.starts_with(&format!("lib{}", term))
-        || name.starts_with(&format!("{}-", term))
-        || name.contains(&format!("-{}-", term))
-        || name.ends_with(&format!("-{}", term))
+    if name.ends_with(term) {
+        return true;
+    }
+    // Suchbegriff enthält den Paketnamen, z. B. `libpng` -> `png`.
+    term.ends_with(name) && name.len() >= 3
 }
 
 /// Kurzschlüssel für die Wissensdatenbank, z. B. `arch` oder `debian`.
@@ -1403,6 +1403,7 @@ fn is_generic_tool_word(name: &str) -> bool {
             | "compiler"
             | "compilers"
             | "linker"
+            | "target"
             // Häufige englische Füllwörter aus Statusmeldungen
             // (z. B. "libraries were not found").
             | "were"
@@ -1544,6 +1545,22 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
             push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
         }
     }
+
+    // Tool-Meldungen, die nur ein bereits erkanntes CMake-/pkg-config-Modul
+    // wiederholen (`webkit` neben `WEBKIT`), sind redundant.
+    let modules: Vec<String> = deps
+        .iter()
+        .filter_map(|dep| match dep {
+            MissingDep::CMakeModule(name) | MissingDep::PkgConfig(name) => {
+                Some(name.to_ascii_lowercase())
+            }
+            _ => None,
+        })
+        .collect();
+    deps.retain(|dep| match dep {
+        MissingDep::Tool(name) => !modules.contains(&name.to_ascii_lowercase()),
+        _ => true,
+    });
 
     deps
 }
@@ -1705,6 +1722,34 @@ mod tests {
             package_from_search("ecm-tools\n", "ecm", "pacman"),
             Some("ecm-tools".to_string())
         );
+        assert_eq!(
+            package_from_search("libsoup3\nlibsoup3-docs\n", "libsoup", "pacman"),
+            Some("libsoup3".to_string())
+        );
+        assert_eq!(
+            package_from_search(
+                "lightdm-webkit-theme-litarvan\nwebkit2gtk-4.1\n",
+                "webkit",
+                "pacman"
+            ),
+            Some("webkit2gtk-4.1".to_string())
+        );
+        assert_eq!(
+            package_from_search("freeglut\n", "glut", "pacman"),
+            Some("freeglut".to_string())
+        );
+    }
+
+    #[test]
+    fn tools_wiederholen_keine_erkannten_module() {
+        let out = "Could NOT find WEBKIT (missing: WEBKIT_LIBRARIES)\nwebkit not found\n";
+        let deps = analyze_output(out);
+        assert!(deps
+            .iter()
+            .any(|dep| matches!(dep, MissingDep::CMakeModule(name) if name == "WEBKIT")));
+        assert!(!deps.iter().any(
+            |dep| matches!(dep, MissingDep::Tool(name) if name.eq_ignore_ascii_case("webkit"))
+        ));
     }
 
     #[test]

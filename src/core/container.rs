@@ -1449,6 +1449,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             return Err(texts.err_no_pattern().to_string());
         }
 
+        let mut unresolved: Option<MissingDep> = None;
         for dep in &missing {
             step(tx, texts.step_search(&dep.label()));
             let term = dep.search_term();
@@ -1573,25 +1574,13 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             }
 
             let Some(package) = installed else {
-                if deps_failed {
-                    let _ = tx.send(BuildEvent::Log(
-                        "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
-                            .to_string(),
-                    ));
-                    let Some(next) =
-                        next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
-                    else {
-                        break;
-                    };
-                    config.skip_deps = next == BuildStrategy::SystemLibsOnly;
-                    strategy_attempt += 1;
-                    heal_round = 1;
-                    allowed_rounds = INITIAL_HEAL_ROUNDS;
-                    forced_strategy = Some(next);
-                    continue 'attempt;
+                // Eine unauflösbare Abhängigkeit darf die späteren, vielleicht
+                // lösbaren nicht blockieren. Erst alle bearbeiten, dann
+                // entscheiden.
+                if unresolved.is_none() {
+                    unresolved = Some(dep.clone());
                 }
-                mark_failed_build(&work);
-                return Err(texts.err_no_package(&dep.label()));
+                continue;
             };
             // Nach der ersten erfolgreichen Nachinstallation brauchen große
             // C++-Workspaces mehr als 5 Runden für alle find_package()-Aufrufe.
@@ -1611,6 +1600,28 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 extra_packages.push(package.clone());
             }
         }
+        if let Some(dep) = unresolved {
+            if deps_failed {
+                let _ = tx.send(BuildEvent::Log(
+                    "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
+                        .to_string(),
+                ));
+                let Some(next) =
+                    next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+                else {
+                    break;
+                };
+                config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+                strategy_attempt += 1;
+                heal_round = 1;
+                allowed_rounds = INITIAL_HEAL_ROUNDS;
+                forced_strategy = Some(next);
+                continue 'attempt;
+            }
+            mark_failed_build(&work);
+            return Err(texts.err_no_package(&dep.label()));
+        }
+
         let cleared_cmake = reset_cmake_caches(&work);
         if cleared_cmake > 0 {
             let _ = tx.send(BuildEvent::Log(
