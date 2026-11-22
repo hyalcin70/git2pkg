@@ -103,6 +103,11 @@ classes instead.
 - `CONTRIBUTING.md`
 - `LICENSE` (GPL-3.0-or-later)
 
+### Agent documentation
+
+- `AGENTS.md` — durable rules for all AI coding agents (this file)
+- `CLAUDE.md` — relative symlink to `AGENTS.md`
+
 ### Automation / installation
 
 - `.github/workflows/release.yml` — release workflow (tag push → GitHub Release)
@@ -128,6 +133,12 @@ classes instead.
 4. **Multilingual documentation.** Whenever a user-facing feature, scope or
    support statement changes, update all five READMEs (`EN`, `DE`, `TR`, `ES`,
    `FR`) consistently.
+5. **Mandatory `AGENTS.md` maintenance.** Every AI coding agent working on this
+   repository MUST keep `AGENTS.md` (and therefore the `CLAUDE.md` symlink)
+   permanently up to date whenever new files or modules are added under `src/`,
+   engineering rules or workflows change, or a major milestone is reached
+   (for example `beta.1`, `rc.1`, `v1.0.0`). Do NOT bloat `AGENTS.md` with minor
+   bugfix history; that belongs in Git commits.
 
 Additional practical rules:
 
