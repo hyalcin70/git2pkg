@@ -33,6 +33,12 @@ The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
 `src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
 
+Persistent Git clones live in `~/.cache/git2pkg/repos/<repo_hash>/` and are
+updated in place. Temporary build workspaces live in
+`~/.cache/git2pkg/builds/<build_id>/` and are removed after success or by the
+exit cleanup. Learned mappings are in
+`~/.config/git2pkg/learned_mappings.json`; only verified build recipes are reused.
+
 ---
 
 ## 2. Strict Scope & Non-Goals
@@ -52,12 +58,12 @@ classes instead.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.20`)
+## 3. Repository Map (as of `v0.2.0-alpha.22`)
 
 ### Entry points
 
 - `src/main.rs` — application entry point, GUI/CLI dispatch
-- `src/cli.rs` — headless CLI (`--cli <url> --target=...`)
+- `src/cli.rs` — headless CLI (`--cli <url> --target=...`, `--reset-learning`)
 
 ### Core logic
 
@@ -186,13 +192,16 @@ Version bumps happen **only when cutting a release**:
 - Verify that the GitHub Actions release workflow completed successfully and
   that the release is visible on GitHub before reporting success.
 
+`--reset-learning` deletes `learned_mappings.json` without touching the Git
+repository cache and prints a confirmation.
+
 Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.21`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.22`)
 
-Current release: `v0.2.0-alpha.21`.
+Current release: `v0.2.0-alpha.22`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
   C++/CMake superbuilds (for example Bambu Studio), Meson/C projects (for

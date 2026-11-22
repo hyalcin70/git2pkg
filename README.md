@@ -58,6 +58,7 @@ anyone through a simple GUI.
 - Result actions: open the output folder, save the build recipe, and see the
   exact install command before anything is executed.
 - Optional headless mode: `git2pkg --cli <url> [--format=package|binary]`.
+- Reset learned mappings with `git2pkg --reset-learning` (the Git repository cache is kept).
 
 ## Requirements
 

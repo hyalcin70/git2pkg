@@ -8,6 +8,16 @@ use crate::core::resolver::MappingStore;
 use crate::gui::i18n::{Language, Texts};
 use std::sync::mpsc;
 
+/// Loescht die gelernte Zuordnungsdatei und bestaetigt das auf der Kommandozeile.
+pub fn reset_learning() {
+    let path = MappingStore::mappings_path();
+    if MappingStore::reset() {
+        println!("Learned mappings removed: {}", path.display());
+    } else {
+        println!("No learned mappings to remove: {}", path.display());
+    }
+}
+
 pub fn run_cli(url: &str) {
     let _ = MappingStore::load();
     let language = Language::detect();

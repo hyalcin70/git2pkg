@@ -60,6 +60,7 @@ o un único binario, utilizable por cualquiera desde una interfaz gráfica senci
 - Acciones de resultado: abrir la carpeta de salida, guardar la receta de
   compilación y ver el comando exacto de instalación antes de ejecutarlo.
 - Modo headless opcional: `git2pkg --cli <url> [--format=package|binary]`.
+- Restablece las asignaciones aprendidas con `git2pkg --reset-learning` (la caché del repositorio Git se conserva).
 
 ## Requisitos
 

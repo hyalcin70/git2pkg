@@ -319,6 +319,129 @@ fn build_cache_root() -> PathBuf {
     Path::new(&home).join(".cache/git2pkg/builds")
 }
 
+/// Dauerhafter, sauber gehaltener Klon-Cache. Er wird niemals vom Build-Cache-
+/// Cleanup geloescht und bei jedem Lauf nur aktualisiert.
+fn repo_cache_root() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    Path::new(&home).join(".cache/git2pkg/repos")
+}
+
+fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(|error| format!("copy {}: {error}", to.display()))?;
+    for entry in fs::read_dir(from).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        let metadata = entry.file_type().map_err(|error| error.to_string())?;
+        if metadata.is_dir() {
+            copy_tree(&source, &target)?;
+        } else if metadata.is_symlink() {
+            #[cfg(unix)]
+            {
+                let link = fs::read_link(&source).map_err(|error| error.to_string())?;
+                let _ = fs::remove_file(&target);
+                std::os::unix::fs::symlink(link, &target)
+                    .map_err(|error| format!("symlink {}: {error}", target.display()))?;
+            }
+        } else {
+            fs::copy(&source, &target)
+                .map_err(|error| format!("copy {}: {error}", source.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Result<(), String> {
+    if !cache.join(".git").is_dir() {
+        if cache.exists() {
+            remove_build_dir_recursively(cache)?;
+        }
+        fs::create_dir_all(cache.parent().unwrap_or_else(|| Path::new("/")))
+            .map_err(|error| error.to_string())?;
+        let cloned = run_streamed(
+            "git",
+            &[
+                "clone".to_string(),
+                "--depth".to_string(),
+                "1".to_string(),
+                url.to_string(),
+                cache.to_string_lossy().into_owned(),
+            ],
+            tx,
+        )?;
+        if !cloned.success {
+            return Err("clone failed".to_string());
+        }
+    } else {
+        for args in [
+            vec!["-C", "fetch", "--all", "--prune"],
+            vec!["-C", "reset", "--hard"],
+            vec!["-C", "clean", "-fdx"],
+        ] {
+            let mut command = vec![args[0].to_string(), cache.to_string_lossy().into_owned()];
+            command.extend(args[1..].iter().map(|arg| arg.to_string()));
+            let _ = run_streamed("git", &command, tx);
+        }
+        if cache.join(".gitmodules").is_file() {
+            let path = cache.to_string_lossy().into_owned();
+            let _ = run_streamed(
+                "git",
+                &[
+                    "-C".to_string(),
+                    path.clone(),
+                    "submodule".to_string(),
+                    "update".to_string(),
+                    "--init".to_string(),
+                    "--recursive".to_string(),
+                ],
+                tx,
+            );
+            let _ = run_streamed(
+                "git",
+                &[
+                    "-C".to_string(),
+                    path,
+                    "submodule".to_string(),
+                    "foreach".to_string(),
+                    "--recursive".to_string(),
+                    "git reset --hard && git clean -fdx".to_string(),
+                ],
+                tx,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Aktualisiert den dauerhaften Repo-Cache und stellt einen frischen
+/// Arbeitsbereich unter `builds/<id>/src` bereit. Der Cache selbst bleibt sauber.
+fn prepare_source_workspace(
+    url: &str,
+    src: &Path,
+    tx: &Sender<BuildEvent>,
+    texts: &Texts,
+) -> Result<(), String> {
+    let cache = repo_cache_root().join(source_cache_key(url));
+    step(tx, texts.step_clone());
+    if let Err(error) = prepare_repo_cache(url, &cache, tx) {
+        mark_failed_build(src.parent().unwrap_or(src));
+        return Err(if error == "clone failed" {
+            texts.err_clone_failed().to_string()
+        } else {
+            error
+        });
+    }
+    let _ = tx.send(BuildEvent::Log(format!(
+        "[cache] Repo-Cache aktualisiert: {}",
+        cache.display()
+    )));
+    if src.exists() {
+        make_tree_writable(src);
+        fs::remove_dir_all(src).map_err(|error| format!("workspace: {error}"))?;
+    }
+    copy_tree(&cache, src)
+}
+
 /// True, wenn mindestens ein fehlgeschlagener Build-Cache existiert.
 #[allow(dead_code)]
 pub fn has_failed_build_cache() -> bool {
@@ -333,7 +456,11 @@ pub fn has_failed_build_cache() -> bool {
 /// "Alles löschen" beim Beenden: kompletter Build-Cache, unabhängig davon,
 /// ob ein Ordner als fehlgeschlagen markiert wurde.
 pub fn cleanup_all_builds() -> usize {
-    let Ok(entries) = fs::read_dir(build_cache_root()) else {
+    cleanup_all_builds_in(&build_cache_root())
+}
+
+fn cleanup_all_builds_in(builds: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(builds) else {
         return 0;
     };
     let mut removed = 0;
@@ -347,7 +474,7 @@ pub fn cleanup_all_builds() -> usize {
             removed += 1;
         }
     }
-    let _ = fs::remove_dir(build_cache_root());
+    let _ = fs::remove_dir(builds);
     removed
 }
 
@@ -717,46 +844,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     fs::create_dir_all(&config.output_dir).map_err(|e| format!("output dir: {}", e))?;
 
     let src = work.join("src");
-    if src.join(".git").is_dir() {
-        let _ = tx.send(BuildEvent::Log(format!(
-            "[cache] Vorhandenen Quellcode wieder verwenden: {}",
-            src.display()
-        )));
-        let _ = run_streamed(
-            "git",
-            &[
-                "-C".to_string(),
-                src.to_string_lossy().into_owned(),
-                "reset".to_string(),
-                "--hard".to_string(),
-            ],
-            tx,
-        );
-        let _ = run_streamed(
-            "git",
-            &[
-                "-C".to_string(),
-                src.to_string_lossy().into_owned(),
-                "clean".to_string(),
-                "-fd".to_string(),
-            ],
-            tx,
-        );
-    } else {
-        step(tx, texts.step_clone());
-        let clone_args = vec![
-            "clone".to_string(),
-            "--depth".to_string(),
-            "1".to_string(),
-            config.url.clone(),
-            src.to_string_lossy().into_owned(),
-        ];
-        let cloned = run_streamed("git", &clone_args, tx)?;
-        if !cloned.success {
-            mark_failed_build(&work);
-            return Err(texts.err_clone_failed().to_string());
-        }
-    }
+    prepare_source_workspace(&config.url, &src, tx, &texts)?;
 
     let mut repo_script = config
         .repo_script
@@ -1053,10 +1141,13 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     cstdint_fix: config.cstdint_fix,
                     submodule_fix: config.submodule_fix,
                     packages: extra_packages.clone(),
+                    verified: false,
                 };
                 mappings.record_build_recipe(&config.url, recipe);
+                mappings.record_repo_packages(&config.url, &fingerprint.signature, &extra_packages);
+                mappings.clear_incomplete_strategy(&config.url, strategy_name);
                 let _ = tx.send(BuildEvent::Log(format!(
-                    "[learn] Erfolgreiche Bauweise für Struktur '{}' gespeichert",
+                    "[learn] Verifizierte Bauweise für Struktur '{}' gespeichert",
                     fingerprint.signature
                 )));
             }
@@ -1258,7 +1349,6 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             if !extra_packages.contains(&package) {
                 extra_packages.push(package.clone());
             }
-            mappings.record_repo_packages(&config.url, &fingerprint.signature, &extra_packages);
         }
         let after_state = RetryState {
             packages: extra_packages.clone(),
@@ -2155,11 +2245,7 @@ fn source_cache_key(url: &str) -> String {
 /// Prüft im erhaltenen Quellcode-Cache, ob lokale deps/ vorhanden sind.
 /// Die GUI nutzt das, um Stufe 2 bei Bedarf zu überspringen.
 pub fn cached_repo_has_local_dependencies(url: &str) -> bool {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let src = Path::new(&home)
-        .join(".cache/git2pkg/builds")
-        .join(source_cache_key(url))
-        .join("src");
+    let src = repo_cache_root().join(source_cache_key(url));
     has_local_dependencies(&src)
 }
 
@@ -3388,6 +3474,34 @@ mod tests {
             TargetFormat::NativePackage
         );
         assert_eq!(TargetFormat::NativePackage.key(), "package");
+    }
+
+    #[test]
+    fn cleanup_loescht_nur_builds_und_laesst_repos_und_lerndaten() {
+        let root = std::env::temp_dir().join(format!(
+            "g2p-cache-trennung-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let builds = root.join("builds");
+        let work = builds.join("example-hash");
+        let repos = root.join("repos");
+        let cached_repo = repos.join("example-hash/.git/objects/aa");
+        let mappings = root.join("learned_mappings.json");
+        fs::create_dir_all(work.join("src/.git/objects/aa")).unwrap();
+        fs::create_dir_all(&cached_repo).unwrap();
+        fs::write(work.join("src/.git/objects/aa/object"), "build").unwrap();
+        fs::write(cached_repo.join("object"), "repo").unwrap();
+        fs::write(&mappings, "{}").unwrap();
+
+        assert_eq!(cleanup_all_builds_in(&builds), 1);
+        assert!(!builds.exists());
+        assert!(cached_repo.join("object").is_file());
+        assert!(mappings.is_file());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

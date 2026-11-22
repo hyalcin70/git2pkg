@@ -1052,6 +1052,55 @@ impl Texts {
         )
     }
 
+    pub fn reset_learning(&self) -> &'static str {
+        self.get(
+            "Reset learned data",
+            "Lerndaten zurücksetzen",
+            "Öğrenilen verileri sıfırla",
+            "Restablecer datos aprendidos",
+            "Réinitialiser les données apprises",
+        )
+    }
+    pub fn reset_learning_title(&self) -> &'static str {
+        self.get(
+            "Reset learned data?",
+            "Lerndaten zurücksetzen?",
+            "Öğrenilen veriler sıfırlansın mı?",
+            "¿Restablecer datos aprendidos?",
+            "Réinitialiser les données apprises ?",
+        )
+    }
+    pub fn reset_learning_body(&self) -> &'static str {
+        self.get(
+            "This deletes learned package mappings and build strategies. The Git repository cache is kept.",
+            "Damit werden gelernte Paket-Zuordnungen und Bau-Strategien gelöscht. Der Git-Repository-Cache bleibt erhalten.",
+            "Bu, öğrenilen paket eşleştirmelerini ve derleme stratejilerini siler. Git deposu önbelleği korunur.",
+            "Esto elimina las asignaciones de paquetes y estrategias aprendidas. La caché del repositorio Git se conserva.",
+            "Cela supprime les correspondances de paquets et les stratégies apprises. Le cache du dépôt Git est conservé.",
+        )
+    }
+    pub fn reset_learning_yes(&self) -> &'static str {
+        self.get(
+            "Yes, reset",
+            "Ja, zurücksetzen",
+            "Evet, sıfırla",
+            "Sí, restablecer",
+            "Oui, réinitialiser",
+        )
+    }
+    pub fn reset_learning_no(&self) -> &'static str {
+        self.get("Cancel", "Abbrechen", "İptal", "Cancelar", "Annuler")
+    }
+    pub fn reset_learning_done(&self) -> &'static str {
+        self.get(
+            "Learned data was reset.",
+            "Lerndaten wurden zurückgesetzt.",
+            "Öğrenilen veriler sıfırlandı.",
+            "Los datos aprendidos se han restablecido.",
+            "Les données apprises ont été réinitialisées.",
+        )
+    }
+
     pub fn retry_failed_title(&self) -> &'static str {
         self.get(
             "Build failed",

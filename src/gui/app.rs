@@ -97,6 +97,7 @@ pub struct Git2PkgApp {
     last_build_failed: bool,
     had_build_in_session: bool,
     show_cleanup_dialog: bool,
+    confirm_reset_learning: bool,
     force_close: bool,
     logo: Option<egui::TextureHandle>,
     app_icon: Option<egui::TextureHandle>,
@@ -256,6 +257,7 @@ impl Git2PkgApp {
             last_build_failed: false,
             had_build_in_session: false,
             show_cleanup_dialog: false,
+            confirm_reset_learning: false,
             force_close: false,
             logo: None,
             app_icon: None,
@@ -739,6 +741,14 @@ impl eframe::App for Git2PkgApp {
                 ui.strong("git2pkg");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
+                        .button(texts.reset_learning())
+                        .on_hover_text(texts.reset_learning())
+                        .clicked()
+                    {
+                        self.confirm_reset_learning = true;
+                    }
+
+                    if ui
                         .add(
                             egui::Button::new(texts.info_button())
                                 .corner_radius(egui::CornerRadius::same(8))
@@ -1058,6 +1068,48 @@ impl eframe::App for Git2PkgApp {
                 self.retry_dialog = false;
                 if retry {
                     self.start_retry();
+                }
+            }
+        }
+
+        // Lerndaten nur nach ausdrücklicher Bestätigung löschen.
+        if self.confirm_reset_learning {
+            let title = self.texts().reset_learning_title().to_string();
+            let body = self.texts().reset_learning_body().to_string();
+            let yes = self.texts().reset_learning_yes().to_string();
+            let no = self.texts().reset_learning_no().to_string();
+            let mut confirm = false;
+            let mut abort = false;
+            egui::Window::new(&title)
+                .default_pos(ctx.available_rect().center() - egui::vec2(220.0, 110.0))
+                .resizable(false)
+                .collapsible(false)
+                .movable(true)
+                .constrain(true)
+                .frame(dialog_frame(ctx))
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(dialog_scroll_height(ctx))
+                        .show(ui, |ui| {
+                            ui.label(&body);
+                        });
+                    ui.separator();
+                    if ui.button(&yes).clicked() {
+                        confirm = true;
+                    }
+                    if ui.button(&no).clicked() {
+                        abort = true;
+                    }
+                });
+            if confirm || abort {
+                self.confirm_reset_learning = false;
+                if confirm {
+                    let texts = self.texts();
+                    if MappingStore::reset() {
+                        let message = texts.reset_learning_done().to_string();
+                        self.hint = Some(message.clone());
+                        self.log.push_str(&format!("[learn] {message}\n"));
+                    }
                 }
             }
         }

@@ -62,6 +62,7 @@ arayüzle herkes kullanabiliyor.
 - Sonuç işlemleri: çıktı klasörünü aç, derleme tarifini kaydet ve bir şey
   çalıştırılmadan önce tam kurulum komutunu gör.
 - İsteğe bağlı başsız mod: `git2pkg --cli <url> [--format=package|binary]`.
+- Öğrenilen eşleştirmeleri `git2pkg --reset-learning` ile sıfırla (Git deposu önbelleği korunur).
 
 ## Gereksinimler
 

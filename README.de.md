@@ -61,6 +61,7 @@ einzelne Binary – per GUI für jeden nutzbar.
 - Ergebnis-Aktionen: Ausgabeordner öffnen, Build-Rezept speichern und den
   exakten Installationsbefehl anzeigen, bevor etwas ausgeführt wird.
 - Optionaler Headless-Modus: `git2pkg --cli <url> [--format=package|binary]`.
+- Gelernte Zuordnungen mit `git2pkg --reset-learning` zurücksetzen (der Git-Repository-Cache bleibt erhalten).
 
 ## Voraussetzungen
 

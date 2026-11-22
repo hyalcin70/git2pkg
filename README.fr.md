@@ -65,6 +65,7 @@ simple interface graphique.
 - Actions de résultat : ouvrir le dossier de sortie, enregistrer la recette de
   compilation et voir la commande d'installation exacte avant toute exécution.
 - Mode headless optionnel : `git2pkg --cli <url> [--format=package|binary]`.
+- Réinitialisez les correspondances apprises avec `git2pkg --reset-learning` (le cache du dépôt Git est conservé).
 
 ## Prérequis
 

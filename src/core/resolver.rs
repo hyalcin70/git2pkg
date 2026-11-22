@@ -6,7 +6,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Mitgelieferte Start-Wissensbasis; lokale Learnings ergänzen diese.
 const DEFAULT_MAPPINGS: &str = include_str!("../../assets/default_mappings.json");
@@ -373,6 +373,9 @@ pub struct BuildRecipe {
     pub submodule_fix: bool,
     #[serde(default)]
     pub packages: Vec<String>,
+    /// Nur vollständig verifizierte Rezepte duerfen spaeter wiederverwendet werden.
+    #[serde(default)]
+    pub verified: bool,
 }
 
 /// Lokale, dauerhafte Paket-Zuordnungen ("Live-Lernen" ohne KI).
@@ -409,12 +412,24 @@ pub struct MappingStore {
 }
 
 impl MappingStore {
-    pub fn load() -> Self {
-        let path = std::env::var_os("HOME")
+    pub fn mappings_path() -> PathBuf {
+        std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join(".config/git2pkg/learned_mappings.json");
-        Self::from_path(path)
+            .join(".config/git2pkg/learned_mappings.json")
+    }
+
+    pub fn load() -> Self {
+        Self::from_path(Self::mappings_path())
+    }
+
+    /// Loescht die gelernte Zuordnungsdatei. Rueckgabe: wurde eine Datei entfernt.
+    pub fn reset() -> bool {
+        Self::reset_at(&Self::mappings_path())
+    }
+
+    pub fn reset_at(path: &Path) -> bool {
+        fs::remove_file(path).is_ok()
     }
 
     fn from_path(path: PathBuf) -> Self {
@@ -580,9 +595,10 @@ impl MappingStore {
     }
 
     /// Speichert eine erfolgreiche Bauweise exakt und strukturbasiert.
-    pub fn record_build_recipe(&mut self, url: &str, recipe: BuildRecipe) {
+    pub fn record_build_recipe(&mut self, url: &str, mut recipe: BuildRecipe) {
         let repo_key = format!("repo:{}", repo_hash(url));
         let signature_key = format!("sig:{}", recipe.signature);
+        recipe.verified = true;
         let changed = self.build_recipes.get(&repo_key) != Some(&recipe)
             || self.build_recipes.get(&signature_key) != Some(&recipe);
         self.build_recipes.insert(repo_key, recipe.clone());
@@ -592,10 +608,28 @@ impl MappingStore {
         }
     }
 
+    /// Entfernt eine frueher als unvollstaendig markierte Strategie wieder.
+    pub fn clear_incomplete_strategy(&mut self, url: &str, strategy: &str) {
+        let key = repo_profile_key(url);
+        let changed = self.repo_profiles.get_mut(&key).is_some_and(|list| {
+            let before = list.len();
+            list.retain(|entry| entry != strategy);
+            list.len() != before
+        });
+        if changed {
+            self.save();
+        }
+    }
+
     /// Merkt sich frisch gelernte Pakete pro Repository, damit sie im naechsten
     /// Anlauf bereits im initialen Setup installiert werden koennen.
     pub fn record_repo_packages(&mut self, url: &str, signature: &str, packages: &[String]) {
         let key = format!("repo:{}", repo_hash(url));
+        let verified = self
+            .build_recipes
+            .get(&key)
+            .map(|recipe| recipe.verified)
+            .unwrap_or(false);
         let mut recipe = self
             .build_recipes
             .get(&key)
@@ -605,20 +639,18 @@ impl MappingStore {
                 ..BuildRecipe::default()
             });
         recipe.packages = packages.to_vec();
+        recipe.verified = verified;
         self.build_recipes.insert(key, recipe);
         self.save();
     }
 
     /// Erst der exakte Repo-Treffer, dann die allgemeine Struktur-Signatur.
     pub fn apply_learned_recipe(&self, url: &str, signature: &str) -> Option<(BuildRecipe, bool)> {
-        self.build_recipes
-            .get(&format!("repo:{}", repo_hash(url)))
-            .cloned()
+        let verified = |recipe: Option<&BuildRecipe>| recipe.filter(|r| r.verified).cloned();
+        verified(self.build_recipes.get(&format!("repo:{}", repo_hash(url))))
             .map(|recipe| (recipe, true))
             .or_else(|| {
-                self.build_recipes
-                    .get(&format!("sig:{}", signature))
-                    .cloned()
+                verified(self.build_recipes.get(&format!("sig:{}", signature)))
                     .map(|recipe| (recipe, false))
             })
     }
@@ -1524,6 +1556,14 @@ mod tests {
         let path = dir.join("learned_mappings.json");
         let mut store = MappingStore::from_path(path.clone());
         let packages = vec!["libpng".to_string(), "pkgconf".to_string()];
+        store.record_build_recipe(
+            "example-app",
+            BuildRecipe {
+                signature: "cmake".to_string(),
+                strategy: "Default".to_string(),
+                ..BuildRecipe::default()
+            },
+        );
         store.record_repo_packages("example-app", "cmake", &packages);
 
         let reloaded = MappingStore::from_path(path);
@@ -1621,5 +1661,66 @@ mod tests {
         assert!(has_eigen_version_mismatch(
             "Eigen3 version 5.0.0 found in /usr/include/eigen3, but at least version 3.3 is required"
         ));
+    }
+
+    #[test]
+    fn bauweise_nur_nach_verifiziertem_erfolg_gespeichert() {
+        let dir = std::env::temp_dir().join(format!(
+            "g2p-verified-recipe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let path = dir.join("learned_mappings.json");
+        let mut store = MappingStore::from_path(path.clone());
+        let packages = vec!["boost".to_string()];
+        store.record_repo_packages("example-app", "cmake-signature", &packages);
+
+        // Ein Programmeintrag allein ist kein verifiziertes Rezept.
+        let unverified = MappingStore::from_path(path.clone());
+        assert!(unverified
+            .apply_learned_recipe("example-app", "cmake-signature")
+            .is_none());
+
+        store.record_build_recipe(
+            "example-app",
+            BuildRecipe {
+                signature: "cmake-signature".to_string(),
+                strategy: "Default".to_string(),
+                packages: packages.clone(),
+                ..BuildRecipe::default()
+            },
+        );
+        // Ein spaeterer Paket-Eintrag darf die Verifizierung nicht zuruecknehmen.
+        store.record_repo_packages("example-app", "cmake-signature", &packages);
+        let reloaded = MappingStore::from_path(path);
+        let (recipe, exact) = reloaded
+            .apply_learned_recipe("example-app", "cmake-signature")
+            .unwrap();
+        assert!(exact);
+        assert!(recipe.verified);
+        assert_eq!(recipe.packages, packages);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reset_entfernt_lerndatei() {
+        let dir = std::env::temp_dir().join(format!(
+            "g2p-reset-learning-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let path = dir.join("learned_mappings.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, "{}").unwrap();
+        assert!(MappingStore::reset_at(&path));
+        assert!(!path.exists());
+        assert!(!MappingStore::reset_at(&path));
+        let _ = fs::remove_dir_all(dir);
     }
 }
