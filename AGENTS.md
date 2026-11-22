@@ -63,7 +63,11 @@ Generated Arch packages (`.pkg.tar.zst`) are assembled directly with
 unreliable inside root containers. In-tree `PKGBUILD` files still use
 `makepkg`. Debian packages compute `Depends` via `dpkg-shlibdeps`; RPM
 packages use `AutoReqProv`, ignore standard RPATHs (`QA_RPATHS=0x0001`) and
-compress man pages before the `%files` list is generated.
+compress man pages before the `%files` list is generated. The target libdir is
+passed explicitly (`/usr/lib64` on Fedora/openSUSE) so installed binaries can
+find their libraries. Project versions are read from Cargo, CMake,
+`pyproject.toml`, `AC_INIT`/`PACKAGE_VERSION`, then Git tags; untagged
+checkouts fall back to `0.1.0`.
 
 Persistent Git clones live in `~/.cache/git2pkg-ai/repos/repo-<repo_hash>/` and
 are updated in place; build workspaces use the separate prefix
