@@ -1051,9 +1051,6 @@ impl Texts {
             "Compilation échouée",
         )
     }
-    pub fn retry_failed_reason(&self) -> &'static str {
-        self.get("Reason:", "Grund:", "Neden:", "Motivo:", "Raison :")
-    }
     pub fn retry_failed_question(&self) -> &'static str {
         self.get(
             "Do you want to retry using the cached source and an alternative build strategy?",

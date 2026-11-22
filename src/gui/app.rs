@@ -110,32 +110,9 @@ fn dialog_scroll_height(ctx: &egui::Context) -> f32 {
 
 /// Einheitlicher, deckender Dialog-Rahmen mit ruhigem Innenabstand.
 fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
-    egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::symmetric(16, 14))
-}
-
-/// ANSI-Steuercodes und Tabs aus Log-Auszuegen entfernen, damit egui den Text
-/// nicht in scheinbare Spalten zerlegt.
-fn single_column_log_text(raw: &str) -> String {
-    let mut without_ansi = String::with_capacity(raw.len());
-    let mut chars = raw.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' {
-            while let Some(&next) = chars.peek() {
-                chars.next();
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-            continue;
-        }
-        without_ansi.push(ch);
-    }
-    without_ansi
-        .lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
+    egui::Frame::window(&ctx.style())
+        .fill(ctx.style().visuals.window_fill)
+        .inner_margin(egui::Margin::symmetric(16, 14))
 }
 
 fn is_foreign_target(target: TargetDistro, host: &DistroFamily) -> bool {
@@ -1063,15 +1040,6 @@ impl eframe::App for Git2PkgApp {
         // Automatisches Retry-Popup, wenn der Auto-Resolver nichts mehr fand.
         if self.retry_dialog {
             let title = self.texts().retry_failed_title().to_string();
-            let reason_label = self.texts().retry_failed_reason().to_string();
-            let reason = self.error.clone().unwrap_or_else(|| {
-                self.log
-                    .lines()
-                    .rev()
-                    .find(|s| !s.trim().is_empty())
-                    .unwrap_or("")
-                    .to_string()
-            });
             let question = self.texts().retry_failed_question().to_string();
             let yes = self.texts().retry_failed_yes().to_string();
             let no = self.texts().retry_failed_cancel().to_string();
@@ -1085,18 +1053,11 @@ impl eframe::App for Git2PkgApp {
                 .constrain(true)
                 .frame(dialog_frame(ctx))
                 .show(ctx, |ui| {
+                    ui.set_max_width(440.0);
+                    let next = self.texts().next_strategy(self.next_strategy_label());
                     egui::ScrollArea::vertical()
                         .max_height(dialog_scroll_height(ctx))
                         .show(ui, |ui| {
-                            ui.label(&reason_label);
-                            ui.set_max_width(460.0);
-                            let clean_reason = single_column_log_text(&reason);
-                            ui.add(
-                                egui::Label::new(egui::RichText::new(&clean_reason).monospace())
-                                    .wrap(),
-                            );
-                            ui.add_space(6.0);
-                            let next = self.texts().next_strategy(self.next_strategy_label());
                             ui.strong(&next);
                             ui.add_space(6.0);
                             ui.label(&question);
@@ -1914,17 +1875,6 @@ fn log_line_color(line: &str, dark: bool) -> egui::Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fehlerlog_wird_einspaltig_gerendert() {
-        let raw = "Build failed\n[ 12%] datei_a\tdatei_b\n\u{1b}[31mCMake Error\u{1b}[0m\n";
-        let clean = single_column_log_text(raw);
-        assert!(!clean.contains('\t'));
-        assert!(!clean.contains('\u{1b}'));
-        assert!(clean.contains("datei_a datei_b"));
-        assert!(clean.contains("CMake Error"));
-        assert_eq!(clean.lines().count(), 3);
-    }
 
     #[test]
     fn log_readonly_buffer_ist_nicht_editierbar() {

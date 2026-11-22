@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "git2pkg"
-version = "0.2.0-alpha.13"
+version = "0.2.0-alpha.14"
 dependencies = [
  "arboard",
  "dark-light",
