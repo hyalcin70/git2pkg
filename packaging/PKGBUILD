@@ -24,13 +24,13 @@ package() {
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
-  # Primäres Programm-Icon des Projekts.
+  # Primary application icon of the project.
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/pixmaps/$pkgname.png"
 
   install -Dm644 packaging/git2pkg.desktop "$pkgdir/usr/share/applications/git2pkg.desktop"
 
-  # Desktop- und Icon-Dateien liegen je nach Projekt in assets/ oder packaging/.
+  # Desktop and icon files may live in assets/ or packaging/, depending on the project.
   for f in assets/*.desktop packaging/*.desktop; do
     [ -f "$f" ] || continue
     install -Dm644 "$f" "$pkgdir/usr/share/applications/$(basename "$f")"
