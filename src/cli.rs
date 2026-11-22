@@ -70,6 +70,7 @@ pub fn run_cli(url: &str) {
                 std::process::exit(1);
             }
             BuildEvent::ContainerStarted(id) => println!("==> {}", id),
+            BuildEvent::ProgressReset => {}
             BuildEvent::Cancelled => {
                 eprintln!("[warn] Build vom Benutzer abgebrochen.");
                 std::process::exit(130);

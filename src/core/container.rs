@@ -471,6 +471,7 @@ pub enum BuildEvent {
     Finished(BuildOutcome),
     Failed(String),
     ContainerStarted(String),
+    ProgressReset,
     Cancelled,
 }
 
@@ -804,6 +805,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
         let effective_strategy = forced_strategy.unwrap_or(config.strategy);
         let strategy_name = effective_strategy.label();
+        let _ = tx.send(BuildEvent::ProgressReset);
         step(
             tx,
             texts.step_strategy_round(
@@ -918,7 +920,11 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             ) {
                 // Lernprofil: kompiliertes Projekt ohne ausführbare Datei im Paket.
                 let mut incomplete_profile = false;
-                if is_compiled_build_system(system.label()) {
+                let unresolved_dependencies = !analyze_output(&last_output).is_empty();
+                if is_compiled_build_system(system.label())
+                    && !deps_failed
+                    && !unresolved_dependencies
+                {
                     if let Ok(listing) = container.exec("find /work/dist -maxdepth 1 -type f", tx) {
                         for raw in listing.text.lines() {
                             let path = raw.trim();
@@ -1569,7 +1575,9 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
         BuildSystem::Go => "go build -o /work/dist/app .",
         BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .",
         BuildSystem::Make => "make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;",
-        BuildSystem::Qmake => "qmake6 . 2>/dev/null || qmake .; make",
+        BuildSystem::Qmake => {
+            "(qmake6 . 2>/dev/null || qmake .) && make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
+        }
         BuildSystem::Unknown => "true",
     }
 }
@@ -2407,6 +2415,13 @@ mod tests {
     }
 
     #[test]
+    fn qmake_kette_bricht_bei_konfigurationsfehler_ab() {
+        let step = binary_build_step(&BuildSystem::Qmake);
+        assert!(step.contains("&& make"), "{step}");
+        assert!(step.contains("&& find"), "{step}");
+    }
+
+    #[test]
     fn alle_buildsysteme_und_strategien_erzeugen_gueltige_skripte() {
         let config = config(DistroFamily::Arch, TargetFormat::NativePackage);
         let identity = project_identity("example-app", Path::new(""));
@@ -2684,6 +2699,7 @@ mod tests {
         assert!(make.contains("Unix Makefiles"));
         let default = build_step_text(&BuildSystem::CMake, BuildStrategy::Default, None);
         assert!(default.contains("cmake -S . -B build"));
+        assert!(default.contains("cmake --build build"));
     }
 
     #[test]

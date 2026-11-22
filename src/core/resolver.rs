@@ -55,7 +55,23 @@ impl MissingDep {
 /// Kleingeschriebene Modulnamen fallen auf den Namen selbst zurück.
 pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static str> {
     match (package_manager, name.to_ascii_lowercase().as_str()) {
-        ("pacman", "boost") => Some("boost"),
+        ("pacman", "boost") | ("pacman", "boost_include_dir") => Some("boost"),
+        ("pacman", "glew") => Some("glew"),
+        ("pacman", "glfw") | ("pacman", "glfw3") => Some("glfw"),
+        ("pacman", "tbb") => Some("tbb"),
+        ("pacman", "opencv") => Some("opencv"),
+        ("pacman", "freetype") => Some("freetype2"),
+        ("pacman", "expat") => Some("expat"),
+        ("pacman", "bzip2") => Some("bzip2"),
+        ("pacman", "liblzma") | ("pacman", "lzma") => Some("xz"),
+        ("pacman", "gtk2") => Some("gtk2"),
+        ("pacman", "gtk3") => Some("gtk3"),
+        ("pacman", "webkit2gtk") => Some("webkit2gtk"),
+        ("pacman", "cereal") => Some("cereal"),
+        ("pacman", "qhull") => Some("qhull"),
+        ("pacman", "nlopt") => Some("nlopt"),
+        ("pacman", "assimp") => Some("assimp"),
+        ("pacman", "ffmpeg") => Some("ffmpeg"),
         ("pacman", "eigen3") | ("pacman", "eigen") => Some("eigen"),
         ("pacman", "openssl") | ("pacman", "ssl") => Some("openssl"),
         ("pacman", "curl") | ("pacman", "libcurl") => Some("curl"),
@@ -65,7 +81,23 @@ pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static
         ("pacman", "opengl") => Some("libglvnd"),
         ("pacman", "wxwidgets") => Some("wxwidgets-gtk3"),
 
-        ("apt", "boost") => Some("libboost-dev"),
+        ("apt", "boost") | ("apt", "boost_include_dir") => Some("libboost-all-dev"),
+        ("apt", "glew") => Some("libglew-dev"),
+        ("apt", "glfw") | ("apt", "glfw3") => Some("libglfw3-dev"),
+        ("apt", "tbb") => Some("libtbb-dev"),
+        ("apt", "opencv") => Some("libopencv-dev"),
+        ("apt", "freetype") => Some("libfreetype-dev"),
+        ("apt", "expat") => Some("libexpat1-dev"),
+        ("apt", "bzip2") => Some("libbz2-dev"),
+        ("apt", "liblzma") | ("apt", "lzma") => Some("liblzma-dev"),
+        ("apt", "gtk2") => Some("libgtk2.0-dev"),
+        ("apt", "gtk3") => Some("libgtk-3-dev"),
+        ("apt", "webkit2gtk") => Some("libwebkit2gtk-4.0-dev"),
+        ("apt", "cereal") => Some("libcereal-dev"),
+        ("apt", "qhull") => Some("libqhull-dev"),
+        ("apt", "nlopt") => Some("libnlopt-dev"),
+        ("apt", "assimp") => Some("libassimp-dev"),
+        ("apt", "ffmpeg") => Some("libavformat-dev"),
         ("apt", "eigen3") | ("apt", "eigen") => Some("libeigen3-dev"),
         ("apt", "openssl") | ("apt", "ssl") => Some("libssl-dev"),
         ("apt", "curl") | ("apt", "libcurl") => Some("libcurl4-openssl-dev"),
@@ -75,7 +107,23 @@ pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static
         ("apt", "opengl") => Some("libgl-dev"),
         ("apt", "wxwidgets") => Some("libwxgtk3.2-dev"),
 
-        ("dnf", "boost") => Some("boost-devel"),
+        ("dnf", "boost") | ("dnf", "boost_include_dir") => Some("boost-devel"),
+        ("dnf", "glew") => Some("glew-devel"),
+        ("dnf", "glfw") | ("dnf", "glfw3") => Some("glfw-devel"),
+        ("dnf", "tbb") => Some("tbb-devel"),
+        ("dnf", "opencv") => Some("opencv-devel"),
+        ("dnf", "freetype") => Some("freetype-devel"),
+        ("dnf", "expat") => Some("expat-devel"),
+        ("dnf", "bzip2") => Some("bzip2-devel"),
+        ("dnf", "liblzma") | ("dnf", "lzma") => Some("xz-devel"),
+        ("dnf", "gtk2") => Some("gtk2-devel"),
+        ("dnf", "gtk3") => Some("gtk3-devel"),
+        ("dnf", "webkit2gtk") => Some("webkit2gtk3-devel"),
+        ("dnf", "cereal") => Some("cereal-devel"),
+        ("dnf", "qhull") => Some("qhull-devel"),
+        ("dnf", "nlopt") => Some("nlopt-devel"),
+        ("dnf", "assimp") => Some("assimp-devel"),
+        ("dnf", "ffmpeg") => Some("ffmpeg-devel"),
         ("dnf", "eigen3") | ("dnf", "eigen") => Some("eigen3-devel"),
         ("dnf", "openssl") | ("dnf", "ssl") => Some("openssl-devel"),
         ("dnf", "curl") | ("dnf", "libcurl") => Some("libcurl-devel"),
@@ -85,7 +133,23 @@ pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static
         ("dnf", "opengl") => Some("mesa-libGL-devel"),
         ("dnf", "wxwidgets") => Some("wxGTK-devel"),
 
-        ("zypper", "boost") => Some("boost-devel"),
+        ("zypper", "boost") | ("zypper", "boost_include_dir") => Some("boost-devel"),
+        ("zypper", "glew") => Some("glew-devel"),
+        ("zypper", "glfw") | ("zypper", "glfw3") => Some("libglfw3-devel"),
+        ("zypper", "tbb") => Some("tbb-devel"),
+        ("zypper", "opencv") => Some("opencv-devel"),
+        ("zypper", "freetype") => Some("freetype2-devel"),
+        ("zypper", "expat") => Some("libexpat-devel"),
+        ("zypper", "bzip2") => Some("libbz2-devel"),
+        ("zypper", "liblzma") | ("zypper", "lzma") => Some("liblzma-devel"),
+        ("zypper", "gtk2") => Some("gtk2-devel"),
+        ("zypper", "gtk3") => Some("gtk3-devel"),
+        ("zypper", "webkit2gtk") => Some("webkit2gtk3-devel"),
+        ("zypper", "cereal") => Some("cereal-devel"),
+        ("zypper", "qhull") => Some("qhull-devel"),
+        ("zypper", "nlopt") => Some("nlopt-devel"),
+        ("zypper", "assimp") => Some("assimp-devel"),
+        ("zypper", "ffmpeg") => Some("ffmpeg-devel"),
         ("zypper", "eigen3") | ("zypper", "eigen") => Some("eigen3-devel"),
         ("zypper", "openssl") | ("zypper", "ssl") => Some("libopenssl-devel"),
         ("zypper", "zlib") => Some("zlib-devel"),
@@ -326,6 +390,14 @@ struct LearnedFile {
     build_recipes: HashMap<String, BuildRecipe>,
 }
 
+/// Veraltete "unvollständig"-Marker aus älteren Lerndateien ignorieren.
+fn is_obsolete_incomplete_strategy(strategy: &str) -> bool {
+    matches!(
+        strategy,
+        "System-Bibliotheken ohne deps/-Vorbau" | "Direkter Build-System-Fallback"
+    )
+}
+
 pub struct MappingStore {
     path: PathBuf,
     learned: HashMap<String, String>,
@@ -372,10 +444,20 @@ impl MappingStore {
                 .get("build_fixes")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
-            let profiles = value
+            let profiles: HashMap<String, Vec<String>> = value
                 .get("repo_profiles")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
+            let profiles = profiles
+                .into_iter()
+                .map(|(key, list)| {
+                    let list = list
+                        .into_iter()
+                        .filter(|entry| !is_obsolete_incomplete_strategy(entry))
+                        .collect();
+                    (key, list)
+                })
+                .collect();
             let recipes = value
                 .get("build_recipes")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -1009,7 +1091,10 @@ mod tests {
     #[test]
     fn cmake_module_werden_auf_distro_pakte_abgebildet() {
         assert_eq!(distro_package_name("boost", "pacman"), Some("boost"));
-        assert_eq!(distro_package_name("boost", "apt"), Some("libboost-dev"));
+        assert_eq!(
+            distro_package_name("boost", "apt"),
+            Some("libboost-all-dev")
+        );
         assert_eq!(distro_package_name("boost", "dnf"), Some("boost-devel"));
         assert_eq!(distro_package_name("eigen3", "pacman"), Some("eigen"));
         assert_eq!(distro_package_name("eigen3", "apt"), Some("libeigen3-dev"));
@@ -1413,6 +1498,65 @@ mod tests {
         assert!(exact);
         assert_eq!(recipe.signature, "cmake");
         assert_eq!(recipe.packages, packages);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cmake_findmodule_mappings_sind_vollstaendig() {
+        for module in [
+            "Boost",
+            "GLEW",
+            "GLFW",
+            "TBB",
+            "OpenCV",
+            "Eigen3",
+            "CURL",
+            "OpenSSL",
+            "Freetype",
+            "EXPAT",
+            "ZLIB",
+            "BZip2",
+            "LibLZMA",
+            "GTK2",
+            "GTK3",
+            "wxWidgets",
+            "WebKit2GTK",
+            "Cereal",
+            "Qhull",
+            "NLopt",
+            "Assimp",
+            "FFmpeg",
+        ] {
+            for manager in ["pacman", "apt", "dnf", "zypper"] {
+                assert!(
+                    distro_package_name(module, manager).is_some(),
+                    "{module} fehlt für {manager}"
+                );
+            }
+        }
+        assert_eq!(
+            distro_package_name("Boost", "apt"),
+            Some("libboost-all-dev")
+        );
+    }
+
+    #[test]
+    fn veraltete_unvollstaendige_profile_werden_verworfen() {
+        let dir = std::env::temp_dir().join(format!(
+            "g2p-obsolete-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("mappings.json");
+        let json = r#"{"repo_profiles":{"repo:abc":["Standard","System-Bibliotheken ohne deps/-Vorbau","Direkter Build-System-Fallback"]}}"#;
+        fs::write(&path, json).unwrap();
+        let store = MappingStore::from_path(path.clone());
+        let list = store.repo_profiles.get("repo:abc").unwrap();
+        assert_eq!(list, &vec!["Standard".to_string()]);
         let _ = fs::remove_dir_all(dir);
     }
 }

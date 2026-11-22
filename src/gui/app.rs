@@ -116,8 +116,10 @@ fn suggested_log_filename(attempt: u32) -> String {
 }
 
 fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+    let fill = ctx.style().visuals.window_fill;
+    let opaque = egui::Color32::from_rgb(fill.r(), fill.g(), fill.b());
     egui::Frame::window(&ctx.style())
-        .fill(ctx.style().visuals.window_fill)
+        .fill(opaque)
         .inner_margin(egui::Margin::symmetric(16, 14))
 }
 
@@ -484,6 +486,10 @@ impl Git2PkgApp {
                     }
                     Ok(BuildEvent::ContainerStarted(id)) => {
                         *self.container_id.lock().unwrap() = Some(id);
+                        changed = true;
+                    }
+                    Ok(BuildEvent::ProgressReset) => {
+                        self.build_progress = 0.0;
                         changed = true;
                     }
                     Ok(BuildEvent::Cancelled) => {
@@ -1767,43 +1773,48 @@ impl eframe::App for Git2PkgApp {
 }
 
 /// Fortschritt aus echten Log-Signalen ableiten, monoton und nie rückwärts.
-fn progress_from_line(current: f32, line: &str, cargo_crates: u32) -> f32 {
+/// Fortschritt nach Phasen des aktuellen Versuchs, nicht nach globalen
+/// Zahlen aus Strategie- oder Rundenangaben (`1/5` darf nie 95 % bedeuten).
+fn progress_from_line(current: f32, line: &str, _cargo_crates: u32) -> f32 {
     let lower = line.to_ascii_lowercase();
-    let next = if lower.contains("clone")
+    let phase = if lower.contains("clone")
         || lower.contains("receiving objects")
         || lower.contains("resolving deltas")
     {
-        extract_percent(line)
-            .map(|value| 0.15 * value)
-            .unwrap_or_else(|| current.clamp(0.03, 0.15))
-    } else if lower.contains("setup") || lower.contains("install") {
-        0.15 + extract_percent(line)
-            .map(|value| 0.15 * value)
-            .unwrap_or(0.08)
+        let fraction = extract_percent(line).unwrap_or(0.5);
+        (0.05 + 0.10 * fraction).min(0.15)
+    } else if lower.contains("setup")
+        || lower.contains("install")
+        || lower.contains("nachinstallation")
+    {
+        0.30
+    } else if lower.contains("cmake -s")
+        || lower.contains("cmake --build")
+        || lower.contains("compiling")
+        || lower.contains("make")
+        || lower.contains("ninja")
+    {
+        0.55
     } else if lower.contains("starting package()")
         || lower.contains("dpkg-deb")
         || lower.contains("rpmbuild")
         || lower.contains("makepkg")
     {
-        current.max(0.85)
+        0.90
     } else if lower.contains("verif") || lower.contains("prüf") {
-        current.max(0.95)
-    } else if let Some((done, total)) = extract_fraction(line) {
-        0.30 + 0.55 * (done / total)
-    } else if let Some(value) = extract_percent(line) {
-        0.30 + 0.55 * value
+        0.95
     } else if lower.contains("finished") && lower.contains("target(s)") {
-        0.85
-    } else if lower.contains("compiling") {
-        let crates = cargo_crates.max(1) as f32;
-        0.30 + 0.52 * (1.0 - 1.0 / (1.0 + crates / 120.0))
-    } else if lower.contains("[") {
-        (current + 0.012).min(0.83)
+        1.0
+    } else if let Some((done, total)) = extract_fraction(line) {
+        if total >= 5.0 {
+            (0.55 + 0.20 * (done / total)).min(0.75)
+        } else {
+            current
+        }
     } else {
         current
     };
-    next.max(current)
-        .min(if lower.contains("setup") { 0.30 } else { 1.0 })
+    phase.max(current)
 }
 
 /// Findet die erste Prozentangabe, z. B. `45%`, `[ 28%]` oder `100 %`.
@@ -1944,14 +1955,20 @@ mod tests {
         );
         assert_eq!(extract_percent("[ 28%] Building CXX object"), Some(0.28));
         assert_eq!(extract_fraction("[140/420] Linking"), Some((140.0, 420.0)));
-        assert!(progress_from_line(0.2, "== git2pkg: Setup ==", 0) <= 0.30);
-        assert!(progress_from_line(0.5, "Starting package() ...", 200) >= 0.85);
-        assert!(progress_from_line(0.5, "[140/420] Linking", 200) >= 0.48);
-        let p50 = progress_from_line(0.0, "   Compiling repo v0.1.0", 50);
-        let p200 = progress_from_line(0.0, "   Compiling repo v0.1.0", 200);
-        assert!((0.44..0.47).contains(&p50), "50 Crates: {p50}");
-        assert!((0.61..0.64).contains(&p200), "200 Crates: {p200}");
-        assert!(progress_from_line(p200, "Finished `release` target(s) in 1s", 200) >= 0.85);
+        assert_eq!(
+            progress_from_line(0.0, "Strategie 1/5: Standard — Runde 1/5", 0),
+            0.0
+        );
+        assert_eq!(progress_from_line(0.0, "== git2pkg: Setup ==", 0), 0.30);
+        let linking = progress_from_line(0.30, "[140/420] Linking", 200);
+        assert!((0.60..0.63).contains(&linking), "Linking: {linking}");
+        assert_eq!(progress_from_line(0.5, "Starting package() ...", 200), 0.90);
+        let compiled = progress_from_line(0.30, "Compiling repo v0.1.0", 200);
+        assert_eq!(compiled, 0.55);
+        assert_eq!(
+            progress_from_line(compiled, "Finished `release` target(s) in 1s", 200),
+            1.0
+        );
     }
 
     #[test]
