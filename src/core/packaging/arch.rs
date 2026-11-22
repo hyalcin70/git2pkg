@@ -56,7 +56,7 @@ done"#.to_string(),
     };
     let install_body = format!("{}\n  {}", install_body, super::strip_binaries_step());
     let build_body = if ctx.build_step.contains("cmake") {
-        "set -e\n  true || return 1"
+        "set -eo pipefail\n  true || return 1"
     } else {
         "true"
     };
@@ -146,8 +146,8 @@ mod tests {
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
-        assert!(script.contains("set -e\n  true || return 1"));
-        assert!(script.contains("build() {\n  set -e"));
+        assert!(script.contains("set -eo pipefail\n  true || return 1"));
+        assert!(script.contains("build() {\n  set -eo pipefail"));
     }
 
     #[test]

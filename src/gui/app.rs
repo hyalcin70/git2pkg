@@ -2,7 +2,7 @@
 //! und deutsch/englisch/türkisch/spanisch/französischer Internationalisierung.
 
 use crate::core::container::{
-    cached_repo_has_local_dependencies, cleanup_all_builds_with, cleanup_failed_build_artifacts,
+    cached_repo_has_local_dependencies, cleanup_all_cache_with, cleanup_failed_build_artifacts,
     container_engine_available, default_output_dir, detect_engine, run_build, BuildConfig,
     BuildEvent, BuildOutcome, BuildStrategy, ContainerEngine, TargetFormat,
 };
@@ -11,6 +11,8 @@ use crate::core::resolver::MappingStore;
 use crate::gui::i18n::{Language, Texts, ThemeMode};
 use crate::gui::settings::GuiSettings;
 use arboard::GetExtLinux;
+#[cfg(target_os = "linux")]
+use arboard::{LinuxClipboardKind, SetExtLinux};
 use eframe::egui;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -74,6 +76,7 @@ pub struct Git2PkgApp {
     log_snapshot: String,
     log_hovered: bool,
     last_log_selection: Option<egui::text::CCursorRange>,
+    last_primary_selection: Option<String>,
     last_url_selection: Option<egui::text::CCursorRange>,
     step: String,
     build_progress: f32,
@@ -97,7 +100,6 @@ pub struct Git2PkgApp {
     last_build_failed: bool,
     had_build_in_session: bool,
     show_cleanup_dialog: bool,
-    confirm_reset_learning: bool,
     force_close: bool,
     logo: Option<egui::TextureHandle>,
     app_icon: Option<egui::TextureHandle>,
@@ -142,7 +144,20 @@ fn selected_text_from_range(range: Option<egui::text::CCursorRange>, text: &str)
     Some(chars[char_range.start..char_range.end].iter().collect())
 }
 
-/// Ersetzt den markierten Zeichenbereich (oder fuegt am Cursor ein) und liefert
+#[cfg(target_os = "linux")]
+fn publish_primary_selection(text: &str) {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        let _ = clipboard
+            .set()
+            .clipboard(LinuxClipboardKind::Primary)
+            .text(text.to_string());
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn publish_primary_selection(_text: &str) {}
+
+/// Ersetzt den markierten Zeichenbereich ( oder fuegt am Cursor ein) und liefert
 /// den neuen String sowie die neue Cursorposition in Zeichenindizes zurueck.
 fn replace_text_in_range(
     text: &str,
@@ -234,6 +249,7 @@ impl Git2PkgApp {
             log_snapshot: String::new(),
             log_hovered: false,
             last_log_selection: None,
+            last_primary_selection: None,
             last_url_selection: None,
             step: String::new(),
             build_progress: 0.0,
@@ -257,7 +273,6 @@ impl Git2PkgApp {
             last_build_failed: false,
             had_build_in_session: false,
             show_cleanup_dialog: false,
-            confirm_reset_learning: false,
             force_close: false,
             logo: None,
             app_icon: None,
@@ -741,14 +756,6 @@ impl eframe::App for Git2PkgApp {
                 ui.strong("git2pkg");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .button(texts.reset_learning())
-                        .on_hover_text(texts.reset_learning())
-                        .clicked()
-                    {
-                        self.confirm_reset_learning = true;
-                    }
-
-                    if ui
                         .add(
                             egui::Button::new(texts.info_button())
                                 .corner_radius(egui::CornerRadius::same(8))
@@ -823,19 +830,22 @@ impl eframe::App for Git2PkgApp {
                 ui.separator();
                 ui.strong(texts.status_engine());
                 ui.colored_label(green, self.engine.label());
-                ui.separator();
-                ui.strong(texts.status_step());
-                ui.colored_label(green, self.step.as_str());
             });
             ui.add_space(3.0);
+            let total_w = ui.available_width();
+            let bar_w = (total_w * 0.55).clamp(240.0, 520.0);
             ui.vertical_centered(|ui| {
-                let percent = (self.build_progress * 100.0).round() as u32;
-                let label = texts.progress_label(percent);
-                let width = ui.available_width().max(1.0);
+                ui.strong(texts.status_step());
+                ui.colored_label(self.value_color(), self.step.as_str());
+            });
+            let percent = (self.build_progress * 100.0).round() as u32;
+            let label = texts.progress_label(percent);
+            ui.horizontal(|ui| {
+                ui.add_space(((total_w - bar_w) * 0.5).max(0.0));
                 ui.add(
                     egui::ProgressBar::new(self.build_progress)
-                        .text(label)
-                        .desired_width(width),
+                        .desired_width(bar_w)
+                        .text(label),
                 );
             });
         });
@@ -1072,48 +1082,6 @@ impl eframe::App for Git2PkgApp {
             }
         }
 
-        // Lerndaten nur nach ausdrücklicher Bestätigung löschen.
-        if self.confirm_reset_learning {
-            let title = self.texts().reset_learning_title().to_string();
-            let body = self.texts().reset_learning_body().to_string();
-            let yes = self.texts().reset_learning_yes().to_string();
-            let no = self.texts().reset_learning_no().to_string();
-            let mut confirm = false;
-            let mut abort = false;
-            egui::Window::new(&title)
-                .default_pos(ctx.available_rect().center() - egui::vec2(220.0, 110.0))
-                .resizable(false)
-                .collapsible(false)
-                .movable(true)
-                .constrain(true)
-                .frame(dialog_frame(ctx))
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(dialog_scroll_height(ctx))
-                        .show(ui, |ui| {
-                            ui.label(&body);
-                        });
-                    ui.separator();
-                    if ui.button(&yes).clicked() {
-                        confirm = true;
-                    }
-                    if ui.button(&no).clicked() {
-                        abort = true;
-                    }
-                });
-            if confirm || abort {
-                self.confirm_reset_learning = false;
-                if confirm {
-                    let texts = self.texts();
-                    if MappingStore::reset() {
-                        let message = texts.reset_learning_done().to_string();
-                        self.hint = Some(message.clone());
-                        self.log.push_str(&format!("[learn] {message}\n"));
-                    }
-                }
-            }
-        }
-
         // Aufraeum-Abfrage beim Beenden nach fehlgeschlagenem Build.
         if self.show_cleanup_dialog {
             let title = self.texts().cleanup_title().to_string();
@@ -1150,7 +1118,7 @@ impl eframe::App for Git2PkgApp {
             if choice > 0 {
                 match choice {
                     1 => {
-                        cleanup_all_builds_with(self.engine.clone(), &self.distro.base_image);
+                        cleanup_all_cache_with(self.engine.clone(), &self.distro.base_image);
                         self.last_build_failed = false;
                     }
                     2 => {
@@ -1722,7 +1690,8 @@ impl eframe::App for Git2PkgApp {
             let secondary_clicked = ui.input(|input| input.pointer.secondary_clicked());
             let pointer_pos = ui.input(|input| input.pointer.latest_pos());
             let mut log_hovered = false;
-            egui::ScrollArea::both()
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
                 .stick_to_bottom(self.building && !selection_active)
                 .max_height(log_height)
                 .show(ui, |ui| {
@@ -1819,6 +1788,16 @@ impl eframe::App for Git2PkgApp {
                     }
                 });
             self.log_hovered = log_hovered;
+            let primary_text =
+                selected_text_from_range(self.last_log_selection, &self.log_snapshot);
+            match primary_text {
+                Some(text) if self.last_primary_selection.as_deref() != Some(text.as_str()) => {
+                    publish_primary_selection(&text);
+                    self.last_primary_selection = Some(text);
+                }
+                None => self.last_primary_selection = None,
+                _ => {}
+            }
             ui.add_space(2.0);
         });
     }

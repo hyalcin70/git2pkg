@@ -333,9 +333,13 @@ pub fn mark_failed_build(work: &Path) {
     let _ = fs::write(work.join("FAILED"), "failed\n");
 }
 
-fn build_cache_root() -> PathBuf {
+fn git2pkg_cache_root() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join(".cache/git2pkg/builds")
+    Path::new(&home).join(".cache/git2pkg")
+}
+
+fn build_cache_root() -> PathBuf {
+    git2pkg_cache_root().join("builds")
 }
 
 /// Dauerhafter, sauber gehaltener Klon-Cache. Er wird niemals vom Build-Cache-
@@ -515,6 +519,7 @@ fn build_cache_has_entries() -> bool {
 
 /// Erst normal löschen; wenn root-eigene Reste bleiben, einmalig in einem
 /// Wegwerf-Container aufräumen. Repo-Cache und Lerndaten bleiben unberührt.
+#[allow(dead_code)]
 pub fn cleanup_all_builds_with(engine: ContainerEngine, image: &str) -> usize {
     let mut removed = cleanup_all_builds();
     if !build_cache_has_entries() {
@@ -537,6 +542,86 @@ pub fn cleanup_all_builds_with(engine: ContainerEngine, image: &str) -> usize {
         removed += cleanup_all_builds();
     }
     removed
+}
+
+fn remove_tree_in_place(path: &Path) -> bool {
+    if !path.exists() {
+        return true;
+    }
+    make_tree_writable(path);
+    match fs::remove_dir_all(path) {
+        Ok(()) => true,
+        Err(_) => {
+            make_tree_writable(path);
+            fs::remove_dir_all(path).is_ok()
+        }
+    }
+}
+
+fn local_cleanup_image(engine: &ContainerEngine, preferred: &str) -> Option<String> {
+    if local_image_exists(engine, preferred) {
+        return Some(preferred.to_string());
+    }
+    let output = Command::new(engine.binary())
+        .arg("images")
+        .arg("-q")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn stop_build_containers(engine: &ContainerEngine) {
+    let Ok(output) = Command::new(engine.binary())
+        .args(["ps", "-aq", "--filter", "name=git2pkg-build-"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return;
+    };
+    for id in String::from_utf8_lossy(&output.stdout).lines() {
+        let id = id.trim();
+        if !id.is_empty() {
+            let _ = Command::new(engine.binary())
+                .args(["rm", "-f", id])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+
+fn cleanup_all_cache_in(cache: &Path) -> bool {
+    remove_tree_in_place(cache)
+}
+
+/// Beenden-Auswahl „Löschen“: kompletter Cache, inkl. Repos und Builds.
+/// Lern-Daten unter `~/.config/git2pkg/` bleiben bewusst unberührt.
+pub fn cleanup_all_cache_with(engine: ContainerEngine, image: &str) -> bool {
+    stop_build_containers(&engine);
+    let cache = git2pkg_cache_root();
+    if cleanup_all_cache_in(&cache) {
+        return true;
+    }
+    let Some(local_image) = local_cleanup_image(&engine, image) else {
+        return false;
+    };
+    let mut spec = container_cleanup_args(&cache, &local_image);
+    spec.0 = engine.binary().to_string();
+    let ok = Command::new(&spec.0)
+        .args(&spec.1)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    ok && cleanup_all_cache_in(&cache)
 }
 
 fn cleanup_all_builds_in(builds: &Path) -> usize {
@@ -2244,6 +2329,7 @@ fn build_script_with_flags(
         "#!/usr/bin/env bash".to_string(),
         "set -e".to_string(),
         "set -o pipefail".to_string(),
+        "trap 'chown -R $(stat -c '%u:%g' /work 2>/dev/null || echo 0:0) /work 2>/dev/null || true' EXIT".to_string(),
         "export CMAKE_POLICY_VERSION_MINIMUM=3.5".to_string(),
         "export CARGO_TARGET_DIR=/work/cargo-target".to_string(),
         "export CARGO_HOME=/work/cargo-home".to_string(),
@@ -3612,6 +3698,53 @@ mod tests {
             TargetFormat::NativePackage
         );
         assert_eq!(TargetFormat::NativePackage.key(), "package");
+    }
+
+    #[test]
+    fn vollstaendiger_cache_wipe_laesst_lerndaten() {
+        let root = std::env::temp_dir().join(format!(
+            "g2p-full-cache-wipe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let cache = root.join("git2pkg");
+        let mappings = root.join("learned_mappings.json");
+        fs::create_dir_all(cache.join("builds/example-hash/src/.git/objects/aa")).unwrap();
+        fs::create_dir_all(cache.join("repos/example-hash/.git/objects/bb")).unwrap();
+        fs::write(
+            cache.join("builds/example-hash/src/.git/objects/aa/object"),
+            "x",
+        )
+        .unwrap();
+        fs::write(cache.join("repos/example-hash/.git/objects/bb/object"), "y").unwrap();
+        fs::write(&mappings, "{}").unwrap();
+
+        assert!(cleanup_all_cache_in(&cache));
+        assert!(!cache.exists());
+        assert!(mappings.is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn build_script_setzt_chown_trap() {
+        let identity = ProjectIdentity {
+            name: "example-app".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let script = build_script_with(
+            &config(DistroFamily::Arch, TargetFormat::NativePackage),
+            &BuildSystem::CMake,
+            &[],
+            None,
+            &identity,
+            BuildStrategy::Default,
+            false,
+        );
+        assert!(script.contains("trap 'chown -R"));
+        assert!(script.contains("stat -c '%u:%g' /work"));
     }
 
     #[test]
