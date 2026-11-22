@@ -284,18 +284,24 @@ pub fn has_failed_build_cache() -> bool {
         .any(|entry| entry.path().join("FAILED").is_file())
 }
 
-/// Löscht ausschließlich als fehlgeschlagen markierte Build-Ordner.
-pub fn cleanup_failed_builds() -> usize {
+/// "Alles löschen" beim Beenden: kompletter Build-Cache, unabhängig davon,
+/// ob ein Ordner als fehlgeschlagen markiert wurde.
+pub fn cleanup_all_builds() -> usize {
     let Ok(entries) = fs::read_dir(build_cache_root()) else {
         return 0;
     };
     let mut removed = 0;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.join("FAILED").is_file() && fs::remove_dir_all(&path).is_ok() {
+        if path.is_dir() {
+            if remove_build_dir_recursively(&path).is_ok() {
+                removed += 1;
+            }
+        } else if fs::remove_file(&path).is_ok() {
             removed += 1;
         }
     }
+    let _ = fs::remove_dir(build_cache_root());
     removed
 }
 
@@ -2826,6 +2832,32 @@ mod tests {
                 family
             );
         }
+    }
+
+    #[test]
+    fn cleanup_entfernt_schreibgeschuetzten_git_ordner() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "g2p-cleanup-git-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let work = root.join("builds/example-hash");
+        let object = work.join("src/.git/objects/readonly");
+        fs::create_dir_all(object.parent().unwrap()).unwrap();
+        fs::write(&object, b"objekt").unwrap();
+        let mut permissions = fs::metadata(&object).unwrap().permissions();
+        permissions.set_mode(0o444);
+        fs::set_permissions(&object, permissions).unwrap();
+        fs::write(work.join("FAILED"), b"").unwrap();
+
+        assert!(remove_build_dir_recursively(&work).is_ok());
+        assert!(!work.exists());
+        assert!(!work.parent().unwrap().exists());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
