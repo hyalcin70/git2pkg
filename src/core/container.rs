@@ -2791,7 +2791,8 @@ fn install_command(config: &BuildConfig, artifacts: &[PathBuf]) -> String {
         .first()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| "<artifact>".to_string());
-    match (&config.target, &config.distro.family) {
+    let target = config.target_distro.info(&config.distro);
+    match (&config.target, &target.family) {
         (TargetFormat::StandaloneBinary, _) => format!("install -m755 {} ~/.local/bin/", file),
         (_, DistroFamily::Arch) | (_, DistroFamily::Unknown) => {
             format!("sudo pacman -U {}", file)
@@ -4094,6 +4095,29 @@ mod tests {
                 &artifact
             ),
             "sudo zypper install /tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst"
+        );
+    }
+
+    #[test]
+    fn install_command_folgt_dem_ziel_bei_cross_builds() {
+        let artifact = vec![PathBuf::from("/tmp/dist/app_1.0.0_amd64.deb")];
+        let mut cfg = config(DistroFamily::Arch, TargetFormat::NativePackage);
+        cfg.target_distro = TargetDistro::Debian;
+        assert_eq!(
+            install_command(&cfg, &artifact),
+            "sudo apt install /tmp/dist/app_1.0.0_amd64.deb"
+        );
+
+        let rpm = vec![PathBuf::from("/tmp/dist/app-1.0-1.x86_64.rpm")];
+        cfg.target_distro = TargetDistro::Fedora;
+        assert_eq!(
+            install_command(&cfg, &rpm),
+            "sudo dnf install /tmp/dist/app-1.0-1.x86_64.rpm"
+        );
+        cfg.target_distro = TargetDistro::Suse;
+        assert_eq!(
+            install_command(&cfg, &rpm),
+            "sudo zypper install /tmp/dist/app-1.0-1.x86_64.rpm"
         );
     }
 
