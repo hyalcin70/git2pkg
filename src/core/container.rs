@@ -7,16 +7,17 @@ use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem, Pr
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::{
     analyze_output, candidate_names, classify_failure, cmake_alternative_flags,
-    cmake_option_flags_from_text, detect_build_fixes, detect_repo_script_distro_rejection,
-    detect_source_group_error, family_key, has_eigen_version_mismatch, is_cmake_policy_error,
-    is_compiled_build_system, is_transient_network_error, package_from_search,
-    packages_from_file_database, probe_commands, search_command, tool_file_database_commands,
-    valid_package_name, BuildRecipe, MappingStore, MissingDep, SourceGroupError,
+    cmake_option_flags_from_text, dependency_id, detect_build_fixes,
+    detect_repo_script_distro_rejection, detect_source_group_error, family_key,
+    has_eigen_version_mismatch, is_cmake_policy_error, is_compiled_build_system,
+    is_transient_network_error, package_from_search, packages_from_file_database, probe_commands,
+    search_command, tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore,
+    MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufRead;
 use std::os::unix::fs::PermissionsExt;
@@ -980,14 +981,16 @@ fn try_candidate(
     texts: &Texts,
 ) -> Option<(String, String)> {
     let package = sanitize_package(candidate);
-    if package.is_empty() || failed_candidates.contains(&package) || mappings.is_negative(&package)
+    if package.is_empty()
+        || failed_candidates.contains(&package)
+        || mappings.is_negative(family, &package)
     {
         return None;
     }
     step(tx, texts.step_install(&package));
     if !try_install(config, container, &package, tx, db_synced) {
         failed_candidates.insert(package.clone());
-        mappings.learn_negative(&package);
+        mappings.learn_negative(family, &package);
         return None;
     }
     if let Some(evidence) = verify_dependency(container, dep, tx) {
@@ -1004,12 +1007,13 @@ fn try_candidate(
 }
 
 /// Prüft im Container, ob eine Abhängigkeit nach der Installation vorhanden ist.
+/// Nur dann darf ein Paket als Lösung gelernt werden.
 fn verify_dependency(
     container: &BuildContainer,
     dep: &MissingDep,
     tx: &Sender<BuildEvent>,
 ) -> Option<String> {
-    let command = match dep {
+    match dep {
         MissingDep::Header(header) => {
             let base = Path::new(header).file_name()?.to_str()?;
             if base.is_empty()
@@ -1019,53 +1023,135 @@ fn verify_dependency(
             {
                 return None;
             }
-            format!(
-                "find /usr/include /usr/local/include -maxdepth 3 -name {} -print -quit 2>/dev/null",
+            // Nicht nur /usr/include: manche Pakete installieren Header tiefer
+            // (z. B. /usr/include/<arch>/... oder /usr/lib/.../include).
+            let command = format!(
+                "find /usr /usr/local -maxdepth 8 -path '*/include/*' -name {} -print -quit 2>/dev/null",
                 shell_quote(base)
-            )
+            );
+            first_line(container.exec(&command, tx).ok()?)
         }
         MissingDep::PkgConfig(name) => {
             if !valid_package_name(name) {
                 return None;
             }
-            format!(
+            let command = format!(
                 "pkg-config --exists {} && pkg-config --modversion {}",
                 shell_quote(name),
                 shell_quote(name)
-            )
+            );
+            first_line(container.exec(&command, tx).ok()?)
         }
-        MissingDep::CMakeModule(module) => {
-            let safe: String = module
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || "_+-".contains(*c))
-                .collect();
-            if safe.is_empty() {
-                return None;
-            }
-            let lower = safe.to_ascii_lowercase();
-            format!(
-                "find /usr /usr/local -maxdepth 6 \\( -name '{}Config.cmake' -o -name '{}-config.cmake' -o -name 'Find{}.cmake' \\) -print -quit 2>/dev/null",
-                safe, lower, safe
-            )
-        }
+        MissingDep::CMakeModule(module) => verify_cmake_module(container, module, tx),
         MissingDep::Tool(tool) => {
             if !valid_package_name(tool) {
                 return None;
             }
-            format!("command -v {} 2>/dev/null", shell_quote(tool))
+            let command = format!("command -v {} 2>/dev/null", shell_quote(tool));
+            first_line(container.exec(&command, tx).ok()?)
         }
-    };
-    let output = container.exec(&command, tx).ok()?;
+        MissingDep::Library(lib) => {
+            let name = lib.trim_start_matches("lib").to_lowercase();
+            if !valid_package_name(&name) {
+                return None;
+            }
+            // Der Linker braucht die unversionierte Entwicklungsdatei; eine
+            // bereits installierte Laufzeitbibliothek (`libfoo.so.1`) genügt
+            // nicht.
+            let command = format!(
+                "find /usr/lib /usr/lib64 /usr/local/lib -maxdepth 4 -name {} -print -quit 2>/dev/null",
+                shell_quote(&format!("lib{}.so", name))
+            );
+            first_line(container.exec(&command, tx).ok()?)
+        }
+    }
+}
+
+fn first_line(output: CommandOutput) -> Option<String> {
     if !output.success {
         return None;
     }
-    let evidence = output
+    output
         .text
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
-        .map(str::to_string);
-    evidence
+        .map(str::to_string)
+}
+
+/// Prüft ein CMake-Modul mit einem minimalen `find_package`-Projekt. Das ist
+/// auch für eingebaute Find-Module (ZLIB, OpenSSL, Threads) aussagekräftig,
+/// die keine eigene Config-Datei besitzen und bei denen ein reiner
+/// Datei-Treffer nur das mitgelieferte CMake-Modul selbst finden würde.
+fn verify_cmake_module(
+    container: &BuildContainer,
+    module: &str,
+    tx: &Sender<BuildEvent>,
+) -> Option<String> {
+    let safe: String = module
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || "_+-".contains(*c))
+        .collect();
+    if safe.is_empty() {
+        return None;
+    }
+    let config_file = |container: &BuildContainer| {
+        let lower = safe.to_ascii_lowercase();
+        let command = format!(
+            "find /usr /usr/local -maxdepth 6 \\( -name '{}Config.cmake' -o -name '{}-config.cmake' -o -name 'Find{}.cmake' \\) -print -quit 2>/dev/null",
+            safe, lower, safe
+        );
+        first_line(container.exec(&command, tx).ok()?)
+    };
+
+    let probe = format!(
+        r#"d=$(mktemp -d) && printf '%s\n' \
+'cmake_minimum_required(VERSION 3.5)' \
+'project(g2pkg_verify C)' \
+'find_package({safe} QUIET)' \
+'if(NOT {safe}_FOUND)' \
+'  message(FATAL_ERROR "g2pkg-missing")' \
+'endif()' > "$d/CMakeLists.txt" \
+&& cmake -S "$d" -B "$d/build" >/dev/null 2>&1 \
+&& echo "find_package({safe})"; rc=$?; rm -rf "$d"; exit $rc"#,
+        safe = safe
+    );
+    if let Some(evidence) = first_line(container.exec(&probe, tx).ok()?) {
+        return Some(evidence);
+    }
+    // Stock-Module gehören zu cmake selbst; ihr Fehlschlag ist eindeutig.
+    let stock = container
+        .exec(
+            &format!(
+                "ls /usr/share/cmake*/Modules/Find{}.cmake >/dev/null 2>&1",
+                safe
+            ),
+            tx,
+        )
+        .map(|output| output.success)
+        .unwrap_or(false);
+    if stock {
+        return None;
+    }
+    // Projekt-eigene Module (Qt, ECM, OpenCV, …) über ihre Config-Datei.
+    if let Some(evidence) = config_file(container) {
+        return Some(evidence);
+    }
+    // Manche Projekte melden "Could not find libfoo!" nach eigenem
+    // find_path/find_library. Dann ist der Name nur ein Bibliotheks- bzw.
+    // Header-Name und kein echtes CMake-Modul.
+    let lower = safe.to_ascii_lowercase();
+    let stem = lower.strip_prefix("lib").unwrap_or(&lower);
+    for name in [format!("lib{}.so", stem), format!("{}.h", stem)] {
+        let command = format!(
+            "find /usr /usr/local -maxdepth 8 \\( -path '*/include/*' -o -path '*/lib*/*' \\) -name {} -print -quit 2>/dev/null",
+            shell_quote(&name)
+        );
+        if let Some(found) = first_line(container.exec(&command, tx).ok()?) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Löst eine fehlende Abhängigkeit auf: gelernte Zuordnung, Datei-Datenbank,
@@ -1403,6 +1489,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let texts = Texts::new(config.language);
     let mut mappings = MappingStore::load();
     let mut failed_candidates: HashSet<String> = HashSet::new();
+    // Bereits erfolgreich installierte Abhängigkeiten dieses Builds. Fehlt eine
+    // davon später erneut, hat das Paket das Problem nicht gelöst.
+    let mut resolved_deps: HashMap<String, String> = HashMap::new();
     let mut skipped_incomplete: HashSet<String> = HashSet::new();
 
     step(tx, texts.step_workdir());
@@ -1413,6 +1502,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
     let src = work.join("src");
     prepare_source_workspace(&config.url, &src, tx, &texts)?;
+    let family = family_key(&config.target_distro.info(&config.distro).family);
 
     let mut repo_script = config
         .repo_script
@@ -1428,7 +1518,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let fingerprint = ProjectFingerprint::from_root(&src);
     let mut learned_packages: Vec<String> = Vec::new();
     if let Some((recipe, _exact)) =
-        mappings.apply_learned_recipe(&config.url, &fingerprint.signature)
+        mappings.apply_learned_recipe(&config.url, &fingerprint.signature, family)
     {
         if let Some(strategy) = BuildStrategy::from_key(&recipe.strategy) {
             config.strategy = strategy;
@@ -1501,6 +1591,8 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut db_synced = false;
     let mut extra_packages: Vec<String> = learned_packages;
     let mut cmake_flags: Vec<String> = Vec::new();
+    // Der Initialwert ist nur ein Platzhalter; jeder Versuch setzt ihn neu.
+    #[allow(unused_assignments)]
     let mut last_output = String::new();
     let mut forced_strategy: Option<BuildStrategy> = None;
     // Einmal pro Lauf dürfen die Abhängigkeiten nachinstallierter Pakete neu
@@ -1545,27 +1637,37 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             && !skipped_incomplete.contains(strategy_name)
         {
             skipped_incomplete.insert(strategy_name.to_string());
-            let message = if effective_strategy == BuildStrategy::Default
-                && mappings.has_incomplete_default(&config.url)
-            {
-                "[learn] stored learning profile active - skipping deps/ and building against system libraries".to_string()
-            } else {
-                format!(
-                    "[learn] known incomplete profile for strategy '{}' skipped - starting with an alternative strategy",
-                    strategy_name
-                )
-            };
-            let Some(next) =
+            if let Some(next) =
                 next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
-            else {
-                break;
-            };
-            let _ = tx.send(BuildEvent::Log(message));
-            config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+            {
+                let _ = tx.send(BuildEvent::Log(format!(
+                    "[learn] stored profile marks '{}' as incomplete - trying '{}'",
+                    strategy_name,
+                    next.label()
+                )));
+                config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+                strategy_attempt += 1;
+                heal_round = 1;
+                allowed_rounds = INITIAL_HEAL_ROUNDS;
+                forced_strategy = Some(next);
+                continue 'attempt;
+            }
+            // Alle Strategien sind markiert: Marker verwerfen und trotzdem
+            // einen echten Versuch starten, statt ohne Build abzubrechen.
+            let _ = tx.send(BuildEvent::Log(
+                "[learn] every strategy is marked incomplete - clearing the stored markers and retrying"
+                    .to_string(),
+            ));
+            mappings.clear_incomplete_strategies(&config.url);
+            skipped_incomplete.clear();
+            // Von vorn beginnen, statt mit der zuletzt übrig gebliebenen
+            // Ausweichstrategie weiterzumachen.
+            visited_strategies.clear();
             strategy_attempt += 1;
             heal_round = 1;
             allowed_rounds = INITIAL_HEAL_ROUNDS;
-            forced_strategy = Some(next);
+            config.skip_deps = config.strategy == BuildStrategy::SystemLibsOnly;
+            forced_strategy = Some(config.strategy);
             continue 'attempt;
         }
         visited_strategies.insert(effective_strategy.key());
@@ -1691,6 +1793,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             if config.target == TargetFormat::NativePackage {
                 let recipe = BuildRecipe {
                     signature: fingerprint.signature.clone(),
+                    family: family.to_string(),
                     strategy: effective_strategy.key().to_string(),
                     skip_deps: config.skip_deps,
                     cmake_compat: config.cmake_compat,
@@ -1700,7 +1803,12 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     verified: false,
                 };
                 mappings.record_build_recipe(&config.url, recipe);
-                mappings.record_repo_packages(&config.url, &fingerprint.signature, &extra_packages);
+                mappings.record_repo_packages(
+                    &config.url,
+                    &fingerprint.signature,
+                    family,
+                    &extra_packages,
+                );
                 mappings.clear_incomplete_strategy(&config.url, strategy_name);
                 let _ = tx.send(BuildEvent::Log(format!(
                     "[learn] saved verified build recipe for structure '{}'",
@@ -1811,6 +1919,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
 
         let mut unresolved: Option<MissingDep> = None;
+        // Hat diese Runde überhaupt etwas verändert? Nur dann lohnt ein
+        // erneuter Buildversuch trotz unauflösbarer (z. B. optionaler) Deps.
+        let mut round_progress = false;
         for dep in &missing {
             // Fehlt ein Header, obwohl das Paket installiert ist, liegt er oft
             // in einem Unterordner von /usr/include. Diesen Pfad ergänzen.
@@ -1822,6 +1933,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                             header, dir
                         )));
                         config.include_dirs.push(dir);
+                        round_progress = true;
                     }
                 }
             }
@@ -1833,6 +1945,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                             name, dir
                         )));
                         config.include_dirs.push(dir);
+                        round_progress = true;
                     }
                 }
             }
@@ -1840,6 +1953,17 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             let target = config.target_distro.info(&config.distro);
             let family = family_key(&target.family);
             let manager = &target.package_manager;
+
+            let dep_id = dependency_id(dep);
+            if let Some(previous) = resolved_deps.remove(&dep_id) {
+                let _ = tx.send(BuildEvent::Log(format!(
+                    "[learn] '{}' is still missing after installing '{}' - scoring the mapping down",
+                    dep.label(),
+                    previous
+                )));
+                mappings.penalize_dependency(family, dep, &previous);
+                failed_candidates.insert(previous);
+            }
 
             let Some((package, evidence)) = resolve_dependency(
                 config,
@@ -1876,6 +2000,8 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     package
                 )));
             }
+            resolved_deps.insert(dep_id, package.clone());
+            round_progress = true;
             if !extra_packages.contains(&package) {
                 extra_packages.push(package.clone());
             }
@@ -1916,8 +2042,17 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 forced_strategy = Some(next);
                 continue 'attempt;
             }
-            mark_failed_build(&work);
-            return Err(texts.err_no_package(&dep.label()));
+            if !round_progress {
+                mark_failed_build(&work);
+                return Err(texts.err_no_package(&dep.label()));
+            }
+            // Andere Abhängigkeiten wurden gelöst: erst erneut bauen. Viele
+            // CMake-Module sind optional, ein fehlendes darf den Build nicht
+            // verhindern, solange er noch erfolgreich werden kann.
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[warn] could not resolve {} - retrying anyway (optional dependencies are not fatal)",
+                dep.label()
+            )));
         }
 
         let cleared_cmake = reset_cmake_caches(&work);
@@ -2174,7 +2309,9 @@ fn base_dependencies(family: &DistroFamily, system: &BuildSystem) -> String {
             "apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential git pkg-config python3-pip cmake meson ninja-build debhelper devscripts fakeroot dpkg-dev"
         }
         DistroFamily::Fedora => {
-            "dnf install -y @development-tools git pkgconf-pkg-config python3-pip cmake meson ninja-build rpm-build rpmdevtools dnf-plugins-core"
+            // `@development-tools` bringt in neueren Fedora-Versionen keinen
+            // C++-Compiler mehr mit; CMake-Projekte brauchen ihn zwingend.
+            "dnf install -y @development-tools gcc gcc-c++ make git pkgconf-pkg-config python3-pip cmake meson ninja-build rpm-build rpmdevtools dnf-plugins-core"
         }
         DistroFamily::Suse => {
             "zypper --non-interactive install git pkgconf-pkg-config python3 gcc gcc-c++ make cmake meson ninja rpm-build"
@@ -2385,10 +2522,22 @@ fn project_install_step(system: &BuildSystem, _name: &str) -> String {
     let step = match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_install_step().to_string(),
         BuildSystem::CMake => {
-            "cmake --build build -j$(nproc) && [ -f build/cmake_install.cmake ] && DESTDIR=\"$pkgdir\" cmake --install build"
-                .to_string()
+            r#"cmake --build build -j$(nproc)
+if [ -f build/cmake_install.cmake ]; then DESTDIR="$pkgdir" cmake --install build; fi
+if [ -z "$(find "$pkgdir/usr" -type f -perm -u+x 2>/dev/null | head -1)" ]; then
+  echo '[pkg] no install rules - staging built binaries' >&2
+  find build -maxdepth 4 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.a|*.o) exit 0;; *.so|*.so.*) install -Dm755 "$1" "$2/$(basename "$1")"; exit 0;; esac; head -c 4 "$1" | grep -q ELF || exit 0; install -Dm755 "$1" "$3/$(basename "$1")"' _ {} "$pkgdir/usr/lib" "$pkgdir/usr/bin" \;
+fi"#
+            .to_string()
         }
-        BuildSystem::Meson => "DESTDIR=\"$pkgdir\" ninja -C build install".to_string(),
+        BuildSystem::Meson => {
+            r#"DESTDIR="$pkgdir" ninja -C build install
+if [ -z "$(find "$pkgdir/usr" -type f -perm -u+x 2>/dev/null | head -1)" ]; then
+  echo '[pkg] no install rules - staging built binaries' >&2
+  find build -maxdepth 4 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.a|*.o) exit 0;; *.so|*.so.*) install -Dm755 "$1" "$2/$(basename "$1")"; exit 0;; esac; head -c 4 "$1" | grep -q ELF || exit 0; install -Dm755 "$1" "$3/$(basename "$1")"' _ {} "$pkgdir/usr/lib" "$pkgdir/usr/bin" \;
+fi"#
+            .to_string()
+        }
         BuildSystem::Go => {
             "for binary in /work/dist/*; do [ -f \"$binary\" ] && install -Dm755 \"$binary\" \"$pkgdir/usr/bin/$(basename \"$binary\")\"; done".to_string()
         }
@@ -2415,10 +2564,10 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
     match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_build_step(),
         BuildSystem::CMake => {
-            "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
+            r#"cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
         }
         BuildSystem::Meson => {
-            r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; meson setup build --prefix=/usr --libdir="${libdir##*/}" && ninja -C build && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \;"#
+            r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; meson setup build --prefix=/usr --libdir="${libdir##*/}" && ninja -C build && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
         }
         BuildSystem::Go => {
             r#"export GOCACHE=/work/go-cache; mkdir -p /work/dist /work/go-cache; found=0; for pkg in $(go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./... 2>/dev/null); do name=$(basename "$pkg"); go build -o "/work/dist/$name" "$pkg" && found=1; done; if [ "$found" = 0 ]; then go build -o /work/dist/app .; fi"#
@@ -2440,7 +2589,7 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
 fn binary_build_step_with_flags(system: &BuildSystem, flags: &[String]) -> String {
     if *system == BuildSystem::CMake {
         return format!(
-            "cmake -S . -B build {} -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {{}} /work/dist/ \\;",
+            r#"cmake -S . -B build {} -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
             cmake_configure_flags(flags)
         );
     }
@@ -2678,7 +2827,7 @@ fn build_step_text_with_flags(
     if strategy == BuildStrategy::DirectStagingFallback {
         if *system == BuildSystem::CMake {
             return format!(
-                r#"cmake -S . -B build -G "Unix Makefiles" {} -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x -exec cp {{}} /work/dist/ \;"#,
+                r#"cmake -S . -B build -G "Unix Makefiles" {} -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
                 cmake_configure_flags(flags)
             );
         }
@@ -2818,7 +2967,12 @@ fn build_script_with_flags(
     let extra_cmd = install_packages_command(&target.family, &extra);
     if !extra_cmd.is_empty() {
         lines.push(echo_line(&texts.log_extra(&extra.join(" "))));
-        lines.push(extra_cmd);
+        // Vorgemerkte Pakete können inzwischen umbenannt sein. Ein Fehlschlag
+        // darf den Build nicht verhindern: der Resolver findet sonst nichts.
+        lines.push(format!(
+            "if ! ( {} ); then echo '[pkg] some extra packages could not be installed - continuing' >&2; fi",
+            extra_cmd
+        ));
     }
     if config.rustup_fix {
         lines.extend(rustup_bootstrap_step(&target.family));
@@ -2891,19 +3045,19 @@ fn build_script_with_flags(
     lines.push(
         r#"case "$artifact" in
   *.pkg.tar.zst|*.tar.zst)
-    if ! (tar -tf "$artifact" 2>/dev/null || tar --zstd -tf "$artifact" 2>/dev/null) | grep -E '(^|/)usr/(bin|lib|lib64)/' >/dev/null; then
+    if ! (tar -tf "$artifact" 2>/dev/null || tar --zstd -tf "$artifact" 2>/dev/null) | grep -E '(^|/)usr/(bin|lib|lib64)/[^/]' >/dev/null; then
       echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.deb)
-    if ! dpkg-deb -c "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/' >/dev/null; then
+    if ! dpkg-deb -c "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/[^/]' >/dev/null; then
       echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.rpm)
-    if ! rpm -qlp "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/' >/dev/null; then
+    if ! rpm -qlp "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/[^/]' >/dev/null; then
       echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
@@ -3418,6 +3572,19 @@ mod tests {
     }
 
     #[test]
+    fn cmake_und_meson_stagen_binaries_ohne_install_regeln() {
+        for system in [BuildSystem::CMake, BuildSystem::Meson] {
+            let install = project_install_step(&system, "example-app");
+            assert!(install.contains("no install rules"), "{install}");
+            assert!(install.contains("pkgdir/usr/bin"), "{install}");
+        }
+        // Interne CMake-Testprogramme dürfen nicht als Programm gelten.
+        let build = binary_build_step(&BuildSystem::CMake);
+        assert!(build.contains("grep -q ELF"), "{build}");
+        assert!(!build.contains("-exec cp"), "{build}");
+    }
+
+    #[test]
     fn autotools_version_wird_gelesen() {
         assert_eq!(
             autotools_version("AC_INIT([example-app], [1.2.3], [bugs@example.invalid])"),
@@ -3477,7 +3644,7 @@ mod tests {
             !script.contains("grep -Eq"),
             "grep -q bricht bei pipefail ab"
         );
-        assert!(script.contains("grep -E 'usr/(bin|lib|lib64)/' >/dev/null"));
+        assert!(script.contains("grep -E 'usr/(bin|lib|lib64)/[^/]' >/dev/null"));
     }
 
     #[test]
@@ -4022,9 +4189,7 @@ mod tests {
         );
         assert!(deb.contains("Arch PKGBUILD ignored for this target format"));
         assert!(deb.contains("cmake --install build"));
-        assert!(deb.contains(
-            "cmake --build build -j$(nproc) && [ -f build/cmake_install.cmake ] && DESTDIR="
-        ));
+        assert!(deb.contains("if [ -f build/cmake_install.cmake ]; then DESTDIR="));
         assert!(deb.contains("dpkg-deb --build /work/deb /work/dist/repo_0.1.0_amd64.deb"));
         assert!(!deb.contains("makepkg"));
 

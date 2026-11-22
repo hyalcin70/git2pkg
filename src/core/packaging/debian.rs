@@ -14,7 +14,7 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     )));
     lines.push("mkdir -p /work/deb/DEBIAN /work/debian".to_string());
     lines.push(format!(
-        "cat > /work/debian/control <<CONTROL_EOF\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",
+        "cat > /work/debian/control <<CONTROL_EOF\nSource: {name}\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.deb(),
@@ -73,6 +73,7 @@ mod tests {
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");
+        assert!(script.contains("Source: repo"));
         assert!(script.contains("dpkg-shlibdeps -O"));
         assert!(script.contains("if [ -n \"$depends\" ]"));
         assert!(script.contains("Depends: $depends"));

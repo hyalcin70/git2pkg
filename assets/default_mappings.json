@@ -42,5 +42,10 @@
   "arch:PNG": "libpng",
   "debian:PNG": "libpng-dev",
   "fedora:PNG": "libpng-devel",
-  "suse:PNG": "libpng-devel"
+  "suse:PNG": "libpng-devel",
+
+  "arch:Curses": "ncurses",
+  "debian:Curses": "libncurses-dev",
+  "fedora:Curses": "ncurses-devel",
+  "suse:Curses": "ncurses-devel"
 }

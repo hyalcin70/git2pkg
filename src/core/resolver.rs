@@ -30,6 +30,8 @@ pub enum MissingDep {
     PkgConfig(String),
     CMakeModule(String),
     Tool(String),
+    /// Linker-Fehler `cannot find -l<name>` (soname ohne Entwicklungsdatei).
+    Library(String),
 }
 
 impl MissingDep {
@@ -39,6 +41,7 @@ impl MissingDep {
             MissingDep::PkgConfig(p) => format!("pkg-config '{}'", p),
             MissingDep::CMakeModule(m) => format!("CMake module '{}'", m),
             MissingDep::Tool(t) => format!("tool '{}'", t),
+            MissingDep::Library(l) => format!("library 'lib{}.so'", l),
         }
     }
 
@@ -48,7 +51,10 @@ impl MissingDep {
     pub fn raw_name(&self) -> &str {
         match self {
             MissingDep::Header(h) => h,
-            MissingDep::PkgConfig(p) | MissingDep::CMakeModule(p) | MissingDep::Tool(p) => p,
+            MissingDep::PkgConfig(p)
+            | MissingDep::CMakeModule(p)
+            | MissingDep::Tool(p)
+            | MissingDep::Library(p) => p,
         }
     }
 
@@ -59,7 +65,7 @@ impl MissingDep {
                 .trim_end_matches("-config")
                 .trim_end_matches("Config")
                 .to_ascii_lowercase(),
-            MissingDep::Tool(t) => t.to_ascii_lowercase(),
+            MissingDep::Tool(t) | MissingDep::Library(t) => t.to_ascii_lowercase(),
         }
     }
 }
@@ -93,6 +99,7 @@ pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static
         ("pacman", "png") | ("pacman", "libpng") => Some("libpng"),
         ("pacman", "opengl") => Some("libglvnd"),
         ("pacman", "wxwidgets") => Some("wxwidgets-gtk3"),
+        ("pacman", "curses") | ("pacman", "ncurses") => Some("ncurses"),
 
         ("apt", "boost") | ("apt", "boost_include_dir") => Some("libboost-all-dev"),
         ("apt", "glew") => Some("libglew-dev"),
@@ -119,6 +126,7 @@ pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static
         ("apt", "png") | ("apt", "libpng") => Some("libpng-dev"),
         ("apt", "opengl") => Some("libgl-dev"),
         ("apt", "wxwidgets") => Some("libwxgtk3.2-dev"),
+        ("apt", "curses") | ("apt", "ncurses") => Some("libncurses-dev"),
 
         ("dnf", "boost") | ("dnf", "boost_include_dir") => Some("boost-devel"),
         ("dnf", "glew") => Some("glew-devel"),
@@ -145,6 +153,7 @@ pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static
         ("dnf", "png") | ("dnf", "libpng") => Some("libpng-devel"),
         ("dnf", "opengl") => Some("mesa-libGL-devel"),
         ("dnf", "wxwidgets") => Some("wxGTK-devel"),
+        ("dnf", "curses") | ("dnf", "ncurses") => Some("ncurses-devel"),
 
         ("zypper", "boost") | ("zypper", "boost_include_dir") => Some("boost-devel"),
         ("zypper", "glew") => Some("glew-devel"),
@@ -171,6 +180,7 @@ pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static
         ("zypper", "png") | ("zypper", "libpng") => Some("libpng-devel"),
         ("zypper", "opengl") => Some("libGL-devel"),
         ("zypper", "wxwidgets") => Some("wxWidgets-devel"),
+        ("zypper", "curses") | ("zypper", "ncurses") => Some("ncurses-devel"),
         _ => None,
     }
 }
@@ -183,17 +193,25 @@ pub fn package_from_search(output: &str, term: &str, package_manager: &str) -> O
             continue;
         }
         let name = match package_manager {
-            "apt" => line.split(':').next().unwrap_or(""),
+            "apt" => line.split(':').next().unwrap_or("").to_string(),
             "pacman" => {
                 if let Some((head, _)) = line.split_once(':') {
-                    head.rsplit('/').next().unwrap_or(head)
+                    head.rsplit('/').next().unwrap_or(head).to_string()
                 } else if line.contains('/') {
                     continue; // reiner Dateipfad aus pacman -Fq
                 } else {
-                    line
+                    line.to_string()
                 }
             }
-            _ => line.split_whitespace().next().unwrap_or(""),
+            "dnf" => match dnf_package_name(line) {
+                Some(name) => name,
+                None => continue,
+            },
+            "zypper" => match zypper_package_name(line) {
+                Some(name) => name,
+                None => continue,
+            },
+            _ => line.split_whitespace().next().unwrap_or("").to_string(),
         };
         let name = name.trim().to_ascii_lowercase();
         if !valid_package_name(&name) {
@@ -206,11 +224,69 @@ pub fn package_from_search(output: &str, term: &str, package_manager: &str) -> O
     None
 }
 
+/// Paketnamen aus einer `zypper`-Tabellenzeile lesen
+/// (`   | libfoo-devel | Beschreibung | package`).
+fn zypper_package_name(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let name = if trimmed.contains('|') {
+        trimmed.split('|').nth(1)?.trim()
+    } else {
+        trimmed.split_whitespace().next()?
+    };
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Paketnamen aus einer `dnf`-Zeile lesen. `dnf provides` liefert
+/// `name-version-release.arch : Beschreibung`, `dnf search` dagegen
+/// `name.arch<TAB>Beschreibung`.
+fn dnf_package_name(line: &str) -> Option<String> {
+    let token = line.split_whitespace().next()?.trim();
+    if token.is_empty() {
+        return None;
+    }
+    // Epoch-Präfix: `1:foo-1.0-1.x86_64` -> `foo-1.0-1.x86_64`
+    let token = match token.rsplit_once(':') {
+        Some((epoch, rest)) if !epoch.is_empty() && epoch.chars().all(|c| c.is_ascii_digit()) => {
+            rest
+        }
+        _ => token,
+    };
+    let arches = [
+        "x86_64", "noarch", "i686", "i386", "aarch64", "ppc64le", "s390x", "armv7hl",
+    ];
+    let mut name = token.to_string();
+    for arch in arches {
+        if let Some(stripped) = name.strip_suffix(&format!(".{}", arch)) {
+            name = stripped.to_string();
+            break;
+        }
+    }
+    let parts: Vec<&str> = name.split('-').collect();
+    if parts.len() >= 3
+        && parts[parts.len() - 1]
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+    {
+        // Version und Release abschneiden.
+        name = parts[..parts.len() - 2].join("-");
+    }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
 /// Prüft, ob ein Paketname wirklich zum Suchbegriff gehört. Reine
 /// Teilstring-Treffer sind zu unscharf (`ecm` steckt auch in `doublecmd`).
-/// Prüft, ob ein Paketname wirklich zum Suchbegriff gehört. Der Begriff muss
-/// am Anfang oder Ende stehen (inkl. `lib`-Präfix); Treffer mitten im Namen
-/// sind zu unscharf (`ecm` steckt auch in `doublecmd`).
+/// Der Begriff muss am Anfang oder Ende stehen (inkl. `lib`-Präfix); Treffer
+/// mitten im Namen sind zu unscharf.
 fn package_name_matches(name: &str, term: &str) -> bool {
     if name == term {
         return true;
@@ -220,6 +296,12 @@ fn package_name_matches(name: &str, term: &str) -> bool {
     }
     if name.ends_with(term) {
         return true;
+    }
+    // Modulnamen wie `libiniparser` entsprechen Paketen wie `iniparser-devel`.
+    if let Some(stripped) = term.strip_prefix("lib") {
+        if stripped.len() >= 3 && (name.starts_with(stripped) || name.ends_with(stripped)) {
+            return true;
+        }
     }
     // Suchbegriff enthält den Paketnamen, z. B. `libpng` -> `png`.
     term.ends_with(name) && name.len() >= 3
@@ -232,7 +314,21 @@ pub fn dependency_kind(dep: &MissingDep) -> &'static str {
         MissingDep::PkgConfig(_) => "pkg_config",
         MissingDep::CMakeModule(_) => "cmake_module",
         MissingDep::Tool(_) => "tool",
+        MissingDep::Library(_) => "soname",
     }
+}
+
+fn negative_key(family: &str, package: &str) -> String {
+    format!("{}|{}", family, package.to_ascii_lowercase())
+}
+
+/// Stabile Kennung einer Abhängigkeit innerhalb eines Builds.
+pub fn dependency_id(dep: &MissingDep) -> String {
+    format!(
+        "{}|{}",
+        dependency_kind(dep),
+        dep.raw_name().to_ascii_lowercase()
+    )
 }
 
 fn dependency_key(family: &str, dep: &MissingDep) -> String {
@@ -294,6 +390,12 @@ pub fn classify_failure(output: &str) -> FailureKind {
     if lower.contains("using bundled") || lower.contains("no_default_path") {
         return FailureKind::Vendored;
     }
+    if lower.contains("no cmake_cxx_compiler")
+        || lower.contains("no cmake_c_compiler")
+        || lower.contains("compiler could not be found")
+    {
+        return FailureKind::SourceCode;
+    }
     if lower.contains("undefined reference to")
         || lower.contains("collect2: error")
         || lower.contains("ld returned")
@@ -301,6 +403,7 @@ pub fn classify_failure(output: &str) -> FailureKind {
         || lower.contains("error: expected")
         || lower.contains("error: no matching")
         || lower.contains("error: invalid")
+        || lower.contains("implicit declaration of function")
     {
         return FailureKind::SourceCode;
     }
@@ -453,6 +556,9 @@ pub fn is_compiled_build_system(label: &str) -> bool {
 pub struct BuildRecipe {
     #[serde(default)]
     pub signature: String,
+    /// Distributionsfamilie, für die die Paketnamen gelten (arch/debian/…).
+    #[serde(default)]
+    pub family: String,
     #[serde(default)]
     pub strategy: String,
     #[serde(default)]
@@ -570,16 +676,21 @@ impl MappingStore {
                 || value.get("negative_cache").is_some()
                 || value.get("repo_profiles").is_some()
                 || value.get("build_recipes").is_some()
+                || value.get("deps").is_some()
                 || value.get("last_used").is_some()
             {
                 let packages = value
                     .get("packages")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
                     .unwrap_or_default();
-                let negative = value
+                let negative: Vec<String> = value
                     .get("negative_cache")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
                     .unwrap_or_default();
+                let negative = negative
+                    .into_iter()
+                    .filter(|entry| entry.contains('|'))
+                    .collect();
                 let fixes = value
                     .get("build_fixes")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -654,8 +765,53 @@ impl MappingStore {
                 });
             }
         }
+        store.drop_redundant_legacy();
+        // Rezepte ohne Familie stammen aus dem alten Format und dürfen keine
+        // Paketnamen in fremde Distributionen tragen.
+        store
+            .build_recipes
+            .retain(|_, recipe| !recipe.family.is_empty());
         store.save();
         store
+    }
+
+    /// Entfernt Alt-Einträge ohne Art, wenn dieselbe Zuordnung bereits mit
+    /// konkretem Art-Schlüssel existiert (z. B. nach dem Formatwechsel).
+    fn drop_redundant_legacy(&mut self) {
+        let specific: HashSet<(String, String, String)> = self
+            .deps
+            .iter()
+            .filter_map(|(key, entry)| {
+                let mut parts = key.split('|');
+                let family = parts.next()?;
+                let kind = parts.next()?;
+                let name = parts.next()?;
+                (kind != "unknown")
+                    .then(|| (family.to_string(), name.to_string(), entry.package.clone()))
+            })
+            .collect();
+        let stale: Vec<String> = self
+            .deps
+            .iter()
+            .filter_map(|(key, entry)| {
+                let mut parts = key.split('|');
+                let family = parts.next()?;
+                let kind = parts.next()?;
+                let name = parts.next()?;
+                (kind == "unknown"
+                    && specific.contains(&(
+                        family.to_string(),
+                        name.to_string(),
+                        entry.package.clone(),
+                    )))
+                .then(|| key.clone())
+            })
+            .collect();
+        for key in stale {
+            // Auch beim Merge mit der Datei nicht wiederbeleben.
+            self.cleared_deps.insert(key.clone());
+            self.deps.remove(&key);
+        }
     }
 
     /// Persistiert den Lernstand. Die Datei wird unter einer Lock-Datei erneut
@@ -701,8 +857,18 @@ impl MappingStore {
             self.learned.entry(key).or_insert(value);
         }
         for package in disk.negative_cache {
+            // Alte, nicht familienbezogene Einträge verwerfen: ein auf Fedora
+            // unbekannter Name kann auf openSUSE der richtige sein.
+            if !package.contains('|') {
+                continue;
+            }
             // Ein zwischenzeitlich gelerntes Mapping hebt den Negativ-Eintrag auf.
-            let learned_now = self.learned.values().any(|value| value == &package);
+            let learned_name = package.rsplit_once('|').map(|(_, name)| name).unwrap_or("");
+            let learned_now = self
+                .deps
+                .values()
+                .any(|entry| entry.package == learned_name)
+                || self.learned.values().any(|value| value == learned_name);
             if !learned_now && !self.negative_cache.iter().any(|item| item == &package) {
                 self.negative_cache.push(package);
             }
@@ -722,6 +888,10 @@ impl MappingStore {
             }
         }
         for (key, recipe) in disk.build_recipes {
+            // Alte Rezepte ohne Familie nicht wiederbeleben.
+            if recipe.family.is_empty() {
+                continue;
+            }
             self.build_recipes.entry(key).or_insert(recipe);
         }
         for (key, stamp) in disk.last_used {
@@ -904,7 +1074,9 @@ impl MappingStore {
         let now = now_secs();
         match self.deps.get_mut(&key) {
             Some(entry) if entry.package == package => {
-                entry.score = (entry.score + 1).min(MAX_DEP_SCORE);
+                // Eine erneut verifizierte Zuordnung startet wieder bei 1,
+                // auch wenn sie zuvor abgewertet wurde.
+                entry.score = (entry.score.max(0) + 1).min(MAX_DEP_SCORE);
                 entry.verified |= verified;
                 if verified && !evidence.is_empty() {
                     entry.evidence = evidence.to_string();
@@ -924,10 +1096,8 @@ impl MappingStore {
                 );
             }
         }
-        self.learned.insert(
-            format!("{}:{}", family, dep.raw_name()),
-            package.to_string(),
-        );
+        // Keine flache Alt-Zuordnung mehr schreiben: der Art-Schlüssel ist
+        // eindeutig, und die Migration alter Einträge bleibt lesbar.
         self.negative_cache.retain(|item| item != package);
         self.save();
     }
@@ -974,18 +1144,22 @@ impl MappingStore {
         lines
     }
 
-    /// Merkt sich Paketnamen, die auf keiner Distro installierbar waren.
-    pub fn learn_negative(&mut self, package: &str) {
-        if package.is_empty() || self.negative_cache.iter().any(|p| p == package) {
+    /// Merkt sich Paketnamen, die in dieser Distributionsfamilie nicht
+    /// installierbar waren. Der Name allein ist nicht genug: `libfoo-devel`
+    /// existiert auf openSUSE, auf Fedora heißt es `foo-devel`.
+    pub fn learn_negative(&mut self, family: &str, package: &str) {
+        let key = negative_key(family, package);
+        if package.is_empty() || self.negative_cache.iter().any(|p| p == &key) {
             return;
         }
-        self.negative_cache.push(package.to_string());
-        self.touch(format!("negative:{}", package));
+        self.negative_cache.push(key.clone());
+        self.touch(format!("negative:{}", key));
         self.save();
     }
 
-    pub fn is_negative(&self, package: &str) -> bool {
-        self.negative_cache.iter().any(|p| p == package)
+    pub fn is_negative(&self, family: &str, package: &str) -> bool {
+        let key = negative_key(family, package);
+        self.negative_cache.iter().any(|p| p == &key)
     }
 
     /// Merkt sich einen allgemeinen Build-Fix (z. B. `cstdint`, `cmake_policy`).
@@ -1017,6 +1191,7 @@ impl MappingStore {
         }
     }
 
+    #[allow(dead_code)]
     pub fn has_incomplete_default(&self, url: &str) -> bool {
         self.is_incomplete_strategy(url, "Default")
     }
@@ -1038,8 +1213,10 @@ impl MappingStore {
 
     /// Speichert eine erfolgreiche Bauweise exakt und strukturbasiert.
     pub fn record_build_recipe(&mut self, url: &str, mut recipe: BuildRecipe) {
-        let repo_key = format!("repo:{}", repo_hash(url));
-        let signature_key = format!("sig:{}", recipe.signature);
+        // Paketnamen sind distributionsspezifisch: ein Rezept gilt nur für
+        // genau die Familie, für die es gelernt wurde.
+        let repo_key = format!("repo:{}:{}", repo_hash(url), recipe.family);
+        let signature_key = format!("sig:{}:{}", recipe.signature, recipe.family);
         recipe.verified = true;
         let changed = self.build_recipes.get(&repo_key) != Some(&recipe)
             || self.build_recipes.get(&signature_key) != Some(&recipe);
@@ -1048,6 +1225,17 @@ impl MappingStore {
         self.touch(format!("recipes:{}", repo_key));
         self.touch(format!("recipes:{}", signature_key));
         if changed {
+            self.save();
+        }
+    }
+
+    /// Verwirft alle Unvollständig-Marker eines Repositories. Nötig, wenn
+    /// wirklich jede Strategie markiert ist: dann ist ein neuer Versuch mit
+    /// dem aktuellen Stand besser als ein Abbruch ohne einen einzigen Build.
+    pub fn clear_incomplete_strategies(&mut self, url: &str) {
+        let key = repo_profile_key(url);
+        if self.repo_profiles.remove(&key).is_some() {
+            self.cleared_profiles.insert(key);
             self.save();
         }
     }
@@ -1068,8 +1256,14 @@ impl MappingStore {
 
     /// Merkt sich frisch gelernte Pakete pro Repository, damit sie im naechsten
     /// Anlauf bereits im initialen Setup installiert werden koennen.
-    pub fn record_repo_packages(&mut self, url: &str, signature: &str, packages: &[String]) {
-        let key = format!("repo:{}", repo_hash(url));
+    pub fn record_repo_packages(
+        &mut self,
+        url: &str,
+        signature: &str,
+        family: &str,
+        packages: &[String],
+    ) {
+        let key = format!("repo:{}:{}", repo_hash(url), family);
         let verified = self
             .build_recipes
             .get(&key)
@@ -1081,6 +1275,7 @@ impl MappingStore {
             .cloned()
             .unwrap_or_else(|| BuildRecipe {
                 signature: signature.to_string(),
+                family: family.to_string(),
                 ..BuildRecipe::default()
             });
         recipe.packages = packages.to_vec();
@@ -1091,14 +1286,25 @@ impl MappingStore {
     }
 
     /// Erst der exakte Repo-Treffer, dann die allgemeine Struktur-Signatur.
-    pub fn apply_learned_recipe(&self, url: &str, signature: &str) -> Option<(BuildRecipe, bool)> {
+    pub fn apply_learned_recipe(
+        &self,
+        url: &str,
+        signature: &str,
+        family: &str,
+    ) -> Option<(BuildRecipe, bool)> {
         let verified = |recipe: Option<&BuildRecipe>| recipe.filter(|r| r.verified).cloned();
-        verified(self.build_recipes.get(&format!("repo:{}", repo_hash(url))))
-            .map(|recipe| (recipe, true))
-            .or_else(|| {
-                verified(self.build_recipes.get(&format!("sig:{}", signature)))
-                    .map(|recipe| (recipe, false))
-            })
+        verified(
+            self.build_recipes
+                .get(&format!("repo:{}:{}", repo_hash(url), family)),
+        )
+        .map(|recipe| (recipe, true))
+        .or_else(|| {
+            verified(
+                self.build_recipes
+                    .get(&format!("sig:{}:{}", signature, family)),
+            )
+            .map(|recipe| (recipe, false))
+        })
     }
 
     pub fn build_recipe_count(&self) -> usize {
@@ -1373,6 +1579,13 @@ pub fn probe_commands(package_manager: &str, dep: &MissingDep) -> Vec<String> {
         MissingDep::CMakeModule(module) => {
             files.push((format!("{}Config.cmake", module), false));
             files.push((format!("{}-config.cmake", module.to_lowercase()), false));
+            // Projekt-eigene Meldungen wie "Could not find libfoo!" meinen oft
+            // keine echte CMake-Datei, sondern die Bibliothek. Dann findet die
+            // Datei-Datenbank das passende Entwicklerpaket über `libfoo.so`.
+            let lower = module.to_ascii_lowercase();
+            if lower.starts_with("lib") && lower.len() > 3 {
+                files.push((format!("{}.so", lower), false));
+            }
         }
         MissingDep::Header(header) => {
             files.push((
@@ -1385,6 +1598,10 @@ pub fn probe_commands(package_manager: &str, dep: &MissingDep) -> Vec<String> {
             let name = tool.to_lowercase();
             files.push((format!("bin/{}", name), true));
             files.push((format!("usr/bin/{}", name), true));
+        }
+        MissingDep::Library(lib) => {
+            let name = lib.trim_start_matches("lib").to_lowercase();
+            files.push((format!("lib{}.so", name), false));
         }
     }
     files.retain(|(file, _)| {
@@ -1782,6 +1999,8 @@ fn is_generic_tool_word(name: &str) -> bool {
 pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     let header_re = Regex::new(r"fatal error:\s*([^\s:]+):\s*No such file or directory").unwrap();
     let pkg_re = Regex::new(r"No package '([^']+)' found").unwrap();
+    // CMake's FindPkgConfig: "None of the required 'fftw3' found".
+    let pkg_required_re = Regex::new(r"None of the required '([^']+)' found").unwrap();
     let pkg2_re = Regex::new(r"Package '([^']+)'[^\n]*not found").unwrap();
     let cmake_find_re = Regex::new(r"(?i)Could\s+NOT\s+find\s+([A-Za-z0-9_+\-]+)").unwrap();
     let cmake_config_re = Regex::new(
@@ -1801,6 +2020,9 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     // CMake-Module melden fehlende Datenpakete z. B. als
     // "Missing wayland-protocols pkgdatadir".
     let pkgdata_re = Regex::new(r"(?i)missing\s+([A-Za-z0-9_+.\-]+)\s+pkgdatadir").unwrap();
+    // Linker: `/usr/bin/ld: cannot find -lssl` bzw. `-l:libssl.so`. Das Paket
+    // liefert die Bibliothek, aber (noch) nicht die `.so`-Entwicklungsdatei.
+    let library_re = Regex::new(r"cannot find -l:?([A-Za-z0-9_+.\-]+)").unwrap();
 
     let mut deps: Vec<MissingDep> = Vec::new();
 
@@ -1826,6 +2048,9 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
             push_unique(&mut deps, MissingDep::Header(caps[1].to_string()));
         }
         for caps in pkg_re.captures_iter(trimmed) {
+            push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
+        }
+        for caps in pkg_required_re.captures_iter(trimmed) {
             push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
         }
         for caps in pkg2_re.captures_iter(trimmed) {
@@ -1868,6 +2093,19 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
         }
         for caps in pkgdata_re.captures_iter(trimmed) {
             push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
+        }
+        if !lower.contains("-- found ") {
+            for caps in library_re.captures_iter(trimmed) {
+                let name = caps[1].trim_start_matches("lib").trim_end_matches(".so");
+                if name.is_empty() || name.len() > 64 {
+                    continue;
+                }
+                // Reine Zahlen (z. B. `-l1`) sind keine Bibliotheksnamen.
+                if name.chars().all(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+                push_unique(&mut deps, MissingDep::Library(name.to_string()));
+            }
         }
     }
 
@@ -1919,6 +2157,81 @@ pub fn search_command(package_manager: &str, dep: &MissingDep) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn erkennt_fehlende_bibliothek_und_findpkgconfig() {
+        let out = "/usr/bin/ld: cannot find -lssl: No such file or directory\ncollect2: error: ld returned 1 exit status\n";
+        assert_eq!(analyze_output(out), vec![MissingDep::Library("ssl".into())]);
+        assert_eq!(
+            analyze_output("CMake Error: None of the required 'fftw3' found\n"),
+            vec![MissingDep::PkgConfig("fftw3".into())]
+        );
+    }
+
+    #[test]
+    fn abhaengigkeits_id_trennt_die_art() {
+        let header = MissingDep::Header("ssl.h".into());
+        let library = MissingDep::Library("ssl".into());
+        assert_eq!(dependency_id(&header), "header|ssl.h");
+        assert_eq!(dependency_id(&library), "soname|ssl");
+        assert_ne!(dependency_id(&header), dependency_id(&library));
+    }
+
+    #[test]
+    fn zypper_tabelle_liefert_echte_paketnamen() {
+        let row = "   | libiniparser-devel | Libraries and Header Files | package\n";
+        assert_eq!(
+            package_from_search(row, "libiniparser", "zypper").as_deref(),
+            Some("libiniparser-devel")
+        );
+        assert_eq!(
+            package_from_search("---+----+-----+----\n", "libiniparser", "zypper"),
+            None
+        );
+    }
+
+    #[test]
+    fn dnf_ausgaben_liefern_echte_paketnamen() {
+        let provides = "iniparser-devel-4.2.6-5.fc45.x86_64 : Development files\nRepo : fedora\n";
+        assert_eq!(
+            package_from_search(provides, "libiniparser", "dnf").as_deref(),
+            Some("iniparser-devel")
+        );
+        let search = " iniparser-devel.x86_64\tDevelopment files\n";
+        assert_eq!(
+            package_from_search(search, "libiniparser", "dnf").as_deref(),
+            Some("iniparser-devel")
+        );
+        assert_eq!(
+            package_from_search("gcc-c++-16.2.1-1.fc45.x86_64 : C++\n", "gcc-c++", "dnf")
+                .as_deref(),
+            Some("gcc-c++")
+        );
+    }
+
+    #[test]
+    fn lib_modul_probe_sucht_die_bibliothek() {
+        let dep = MissingDep::CMakeModule("libiniparser".to_string());
+        let pacman = probe_commands("pacman", &dep);
+        assert!(
+            pacman
+                .iter()
+                .any(|command| command.contains("libiniparser.so")),
+            "{pacman:?}"
+        );
+        let dnf = probe_commands("dnf", &dep);
+        assert!(
+            dnf.iter()
+                .any(|command| command.contains("libiniparser.so")),
+            "{dnf:?}"
+        );
+        // Normale Modulnamen bleiben bei Config-Dateien.
+        let zlib = probe_commands("pacman", &MissingDep::CMakeModule("ZLIB".to_string()));
+        assert!(
+            !zlib.iter().any(|command| command.contains(".so")),
+            "{zlib:?}"
+        );
+    }
 
     #[test]
     fn erkennt_fehlenden_header() {
@@ -2220,8 +2533,9 @@ mod tests {
         assert_eq!(store.get("arch", "Boost").as_deref(), Some("boost"));
         store.learn("arch", "MyLib", "mylib-dev");
         assert_eq!(store.get("arch", "MyLib").as_deref(), Some("mylib-dev"));
-        store.learn_negative("bogus-pkg");
-        assert!(store.is_negative("bogus-pkg"));
+        store.learn_negative("arch", "bogus-pkg");
+        assert!(store.is_negative("arch", "bogus-pkg"));
+        assert!(!store.is_negative("debian", "bogus-pkg"));
         assert!(store.learn_build_fix("cstdint", "-include cstdint"));
         assert_eq!(
             store.build_fix("cstdint").as_deref(),
@@ -2234,7 +2548,7 @@ mod tests {
         assert!(json.contains("build_fixes"));
         let mut reloaded = MappingStore::from_path(path.clone());
         assert_eq!(reloaded.get("arch", "MyLib").as_deref(), Some("mylib-dev"));
-        assert!(reloaded.is_negative("bogus-pkg"));
+        assert!(reloaded.is_negative("arch", "bogus-pkg"));
         assert_eq!(
             reloaded.build_fix("cstdint").as_deref(),
             Some("-include cstdint")
@@ -2366,6 +2680,34 @@ mod tests {
     }
 
     #[test]
+    fn rezepte_gelten_nur_fuer_ihre_distributionsfamilie() {
+        let path = temp_mapping_path("recipe-family");
+        let mut store = MappingStore::from_path(path.clone());
+        store.record_build_recipe(
+            "example-app",
+            BuildRecipe {
+                signature: "cmake".to_string(),
+                family: "arch".to_string(),
+                strategy: "Default".to_string(),
+                packages: vec!["fftw".to_string()],
+                verified: true,
+                ..BuildRecipe::default()
+            },
+        );
+        assert!(store
+            .apply_learned_recipe("example-app", "cmake", "arch")
+            .is_some());
+        // Debian darf keine Arch-Paketnamen wiederverwenden.
+        assert!(store
+            .apply_learned_recipe("example-app", "cmake", "debian")
+            .is_none());
+        assert!(store
+            .apply_learned_recipe("other-app", "cmake", "debian")
+            .is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn build_recipes_werden_gelernt_und_wiedergefunden() {
         let dir = std::env::temp_dir().join(format!(
             "git2pkg-ai-recipes-{}-{}",
@@ -2379,6 +2721,7 @@ mod tests {
         let mut store = MappingStore::from_path(path.clone());
         let recipe = BuildRecipe {
             signature: "cmake+deps_dir+repo_script".to_string(),
+            family: "arch".to_string(),
             strategy: "SystemLibsOnly".to_string(),
             skip_deps: true,
             packages: vec!["pkgconf".to_string()],
@@ -2388,12 +2731,12 @@ mod tests {
 
         let reloaded = MappingStore::from_path(path);
         let (exact, is_exact) = reloaded
-            .apply_learned_recipe("example-app", "cmake+deps_dir+repo_script")
+            .apply_learned_recipe("example-app", "cmake+deps_dir+repo_script", "arch")
             .unwrap();
         assert!(is_exact);
         assert!(exact.skip_deps);
         let (similar, by_signature) = reloaded
-            .apply_learned_recipe("sample-tool", "cmake+deps_dir+repo_script")
+            .apply_learned_recipe("sample-tool", "cmake+deps_dir+repo_script", "arch")
             .unwrap();
         assert!(!by_signature);
         assert_eq!(similar.strategy, "SystemLibsOnly");
@@ -2472,15 +2815,16 @@ mod tests {
             "example-app",
             BuildRecipe {
                 signature: "cmake".to_string(),
+                family: "arch".to_string(),
                 strategy: "Default".to_string(),
                 ..BuildRecipe::default()
             },
         );
-        store.record_repo_packages("example-app", "cmake", &packages);
+        store.record_repo_packages("example-app", "cmake", "arch", &packages);
 
         let reloaded = MappingStore::from_path(path);
         let (recipe, exact) = reloaded
-            .apply_learned_recipe("example-app", "cmake")
+            .apply_learned_recipe("example-app", "cmake", "arch")
             .unwrap();
         assert!(exact);
         assert_eq!(recipe.signature, "cmake");
@@ -2513,6 +2857,7 @@ mod tests {
             "NLopt",
             "Assimp",
             "FFmpeg",
+            "Curses",
         ] {
             for manager in ["pacman", "apt", "dnf", "zypper"] {
                 assert!(
@@ -2593,28 +2938,29 @@ mod tests {
         let path = dir.join("learned_mappings.json");
         let mut store = MappingStore::from_path(path.clone());
         let packages = vec!["boost".to_string()];
-        store.record_repo_packages("example-app", "cmake-signature", &packages);
+        store.record_repo_packages("example-app", "cmake-signature", "arch", &packages);
 
         // Ein Programmeintrag allein ist kein verifiziertes Rezept.
         let unverified = MappingStore::from_path(path.clone());
         assert!(unverified
-            .apply_learned_recipe("example-app", "cmake-signature")
+            .apply_learned_recipe("example-app", "cmake-signature", "arch")
             .is_none());
 
         store.record_build_recipe(
             "example-app",
             BuildRecipe {
                 signature: "cmake-signature".to_string(),
+                family: "arch".to_string(),
                 strategy: "Default".to_string(),
                 packages: packages.clone(),
                 ..BuildRecipe::default()
             },
         );
         // Ein spaeterer Paket-Eintrag darf die Verifizierung nicht zuruecknehmen.
-        store.record_repo_packages("example-app", "cmake-signature", &packages);
+        store.record_repo_packages("example-app", "cmake-signature", "arch", &packages);
         let reloaded = MappingStore::from_path(path);
         let (recipe, exact) = reloaded
-            .apply_learned_recipe("example-app", "cmake-signature")
+            .apply_learned_recipe("example-app", "cmake-signature", "arch")
             .unwrap();
         assert!(exact);
         assert!(recipe.verified);
@@ -2704,6 +3050,14 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
             classify_failure("undefined reference to `example_symbol'"),
             FailureKind::SourceCode
         );
+        assert_eq!(
+            classify_failure("CMake Error: No CMAKE_CXX_COMPILER could be found."),
+            FailureKind::SourceCode
+        );
+        assert_eq!(
+            classify_failure("error: implicit declaration of function 'mvaddwstr'"),
+            FailureKind::SourceCode
+        );
         assert_eq!(classify_failure("something odd"), FailureKind::Unknown);
     }
 
@@ -2752,6 +3106,32 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
     }
 
     #[test]
+    fn gelernte_abhaengigkeiten_ueberleben_neustart() {
+        let path = temp_mapping_path("persist");
+        let dep = MissingDep::Header("example.h".into());
+        {
+            let mut store = MappingStore::from_path(path.clone());
+            store.learn_dependency(
+                "debian",
+                &dep,
+                "libexample-dev",
+                true,
+                "/usr/include/example.h",
+            );
+        }
+
+        let mut store = MappingStore::from_path(path.clone());
+        let entry = store.lookup_dependency("debian", &dep).unwrap();
+        assert_eq!(entry.package, "libexample-dev");
+        assert!(entry.verified);
+        assert_eq!(entry.evidence, "/usr/include/example.h");
+        assert_eq!(entry.score, 1);
+        // Andere Distributionsfamilie = eigener Schlüssel.
+        assert!(store.lookup_dependency("arch", &dep).is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn parallele_stores_verlieren_keine_learnings() {
         let path = temp_mapping_path("merge");
         let mut first = MappingStore::from_path(path.clone());
@@ -2765,11 +3145,11 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         assert_eq!(merged.get("arch", "Beta").as_deref(), Some("beta-pkg"));
 
         // Ein gelerntes Mapping hebt einen zwischenzeitlichen Negativ-Eintrag auf.
-        first.learn_negative("gamma-pkg");
+        first.learn_negative("arch", "gamma-pkg");
         second.learn("arch", "Gamma", "gamma-pkg");
         let mut merged = MappingStore::from_path(path.clone());
         assert_eq!(merged.get("arch", "Gamma").as_deref(), Some("gamma-pkg"));
-        assert!(!merged.is_negative("gamma-pkg"));
+        assert!(!merged.is_negative("arch", "gamma-pkg"));
 
         let _ = fs::remove_file(path);
     }
@@ -2796,7 +3176,7 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         let mut store = MappingStore::from_path(path.clone());
         let total = MAX_NEGATIVE_ENTRIES + 10;
         for index in 0..total {
-            let package = format!("pkg-{:04}", index);
+            let package = format!("arch|pkg-{:04}", index);
             store.negative_cache.push(package.clone());
             store
                 .last_used
@@ -2805,8 +3185,8 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         store.save();
 
         assert_eq!(store.negative_cache.len(), MAX_NEGATIVE_ENTRIES);
-        assert!(!store.is_negative("pkg-0000"));
-        assert!(store.is_negative(&format!("pkg-{:04}", total - 1)));
+        assert!(!store.is_negative("arch", "pkg-0000"));
+        assert!(store.is_negative("arch", &format!("pkg-{:04}", total - 1)));
         assert!(
             !lock_path_for(&path).exists(),
             "Lock-Datei muss entfernt sein"
@@ -2816,6 +3196,19 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
             "Temp-Datei muss entfernt sein"
         );
 
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn doppelte_alt_eintraege_werden_bereinigt() {
+        let path = temp_mapping_path("dedupe");
+        fs::write(
+            &path,
+            r#"{"deps":{"debian|header|foo.h":{"package":"libfoo-dev","verified":true,"evidence":"/usr/include/foo.h","score":2,"last_seen":1},"debian|unknown|foo.h":{"package":"libfoo-dev","verified":false,"evidence":"legacy","score":0,"last_seen":0}}}"#,
+        )
+        .unwrap();
+        let store = MappingStore::from_path(path.clone());
+        assert_eq!(store.explained_dependencies().len(), 1);
         let _ = fs::remove_file(path);
     }
 

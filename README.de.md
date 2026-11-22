@@ -55,9 +55,11 @@ einzelne Binary – per GUI für jeden nutzbar.
   `meson.build`, `go.mod`, `pyproject.toml`, `Makefile`).
 - Live-Log aus dem Container, scrollbar, mit „Log kopieren"-Button.
 - Auflösung fehlender Abhängigkeiten: Die Compiler-Ausgabe wird nach fehlenden
-  Headern, pkg-config-Paketen und CMake-Modulen durchsucht; das passende Paket
-  wird **im Wegwerf-Container** installiert und der Build erneut gestartet
-  (max. 5 Versuche).
+  Headern, pkg-config-Paketen, CMake-Modulen, Werkzeugen und Linker-Bibliotheken
+  durchsucht; das passende Paket wird **im Wegwerf-Container** installiert und
+  anschließend geprüft (Header/Modul/Bibliothek muss wirklich vorhanden sein),
+  bevor der Build erneut startet (max. 5 Versuche). Nur geprüfte Treffer werden
+  dauerhaft gemerkt.
 - Native Pakete: `.pkg.tar.zst` (Arch via `PKGBUILD` + `makepkg`), `.deb`
   (Debian/Ubuntu via `dpkg-deb`), `.rpm` (Fedora/openSUSE via `rpmbuild`).
 - **Ausgabeordner**: Fertige Artefakte landen standardmäßig in

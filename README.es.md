@@ -55,9 +55,12 @@ o un único binario, utilizable por cualquiera desde una interfaz gráfica senci
   `meson.build`, `go.mod`, `pyproject.toml`, `Makefile`).
 - Registro de compilación en vivo y desplazable, con botón de copia.
 - Resolución de dependencias: la salida del compilador se analiza en busca de
-  cabeceras, paquetes pkg-config y módulos CMake faltantes; el paquete
-  correspondiente se instala **dentro del contenedor desechable** y se reintenta
-  la compilación (máx. 5 intentos).
+  cabeceras, paquetes pkg-config, módulos CMake, herramientas y bibliotecas de
+  enlace faltantes; el paquete
+  correspondiente se instala **dentro del contenedor desechable** y se verifica
+  (la cabecera, el módulo o la biblioteca debe existir realmente) antes de
+  reintentar la compilación (máx. 5 intentos). Solo se memorizan las
+  coincidencias verificadas.
 - Paquetes nativos: `.pkg.tar.zst` (Arch), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).
 - **Carpeta de salida**: los resultados van a `~/Downloads/git2pkg-ai` por defecto.

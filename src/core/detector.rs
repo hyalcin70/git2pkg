@@ -102,9 +102,9 @@ impl ProjectFingerprint {
 }
 
 fn fingerprint_build_system(root: &Path) -> &'static str {
-    if root.join("configure.ac").is_file() || root.join("configure").is_file() {
-        return "autotools";
-    }
+    // Muss dieselbe Rangfolge wie die echte Erkennung nutzen: viele Projekte
+    // liefern sowohl `configure.ac` als auch `CMakeLists.txt` mit, gebaut wird
+    // aber nach der Detektion (CMake vor Autotools).
     match detect_build_system(root) {
         BuildSystem::Cargo => "cargo",
         BuildSystem::CMake => "cmake",
@@ -266,6 +266,16 @@ mod tests {
         assert!(first.features.contains(&"repo_script".to_string()));
         assert!(first.features.contains(&"qt".to_string()));
         assert!(!first.signature.contains("fingerprint"));
+    }
+
+    #[test]
+    fn fingerprint_folgt_der_echten_erkennung() {
+        let root = temp_root("mixed", &["CMakeLists.txt", "configure.ac", "configure"]);
+        assert_eq!(detect_build_system(&root), BuildSystem::CMake);
+        let fingerprint = ProjectFingerprint::from_root(&root);
+        assert_eq!(fingerprint.build_system, "cmake");
+        assert_eq!(fingerprint.signature, "cmake");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

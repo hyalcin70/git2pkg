@@ -15,6 +15,7 @@ REPOS=(
   "https://github.com/sharkdp/hyperfine"      # Cargo / Rust
   "https://github.com/junegunn/fzf"           # Go
   "https://github.com/pallets/click"          # Python
+  "https://github.com/karlstav/cava"          # CMake + system libs
 )
 
 if [[ ! -x "$BIN" ]]; then

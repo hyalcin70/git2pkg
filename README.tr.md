@@ -57,8 +57,11 @@ arayüzle herkes kullanabiliyor.
   `meson.build`, `go.mod`, `pyproject.toml`, `Makefile`).
 - Konteynerden canlı, kaydırılabilir derleme günlüğü ve kopyalama düğmesi.
 - Eksik bağımlılık çözümü: derleyici çıktısı eksik başlıklar, pkg-config
-  paketleri ve CMake modülleri için taranır; uygun paket **geçici konteynerin
-  içine** kurulur ve derleme yeniden denenir (en fazla 5 deneme).
+  paketleri, CMake modülleri, araçlar ve bağlayıcı kitaplıkları için taranır;
+  uygun paket **geçici konteynerin içine** kurulur ve gerçekten sağlayıp
+  sağlamadığı doğrulanır (başlık/modül/kitaplık gerçekten var olmalı), ardından
+  derleme yeniden denenir (en fazla 5 deneme). Yalnızca doğrulanmış eşleşmeler
+  kalıcı olarak saklanır.
 - Yerel paketler: `.pkg.tar.zst` (Arch), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).
 - **Çıktı klasörü**: sonuçlar varsayılan olarak `~/Downloads/git2pkg-ai` içine

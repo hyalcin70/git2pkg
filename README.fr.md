@@ -59,9 +59,12 @@ simple interface graphique.
   `meson.build`, `go.mod`, `pyproject.toml`, `Makefile`).
 - Journal de compilation en direct, défilable, avec bouton de copie.
 - Résolution des dépendances manquantes : la sortie du compilateur est analysée
-  pour les en-têtes, paquets pkg-config et modules CMake absents ; le paquet
-  correspondant est installé **dans le conteneur jetable**, puis la compilation
-  est relancée (5 tentatives maximum).
+  pour les en-têtes, paquets pkg-config, modules CMake, outils et bibliothèques
+  de liaison absents ; le paquet
+  correspondant est installé **dans le conteneur jetable** et vérifié (l'en-tête,
+  le module ou la bibliothèque doit réellement exister), puis la compilation est
+  relancée (5 tentatives maximum). Seules les correspondances vérifiées sont
+  mémorisées.
 - Paquets natifs : `.pkg.tar.zst` (Arch), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).
 - **Dossier de sortie** : les artefacts sont écrits dans `~/Downloads/git2pkg-ai`

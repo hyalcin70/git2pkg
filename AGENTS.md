@@ -43,15 +43,27 @@ atomically. All sections are bounded by deterministic LRU eviction
 Dependency learnings are stored per kind and distro family
 (`family|kind|name`) with `package`, `verified`, `evidence`, `score` and
 `last_seen`. A package is learned only after it really provides the missing
-artifact (header, pkg-config module, CMake config, tool), verified inside the
-container. Mappings that fail verification are scored down and blocked after
-two strikes; defaults and legacy flat mappings remain as fallbacks.
+artifact (header, pkg-config module, CMake module, tool, linker library),
+verified inside the container - CMake modules via a minimal `find_package`
+probe, so built-in modules such as `ZLIB` are covered without a config file.
+Mappings that fail verification are scored down and blocked after two strikes;
+a mapping whose package is still missing in the next round is scored down as
+well ("install success is not a fix"). Package names that cannot be installed
+are cached per distro family too, never globally. Defaults and legacy flat
+mappings remain as fallbacks.
 `git2pkg-ai --explain-learning` prints the learned table.
 
 Failures are classified (dependency, version/ABI, bundled dependency,
 source/compiler, packaging). If no dependency pattern remains and the failure
 is a source or packaging error, the build stops with a clear diagnosis instead
 of trying more packages.
+
+Strategy profiles marked "incomplete" are skipped, but if every strategy is
+marked for a repository the markers are cleared and one real attempt runs
+instead of failing without a build. CMake and Meson projects without install
+rules (or with empty install rules) stage their built ELF programs to
+`/usr/bin` and shared libraries to `/usr/lib` as a generic fallback; internal
+CMake probe binaries in `CMakeFiles/` are never treated as programs.
 
 **Log language policy:** static UI text is localized in five languages
 (`src/gui/i18n.rs`), but live build logs are English technical diagnostics
@@ -74,7 +86,9 @@ cleanup live in `src/core/container.rs`. Packaging backends are modular under
 Generated Arch packages (`.pkg.tar.zst`) are assembled directly with
 `bsdtar` from `.PKGINFO`/`.MTREE`, because `makepkg`'s `fakeroot` step is
 unreliable inside root containers. In-tree `PKGBUILD` files still use
-`makepkg`. Debian packages compute `Depends` via `dpkg-shlibdeps`; RPM
+`makepkg`. Debian packages compute `Depends` via `dpkg-shlibdeps` (the
+temporary `debian/control` needs a `Source:` stanza or the parser refuses to
+run); RPM
 packages use `AutoReqProv`, ignore standard RPATHs (`QA_RPATHS=0x0001`) and
 compress man pages before the `%files` list is generated. The target libdir is
 passed explicitly (`/usr/lib64` on Fedora/openSUSE) so installed binaries can
@@ -90,7 +104,10 @@ independent copies (no symlink or shared clone). The exit dialog option
 then wipes the complete `~/.cache/git2pkg-ai/` tree (including `repos/`), using a
 short-lived container if root-owned artifacts remain. Learned mappings in
 `~/.config/git2pkg-ai/learned_mappings.json` are never touched by cache cleanup;
-only verified build recipes are reused. The GUI has no learning-reset button;
+only verified build recipes are reused. Recipes and their saved package names
+are scoped to the target distro family, so an Arch recipe never leaks into a
+Debian build. Unresolvable (often optional) CMake modules do not abort a build
+when other dependencies were resolved in the same round; the build is retried. The GUI has no learning-reset button;
 the CLI flag `--reset-learning` remains available. After package installs
 `CMakeCache.txt`/`CMakeFiles` are reset; missing CLI tools are resolved through
 the package manager file database; `option(...)` flags in `CMakeLists.txt` are

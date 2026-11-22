@@ -53,9 +53,10 @@ anyone through a simple GUI.
   `go.mod`, `pyproject.toml`, `Makefile`).
 - Live, scrollable build log streamed from the container, with a copy button.
 - Missing-dependency resolution: the compiler output is scanned for missing
-  headers, pkg-config packages and CMake modules; the matching package is
-  installed **inside the throwaway container**, then the build is retried
-  (max. 5 attempts).
+  headers, pkg-config packages, CMake modules, tools and linker libraries; the
+  matching package is installed **inside the throwaway container** and then
+  verified (the header/module/library must really exist) before the build is
+  retried (max. 5 attempts). Only verified matches are remembered.
 - Native packages: `.pkg.tar.zst` (Arch, via `PKGBUILD` + `makepkg`), `.deb`
   (Debian/Ubuntu, via `dpkg-deb`), `.rpm` (Fedora/openSUSE, via `rpmbuild`).
 - **Output folder**: finished artifacts land in `~/Downloads/git2pkg-ai` by default.
