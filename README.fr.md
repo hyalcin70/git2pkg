@@ -18,6 +18,10 @@ conteneur.
 > [!WARNING]
 > **Statut Alpha :** Ce projet est actuellement en phase de test actif (Alpha). Le clonage et les tests s'effectuent à vos propres risques. Aucun support, assistance ou garantie d'aucune sorte n'est fourni pendant la phase Alpha — le support sera disponible à partir du statut Beta.
 
+## Périmètre et exclusions
+
+`git2pkg` est conçu exclusivement pour les applications natives Linux de bureau et en ligne de commande (p. ex. outils C/C++, Rust, Go et Python). Les chaînes d'outils embarquées/microcontrôleurs (p. ex. Arduino, PlatformIO, ESP-IDF), les plugins d'IDE (p. ex. extensions VS Code), les applications mobiles et les applications web sont volontairement exclus du périmètre.
+
 ## Pourquoi je l'ai créé
 
 J'adore découvrir de nouveaux outils open source sur GitHub, GitLab et ailleurs,

@@ -18,6 +18,10 @@ ile alınır.
 > [!WARNING]
 > **Alfa Durumu:** Bu proje şu anda aktif test aşamasındadır (Alfa). Klonlama ve test etme tamamen kendi sorumluluğunuzdadır. Alfa aşamasında hiçbir şekilde destek, yardım veya garanti sağlanmamaktadır — destek Beta aşamasından itibaren sunulacaktır.
 
+## Kapsam ve Kapsam Dışı Alanlar
+
+`git2pkg` yalnızca yerel Linux masaüstü ve CLI uygulamaları için geliştirilmiştir (ör. C/C++, Rust, Go ve Python araçları). Gömülü/mikrodenetleyici araç zincirleri (ör. Arduino, PlatformIO, ESP-IDF), IDE eklentileri (ör. VS Code uzantıları), mobil uygulamalar ve web uygulamaları bilinçli olarak kapsam dışıdır.
+
 ## Neden bunu geliştirdim
 
 GitHub, GitLab ve benzeri yerlerde yeni açık kaynak araçları keşfetmeyi

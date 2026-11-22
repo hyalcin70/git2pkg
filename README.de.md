@@ -17,6 +17,10 @@ den Paketmanager im Container.
 > [!WARNING]
 > **Alpha-Status:** Dieses Projekt befindet sich derzeit in der aktiven Testphase (Alpha). Klonen und Testen erfolgen auf eigenes Risiko. Während der Alpha-Phase wird keinerlei Support, Hilfestellung oder Gewährleistung übernommen — Support gibt es erst ab dem Beta-Status.
 
+## Anwendungsbereich & Nicht-Ziele
+
+`git2pkg` ist ausschließlich für native Linux-Desktop- und CLI-Anwendungen gedacht (z. B. C/C++, Rust, Go und Python-Tools). Eingebettete/Mikrocontroller-Toolchains (z. B. Arduino, PlatformIO, ESP-IDF), IDE-Plugins (z. B. VS-Code-Erweiterungen), mobile Apps und Web-Apps sind bewusst nicht im Anwendungsbereich enthalten.
+
 ## Warum ich das gebaut habe
 
 Ich entdecke gerne neue Open-Source-Tools auf GitHub, GitLab und anderen

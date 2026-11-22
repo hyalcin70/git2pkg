@@ -16,6 +16,10 @@ regular expressions over compiler output, and the container's package manager.
 > [!WARNING]
 > **Alpha Status:** This project is currently in active testing (Alpha). Cloning and testing are at your own risk. No support, assistance, or warranty of any kind is provided during Alpha — support will be available starting from the Beta stage.
 
+## Scope & Non-Goals
+
+`git2pkg` is built exclusively for native Linux desktop and CLI applications (such as C/C++, Rust, Go, and Python tools). Embedded/microcontroller toolchains (e.g., Arduino, PlatformIO, ESP-IDF), IDE plugins (e.g., VS Code extensions), mobile apps, or web apps are intentionally out of scope.
+
 ## Why I Built This
 
 I love discovering new open-source tools on GitHub, GitLab and elsewhere, but I

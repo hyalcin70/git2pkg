@@ -17,6 +17,10 @@ del compilador y el gestor de paquetes del contenedor.
 > [!WARNING]
 > **Estado Alfa:** Este proyecto se encuentra actualmente en fase de pruebas activas (Alfa). La clonación y las pruebas se realizan bajo su propio riesgo. Durante la fase Alfa no se ofrece soporte, asistencia ni garantía de ningún tipo; el soporte estará disponible a partir de la fase Beta.
 
+## Alcance y objetivos excluidos
+
+`git2pkg` está diseñado exclusivamente para aplicaciones nativas de escritorio y CLI en Linux (p. ej., herramientas en C/C++, Rust, Go y Python). Las cadenas de herramientas embebidas/microcontroladores (p. ej., Arduino, PlatformIO, ESP-IDF), los complementos de IDE (p. ej., extensiones de VS Code), las aplicaciones móviles y las aplicaciones web quedan deliberadamente fuera del alcance.
+
 ## Por qué lo construí
 
 Me encanta descubrir nuevas herramientas de código abierto en GitHub, GitLab y
