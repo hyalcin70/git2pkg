@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           git2pkg
-Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.26}
+Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.27}
 Release:        1%{?dist}
 Summary:        Isolated package builder from Git repositories
 License:        GPL-3.0-or-later
@@ -48,5 +48,8 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %license LICENSE
 
 %changelog
+* Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.27-1
+- Remove the misleading build progress percentage from the GUI.
+
 * Sun Nov 22 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.26-1
 - Native RPM package for 0.2.0-alpha.26.

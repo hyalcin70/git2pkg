@@ -886,7 +886,6 @@ pub enum BuildEvent {
     Finished(BuildOutcome),
     Failed(String),
     ContainerStarted(String),
-    ProgressReset,
     Cancelled,
 }
 
@@ -1605,7 +1604,6 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         };
         let effective_strategy = forced_strategy.unwrap_or(config.strategy);
         let strategy_name = effective_strategy.label();
-        let _ = tx.send(BuildEvent::ProgressReset);
         step(
             tx,
             texts.step_strategy_round(

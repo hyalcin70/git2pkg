@@ -648,16 +648,6 @@ impl Texts {
     pub fn status_step(&self) -> &'static str {
         self.get("Step:", "Schritt:", "Adım:", "Paso:", "Étape :")
     }
-    pub fn progress_label(&self, percent: u32) -> String {
-        let name = self.get(
-            "Progress",
-            "Fortschritt",
-            "İlerleme",
-            "Progreso",
-            "Progression",
-        );
-        format!("{}: {} %", name, percent)
-    }
     pub fn status_language(&self) -> &'static str {
         self.get("Language:", "Sprache:", "Dil:", "Idioma:", "Langue :")
     }
@@ -1295,14 +1285,6 @@ mod tests {
         assert!(text.contains("Strategie 2/4"), "{}", text);
         assert!(text.contains("System-Bibliotheken"), "{}", text);
         assert!(text.contains("Runde 1/10"), "{}", text);
-    }
-
-    #[test]
-    fn fortschritt_ist_im_ruhezustand_lokalisiert() {
-        let de = Texts::new(Language::De).progress_label(0);
-        assert_eq!(de, "Fortschritt: 0 %");
-        let en = Texts::new(Language::En).progress_label(42);
-        assert_eq!(en, "Progress: 42 %");
     }
 
     #[test]

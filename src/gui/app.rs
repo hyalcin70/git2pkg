@@ -81,8 +81,6 @@ pub struct Git2PkgApp {
     last_primary_selection: Option<String>,
     last_url_selection: Option<egui::text::CCursorRange>,
     step: String,
-    build_progress: f32,
-    cargo_crates: u32,
     building: bool,
     build_attempt: u32,
     cancel_flag: Arc<AtomicBool>,
@@ -256,8 +254,6 @@ impl Git2PkgApp {
             last_primary_selection: None,
             last_url_selection: None,
             step: String::new(),
-            build_progress: 0.0,
-            cargo_crates: 0,
             building: false,
             build_attempt: 1,
             cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -434,8 +430,6 @@ impl Git2PkgApp {
         self.next_strategy = strategy.next(has_deps);
         self.building = true;
         self.had_build_in_session = true;
-        self.build_progress = 0.0;
-        self.cargo_crates = 0;
         self.cancel_flag.store(false, Ordering::Relaxed);
         *self.container_id.lock().unwrap() = None;
         self.outcome = None;
@@ -481,7 +475,6 @@ impl Git2PkgApp {
         }
         self.cancel_flag.store(true, Ordering::Relaxed);
         self.building = false;
-        self.build_progress = 0.0;
         self.retry_dialog = false;
         self.install_dialog = None;
         self.log.push_str("[warn] build cancelled by the user.\n");
@@ -529,17 +522,12 @@ impl Git2PkgApp {
                         *self.container_id.lock().unwrap() = Some(id);
                         changed = true;
                     }
-                    Ok(BuildEvent::ProgressReset) => {
-                        self.build_progress = 0.0;
-                        changed = true;
-                    }
                     Ok(BuildEvent::Cancelled) => {
                         self.building = false;
                         self.last_build_failed = true;
                         self.retry_dialog = false;
                         self.install_dialog = None;
                         self.step = self.texts().failed_step().to_string();
-                        self.build_progress = 0.0;
                         *self.container_id.lock().unwrap() = None;
                         clear_receiver = true;
                         changed = true;
@@ -547,15 +535,9 @@ impl Git2PkgApp {
                     Ok(BuildEvent::Log(text)) => {
                         self.log.push_str(&text);
                         self.log.push('\n');
-                        if text.trim_start().starts_with("Compiling ") {
-                            self.cargo_crates += 1;
-                        }
-                        self.build_progress =
-                            progress_from_line(self.build_progress, &text, self.cargo_crates);
                         changed = true;
                     }
                     Ok(BuildEvent::Finished(outcome)) => {
-                        self.build_progress = 1.0;
                         self.step = self.texts().success_step().to_string();
                         self.last_build_failed = false;
                         self.retry_dialog = false;
@@ -858,23 +840,6 @@ impl eframe::App for Git2PkgApp {
                 ui.strong(texts.status_step());
                 ui.colored_label(green, self.step.as_str());
             });
-            let panel_rect = ui.max_rect();
-            let bar_w = (panel_rect.width() * 0.55).clamp(240.0, 520.0);
-            let bar_h = 18.0;
-            let row_center_y = ui.cursor().top() + bar_h * 0.5 + 3.0;
-            let bar_rect = egui::Rect::from_center_size(
-                egui::pos2(panel_rect.center().x, row_center_y),
-                egui::vec2(bar_w, bar_h),
-            );
-            let percent = (self.build_progress * 100.0).round() as u32;
-            let label = texts.progress_label(percent);
-            ui.put(
-                bar_rect,
-                egui::ProgressBar::new(self.build_progress)
-                    .desired_width(bar_w)
-                    .text(label),
-            );
-            ui.allocate_rect(bar_rect, egui::Sense::hover());
         });
 
         // Log-Aktionen und Status sind unten angedockt und bleiben auch nach
@@ -1885,92 +1850,6 @@ impl eframe::App for Git2PkgApp {
 /// Fortschritt aus echten Log-Signalen ableiten, monoton und nie rückwärts.
 /// Fortschritt nach Phasen des aktuellen Versuchs, nicht nach globalen
 /// Zahlen aus Strategie- oder Rundenangaben (`1/5` darf nie 95 % bedeuten).
-fn progress_from_line(current: f32, line: &str, _cargo_crates: u32) -> f32 {
-    let lower = line.to_ascii_lowercase();
-    let phase = if lower.contains("clone")
-        || lower.contains("receiving objects")
-        || lower.contains("resolving deltas")
-    {
-        let fraction = extract_percent(line).unwrap_or(0.5);
-        (0.05 + 0.10 * fraction).min(0.15)
-    } else if lower.contains("setup")
-        || lower.contains("install")
-        || lower.contains("nachinstallation")
-    {
-        0.30
-    } else if lower.contains("cmake -s")
-        || lower.contains("cmake --build")
-        || lower.contains("compiling")
-        || lower.contains("make")
-        || lower.contains("ninja")
-    {
-        0.55
-    } else if lower.contains("starting package()")
-        || lower.contains("dpkg-deb")
-        || lower.contains("rpmbuild")
-        || lower.contains("makepkg")
-    {
-        0.90
-    } else if lower.contains("verif") || lower.contains("prüf") {
-        0.95
-    } else if lower.contains("finished") && lower.contains("target(s)") {
-        1.0
-    } else if let Some((done, total)) = extract_fraction(line) {
-        if total >= 5.0 {
-            (0.55 + 0.20 * (done / total)).min(0.75)
-        } else {
-            current
-        }
-    } else {
-        current
-    };
-    phase.max(current)
-}
-
-/// Findet die erste Prozentangabe, z. B. `45%`, `[ 28%]` oder `100 %`.
-fn extract_percent(text: &str) -> Option<f32> {
-    let bytes = text.as_bytes();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index].is_ascii_digit() {
-            let start = index;
-            while index < bytes.len() && bytes[index].is_ascii_digit() {
-                index += 1;
-            }
-            let mut probe = index;
-            while probe < bytes.len() && bytes[probe].is_ascii_whitespace() {
-                probe += 1;
-            }
-            if probe < bytes.len() && bytes[probe] == b'%' {
-                let value: f32 = text[start..index].parse().ok()?;
-                if (0.0..=100.0).contains(&value) {
-                    return Some(value / 100.0);
-                }
-            }
-        } else {
-            index += 1;
-        }
-    }
-    None
-}
-
-/// Findet Ninja-Fortschritt wie `[140/420]`.
-fn extract_fraction(text: &str) -> Option<(f32, f32)> {
-    let open = text.find('[')?;
-    let rest = &text[open + 1..];
-    let slash = rest.find('/')?;
-    let close = rest.find(']')?;
-    if close < slash {
-        return None;
-    }
-    let done: f32 = rest[..slash].trim().parse().ok()?;
-    let total: f32 = rest[slash + 1..close].trim().parse().ok()?;
-    if total <= 0.0 || done > total {
-        return None;
-    }
-    Some((done, total))
-}
-
 fn log_line_color(line: &str, dark: bool) -> egui::Color32 {
     let lower = line.to_ascii_lowercase();
     if line.starts_with("[err]")
@@ -2055,30 +1934,6 @@ mod tests {
         let (text, cursor) = replace_text_in_range("abc", None, "XY");
         assert_eq!(text, "abcXY");
         assert_eq!(cursor, 5);
-    }
-
-    #[test]
-    fn fortschritt_wird_aus_log_signalen_lesen() {
-        assert_eq!(
-            extract_percent("Receiving objects: 45% (123/456)"),
-            Some(0.45)
-        );
-        assert_eq!(extract_percent("[ 28%] Building CXX object"), Some(0.28));
-        assert_eq!(extract_fraction("[140/420] Linking"), Some((140.0, 420.0)));
-        assert_eq!(
-            progress_from_line(0.0, "Strategie 1/5: Standard — Runde 1/5", 0),
-            0.0
-        );
-        assert_eq!(progress_from_line(0.0, "== git2pkg: Setup ==", 0), 0.30);
-        let linking = progress_from_line(0.30, "[140/420] Linking", 200);
-        assert!((0.60..0.63).contains(&linking), "Linking: {linking}");
-        assert_eq!(progress_from_line(0.5, "Starting package() ...", 200), 0.90);
-        let compiled = progress_from_line(0.30, "Compiling repo v0.1.0", 200);
-        assert_eq!(compiled, 0.55);
-        assert_eq!(
-            progress_from_line(compiled, "Finished `release` target(s) in 1s", 200),
-            1.0
-        );
     }
 
     #[test]
