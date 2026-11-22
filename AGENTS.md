@@ -58,6 +58,13 @@ The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
 `src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
 
+Generated Arch packages (`.pkg.tar.zst`) are assembled directly with
+`bsdtar` from `.PKGINFO`/`.MTREE`, because `makepkg`'s `fakeroot` step is
+unreliable inside root containers. In-tree `PKGBUILD` files still use
+`makepkg`. Debian packages compute `Depends` via `dpkg-shlibdeps`; RPM
+packages use `AutoReqProv`, ignore standard RPATHs (`QA_RPATHS=0x0001`) and
+compress man pages before the `%files` list is generated.
+
 Persistent Git clones live in `~/.cache/git2pkg-ai/repos/repo-<repo_hash>/` and
 are updated in place; build workspaces use the separate prefix
 `~/.cache/git2pkg-ai/builds/build-<unix_millis>-<pid>/src/` and are complete

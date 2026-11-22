@@ -2253,9 +2253,11 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
         }
         BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .",
         BuildSystem::Autotools => {
-            "if [ -x ./configure ]; then ./configure --prefix=/usr; else autoreconf -fi && ./configure --prefix=/usr; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
+            "if [ -x ./configure ]; then ./configure --prefix=/usr; else autoreconf -fi && ./configure --prefix=/usr; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b \"$1\" | grep -q ELF && cp \"$1\" /work/dist/; else cp \"$1\" /work/dist/; fi' _ {} \\;"
         }
-        BuildSystem::Make => "make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;",
+        BuildSystem::Make => {
+            "make && find . -maxdepth 2 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b \"$1\" | grep -q ELF && cp \"$1\" /work/dist/; else cp \"$1\" /work/dist/; fi' _ {} \\;"
+        }
         BuildSystem::Qmake => {
             "(qmake6 . 2>/dev/null || qmake .) && make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
         }
@@ -2706,19 +2708,19 @@ fn build_script_with_flags(
     lines.push(
         r#"case "$artifact" in
   *.pkg.tar.zst|*.tar.zst)
-    if ! (tar -tf "$artifact" 2>/dev/null || tar --zstd -tf "$artifact" 2>/dev/null) | grep -Eq '(^|/)usr/(bin|lib|lib64)/'; then
+    if ! (tar -tf "$artifact" 2>/dev/null || tar --zstd -tf "$artifact" 2>/dev/null) | grep -E '(^|/)usr/(bin|lib|lib64)/' >/dev/null; then
       echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.deb)
-    if ! dpkg-deb -c "$artifact" 2>/dev/null | grep -Eq 'usr/(bin|lib|lib64)/'; then
+    if ! dpkg-deb -c "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/' >/dev/null; then
       echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.rpm)
-    if ! rpm -qlp "$artifact" 2>/dev/null | grep -Eq 'usr/(bin|lib|lib64)/'; then
+    if ! rpm -qlp "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/' >/dev/null; then
       echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
@@ -3229,6 +3231,20 @@ mod tests {
             let install = project_install_step(&system, "example-app");
             assert!(install.contains("staging built binaries"), "{install}");
         }
+    }
+
+    #[test]
+    fn artefaktpruefung_vermeidet_sigpipe() {
+        let script = build_script(
+            &config(DistroFamily::Arch, TargetFormat::NativePackage),
+            &BuildSystem::Cargo,
+            &[],
+        );
+        assert!(
+            !script.contains("grep -Eq"),
+            "grep -q bricht bei pipefail ab"
+        );
+        assert!(script.contains("grep -E 'usr/(bin|lib|lib64)/' >/dev/null"));
     }
 
     #[test]
