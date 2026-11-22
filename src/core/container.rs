@@ -434,33 +434,33 @@ fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Resul
             command.extend(args[1..].iter().map(|arg| arg.to_string()));
             let _ = run_streamed("git", &command, tx);
         }
-        if cache.join(".gitmodules").is_file() {
-            let path = cache.to_string_lossy().into_owned();
-            let _ = run_streamed(
-                "git",
-                &[
-                    "-C".to_string(),
-                    path.clone(),
-                    "submodule".to_string(),
-                    "update".to_string(),
-                    "--init".to_string(),
-                    "--recursive".to_string(),
-                ],
-                tx,
-            );
-            let _ = run_streamed(
-                "git",
-                &[
-                    "-C".to_string(),
-                    path,
-                    "submodule".to_string(),
-                    "foreach".to_string(),
-                    "--recursive".to_string(),
-                    "git reset --hard && git clean -fdx".to_string(),
-                ],
-                tx,
-            );
-        }
+    }
+    if cache.join(".gitmodules").is_file() {
+        let path = cache.to_string_lossy().into_owned();
+        let _ = run_streamed(
+            "git",
+            &[
+                "-C".to_string(),
+                path.clone(),
+                "submodule".to_string(),
+                "update".to_string(),
+                "--init".to_string(),
+                "--recursive".to_string(),
+            ],
+            tx,
+        );
+        let _ = run_streamed(
+            "git",
+            &[
+                "-C".to_string(),
+                path,
+                "submodule".to_string(),
+                "foreach".to_string(),
+                "--recursive".to_string(),
+                "git reset --hard && git clean -fdx".to_string(),
+            ],
+            tx,
+        );
     }
     Ok(())
 }
@@ -1065,7 +1065,7 @@ fn verify_dependency(
         .map(str::trim)
         .find(|line| !line.is_empty())
         .map(str::to_string);
-    Some(evidence.unwrap_or(command))
+    evidence
 }
 
 /// Löst eine fehlende Abhängigkeit auf: gelernte Zuordnung, Datei-Datenbank,
@@ -2777,13 +2777,12 @@ fn build_script_with_flags(
         "export CCACHE_DIR=/work/ccache".to_string(),
         "export PIP_BREAK_SYSTEM_PACKAGES=1".to_string(),
         "mkdir -p /work/cargo-target /work/cargo-home /work/ccache".to_string(),
-        // Gemountete Quellen gehören dem Host-Nutzer; der Container läuft als
-        // root. Ohne diese Ausnahme verweigert git seine Arbeit.
-        "git config --global --add safe.directory '*' 2>/dev/null || true".to_string(),
         echo_line(&texts.log_setup(&target.package_manager)),
         format!("export GIT2PKG_LIBDIR={}", target_libdir(&target.family)),
         base_dependencies(&target.family, system),
     ];
+    // Erst nach der Installation von git wirksam.
+    lines.push("git config --global --add safe.directory '*' 2>/dev/null || true".to_string());
     if config.cmake_compat {
         lines.push("export CMAKE_SUPPRESS_DEVELOPER_ERRORS=ON".to_string());
     }
