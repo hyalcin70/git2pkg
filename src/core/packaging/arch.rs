@@ -71,6 +71,9 @@ done"#.to_string(),
         build_body = build_body,
         install_body = install_body,
     ));
+    // Die Abhängigkeitszeile wird erst beim Schreiben eingesetzt; im
+    // Heredoc bleiben `${pkgdir}` usw. unangetastet.
+    lines.push("sed -i \"s|^depends=.*|depends=($dep_line)|\" /work/pkg/PKGBUILD".to_string());
     lines.push("chown -R builder:builder /work/pkg /work/src /work/out /work/dist".to_string());
     lines.push("su builder -c 'cd /work/pkg && makepkg -s --noconfirm'".to_string());
     lines.push("rm -f /work/pkg/*-debug-*.pkg.tar.zst".to_string());
@@ -130,6 +133,7 @@ mod tests {
         let script = script(&ctx).join("\n");
         assert!(script.contains("pacman -Qoq"));
         assert!(script.contains("depends=(${dep_line})"));
+        assert!(script.contains("sed -i \"s|^depends=.*|depends=($dep_line)|\""));
         assert!(script.contains("ldd"));
     }
 

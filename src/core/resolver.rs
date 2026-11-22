@@ -1429,6 +1429,14 @@ fn is_generic_tool_word(name: &str) -> bool {
             | "compilers"
             | "linker"
             | "target"
+            | "documentation"
+            | "docs"
+            | "help"
+            | "usage"
+            | "examples"
+            | "information"
+            | "reference"
+            | "manual"
             // Häufige englische Füllwörter aus Statusmeldungen
             // (z. B. "libraries were not found").
             | "were"
@@ -1627,6 +1635,14 @@ mod tests {
             analyze_output(out),
             vec![MissingDep::Header("openssl/sha.h".into())]
         );
+    }
+
+    #[test]
+    fn dokumentationshinweise_erzeugen_keine_tools() {
+        let out = "*  Python dependencies for building jq documentation not found. *\n";
+        assert!(!analyze_output(out)
+            .iter()
+            .any(|dep| matches!(dep, MissingDep::Tool(name) if name == "documentation")));
     }
 
     #[test]

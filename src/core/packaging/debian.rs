@@ -14,7 +14,7 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     )));
     lines.push("mkdir -p /work/deb/DEBIAN /work/debian".to_string());
     lines.push(format!(
-        "cat > /work/debian/control <<'CONTROL_EOF'\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",
+        "cat > /work/debian/control <<CONTROL_EOF\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.deb(),
@@ -30,7 +30,7 @@ for binary in $(find /work/out/usr/bin /work/out/usr/lib /work/out/usr/lib/* -ty
 done"#.to_string(),
     );
     lines.push(format!(
-        "cat > /work/deb/DEBIAN/control <<'CONTROL_EOF'\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nDepends: ${{depends}}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",
+        "{{ echo 'Package: {name}'; echo 'Version: {version}'; echo 'Section: utils'; echo 'Priority: optional'; echo 'Architecture: {arch}'; if [ -n \"$depends\" ]; then echo \"Depends: $depends\"; fi; echo 'Maintainer: git2pkg-ai <noreply@example.invalid>'; echo 'Description: Package built by git2pkg-ai'; }} > /work/deb/DEBIAN/control",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.deb(),
@@ -75,7 +75,8 @@ mod tests {
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("dpkg-shlibdeps -O"));
-        assert!(script.contains("Depends: ${depends}"));
+        assert!(script.contains("if [ -n \"$depends\" ]"));
+        assert!(script.contains("Depends: $depends"));
         assert!(script.contains("Architecture: amd64"));
         assert!(script.contains("--strip-unneeded"));
     }
