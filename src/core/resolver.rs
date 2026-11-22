@@ -715,6 +715,69 @@ pub fn candidate_names(dep: &MissingDep, package_manager: &str) -> Vec<String> {
 
 /// Stufe 2 und 3: gezielte Suche nach CMake-Konfigurationsdateien,
 /// `.pc`-Dateien und Headern in der Paketdatenbank des Containers.
+fn safe_tool_name(tool: &str) -> Option<String> {
+    let name = tool.trim();
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_+.".contains(c))
+    {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// Paketmanager-Dateidatenbank nach dem Binary eines fehlenden Tools fragen.
+pub fn tool_file_database_commands(package_manager: &str, tool: &str) -> Vec<String> {
+    let Some(name) = safe_tool_name(tool) else {
+        return Vec::new();
+    };
+    let path = format!("/usr/bin/{name}");
+    match package_manager {
+        "pacman" => vec![
+            "pacman -Fy --noconfirm".to_string(),
+            format!("pacman -Fq '{path}'"),
+        ],
+        "apt" => vec![format!("apt-file search '{path}'")],
+        "dnf" => vec![format!("dnf provides '{path}'")],
+        "zypper" => vec![format!("zypper se --provides '{path}'")],
+        _ => Vec::new(),
+    }
+}
+
+/// Parst die Paketnamen aus der Ausgabe der Dateidatenbank.
+pub fn packages_from_file_database(output: &str, tool: &str) -> Vec<String> {
+    let Some(name) = safe_tool_name(tool) else {
+        return Vec::new();
+    };
+    let mut packages: Vec<String> = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let candidate = if let Some((_, rest)) = line.split_once("is owned by ") {
+            rest.split_whitespace().next().unwrap_or("")
+        } else if let Some((head, _)) = line.split_once(':') {
+            head.rsplit('/').next().unwrap_or(head)
+        } else if line.starts_with(&format!("/usr/bin/{name}")) {
+            continue;
+        } else {
+            line.split_whitespace().next().unwrap_or("")
+        };
+        let candidate = candidate
+            .rsplit('/')
+            .next()
+            .unwrap_or(candidate)
+            .trim()
+            .to_ascii_lowercase();
+        if valid_package_name(&candidate) && !packages.contains(&candidate) {
+            packages.push(candidate);
+        }
+    }
+    packages
+}
+
 pub fn probe_commands(package_manager: &str, dep: &MissingDep) -> Vec<String> {
     let mut files: Vec<(String, bool)> = Vec::new();
     match dep {
@@ -940,6 +1003,39 @@ pub fn is_cmake_policy_error(output: &str) -> bool {
             && (lower.contains("3.5") || lower.contains("3.10")))
 }
 
+/// Liest `option(<NAME> "<doc>" <DEFAULT>)` aus CMake-Dateien und liefert
+/// die passenden `-D`-Flags fuer system-nahe bzw. geteilte Bibliotheken.
+pub fn cmake_option_flags_from_text(
+    text: &str,
+    prefer_system: bool,
+    prefer_shared: bool,
+) -> Vec<String> {
+    let Ok(regex) =
+        Regex::new(r#"(?m)^\s*option\s*\(\s*([A-Za-z0-9_]+)\s+"[^"]*"\s+(ON|OFF)\s*\)"#)
+    else {
+        return Vec::new();
+    };
+    let mut flags: Vec<String> = Vec::new();
+    for found in regex.captures_iter(text) {
+        let name = &found[1];
+        let upper = name.to_ascii_uppercase();
+        let default_on = &found[2] == "ON";
+        if prefer_system && upper.contains("SYSTEM") && !default_on {
+            let flag = format!("-D{name}=ON");
+            if !flags.contains(&flag) {
+                flags.push(flag);
+            }
+        }
+        if prefer_shared && upper.ends_with("_STATIC") && default_on {
+            let flag = format!("-D{name}=OFF");
+            if !flags.contains(&flag) {
+                flags.push(flag);
+            }
+        }
+    }
+    flags
+}
+
 /// Parst generische CMake-Hinweise wie `or pass -DFOO_BAR=ON`.
 pub fn cmake_alternative_flags(output: &str) -> Vec<String> {
     let Ok(regex) = Regex::new(r"(?:or\s+)?(?:pass|set)\s+(-D[A-Za-z0-9_]+=[A-Za-z0-9_./-]+)")
@@ -1017,7 +1113,9 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     )
     .unwrap();
     let cmd_tool_re = Regex::new(r"(?i)command not found:\s*([A-Za-z0-9_+\-]+)").unwrap();
-    let shell_cmd_re = Regex::new(r"(?i)([A-Za-z0-9_+.\-]+):\s*command not found").unwrap();
+    let shell_cmd_re = Regex::new(r"(?i)([A-Za-z0-9_.\-]+):\s*command not found").unwrap();
+    let tool_quoted_re =
+        Regex::new(r#"(?i)(?:tool|executable|program)\s+['\"]([A-Za-z0-9_+.\-]+)['\"]"#).unwrap();
 
     let mut deps: Vec<MissingDep> = Vec::new();
 
@@ -1072,6 +1170,12 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
             }
         }
         for caps in shell_cmd_re.captures_iter(trimmed) {
+            let name = &caps[1];
+            if !is_generic_tool_word(name) {
+                push_unique(&mut deps, MissingDep::Tool(name.to_string()));
+            }
+        }
+        for caps in tool_quoted_re.captures_iter(trimmed) {
             let name = &caps[1];
             if !is_generic_tool_word(name) {
                 push_unique(&mut deps, MissingDep::Tool(name.to_string()));
@@ -1703,6 +1807,37 @@ mod tests {
         assert!(recipe.verified);
         assert_eq!(recipe.packages, packages);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cmake_option_flags_werden_generisch_erkannt() {
+        let text = r#"
+option(EXAMPLE_USE_SYSTEM_FOO "Use the system foo" OFF)
+option(EXAMPLE_STATIC "Link foo statically" ON)
+option(EXAMPLE_OTHER "Unrelated" OFF)
+"#;
+        let flags = cmake_option_flags_from_text(text, true, true);
+        assert_eq!(
+            flags,
+            vec![
+                "-DEXAMPLE_USE_SYSTEM_FOO=ON".to_string(),
+                "-DEXAMPLE_STATIC=OFF".to_string(),
+            ]
+        );
+        assert!(cmake_option_flags_from_text(text, false, false).is_empty());
+    }
+
+    #[test]
+    fn pacman_dateidatenbank_paketname_wird_geparst() {
+        let commands = tool_file_database_commands("pacman", "example-tool");
+        assert_eq!(commands[0], "pacman -Fy --noconfirm");
+        assert_eq!(commands[1], "pacman -Fq '/usr/bin/example-tool'");
+        let output = "usr/bin/example-tool is owned by extra/example-package 1.2.3-1\n";
+        assert_eq!(
+            packages_from_file_database(output, "example-tool"),
+            vec!["example-package".to_string()]
+        );
+        assert!(tool_file_database_commands("pacman", "../bad").is_empty());
     }
 
     #[test]

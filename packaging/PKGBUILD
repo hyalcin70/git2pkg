@@ -1,7 +1,7 @@
 # Maintainer: SattNEK
 pkgname=git2pkg
-_tag=v0.2.0-alpha.22
-pkgver=0.2.0alpha22
+_tag=v0.2.0-alpha.23
+pkgver=0.2.0alpha23
 pkgrel=1
 pkgdesc="Isolated package builder from Git repositories for Linux distributions"
 arch=('x86_64')

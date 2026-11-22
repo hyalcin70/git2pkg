@@ -36,8 +36,13 @@ cleanup live in `src/core/container.rs`. Packaging backends are modular under
 Persistent Git clones live in `~/.cache/git2pkg/repos/<repo_hash>/` and are
 updated in place. Temporary build workspaces live in
 `~/.cache/git2pkg/builds/<build_id>/` and are removed after success or by the
-exit cleanup. Learned mappings are in
-`~/.config/git2pkg/learned_mappings.json`; only verified build recipes are reused.
+exit cleanup. If root-owned Docker artifacts block host deletion, a short-lived
+container removes them; `repos/` and learned mappings are never touched.
+Learned mappings are in `~/.config/git2pkg/learned_mappings.json`; only verified
+build recipes are reused. After package installs `CMakeCache.txt`/`CMakeFiles`
+are reset; missing CLI tools are resolved through the package manager file
+database; `option(...)` flags in `CMakeLists.txt` are applied to system-lib and
+shared-lib strategies.
 
 ---
 
@@ -58,7 +63,7 @@ classes instead.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.22`)
+## 3. Repository Map (as of `v0.2.0-alpha.23`)
 
 ### Entry points
 
@@ -199,9 +204,9 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.22`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.23`)
 
-Current release: `v0.2.0-alpha.22`.
+Current release: `v0.2.0-alpha.23`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
   C++/CMake superbuilds (for example Bambu Studio), Meson/C projects (for

@@ -6,11 +6,12 @@
 use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem, ProjectFingerprint};
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::{
-    analyze_output, candidate_names, cmake_alternative_flags, detect_build_fixes,
-    detect_repo_script_distro_rejection, detect_source_group_error, family_key,
+    analyze_output, candidate_names, cmake_alternative_flags, cmake_option_flags_from_text,
+    detect_build_fixes, detect_repo_script_distro_rejection, detect_source_group_error, family_key,
     has_eigen_version_mismatch, is_cmake_policy_error, is_compiled_build_system,
-    package_from_search, package_lacks_executable, probe_commands, search_command,
-    valid_package_name, BuildRecipe, MappingStore, MissingDep, SourceGroupError,
+    package_from_search, package_lacks_executable, packages_from_file_database, probe_commands,
+    search_command, tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore,
+    MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -79,6 +80,24 @@ fn cmake_retry_flags(output: &str, current: &[String]) -> Vec<String> {
 
 fn retry_state_changed(before: &RetryState, after: &RetryState) -> bool {
     before != after
+}
+
+/// Strategie-abhaengige `option(...)`-Flags aus dem Projekt und lokalen deps/.
+fn cmake_option_flags(src: &Path, strategy: BuildStrategy) -> Vec<String> {
+    let system_libs = matches!(
+        strategy,
+        BuildStrategy::SystemLibsOnly | BuildStrategy::DirectStagingFallback
+    );
+    let mut flags: Vec<String> = Vec::new();
+    for file in [src.join("CMakeLists.txt"), src.join("deps/CMakeLists.txt")] {
+        let Ok(text) = fs::read_to_string(file) else {
+            continue;
+        };
+        for flag in cmake_option_flags_from_text(&text, system_libs, system_libs) {
+            push_unique_string(&mut flags, flag);
+        }
+    }
+    flags
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -459,6 +478,67 @@ pub fn cleanup_all_builds() -> usize {
     cleanup_all_builds_in(&build_cache_root())
 }
 
+/// Shell-Kommando für den Fall, dass root-eigene Dateien im Build-Cache liegen.
+fn container_cleanup_args(builds: &Path, image: &str) -> (String, Vec<String>) {
+    let script = "rm -rf /cleanup/* /cleanup/.[!.]* /cleanup/..?*";
+    let mount = format!("{}:/cleanup", builds.display());
+    (
+        "docker".to_string(),
+        vec![
+            "run".to_string(),
+            "--rm".to_string(),
+            "-v".to_string(),
+            mount,
+            image.to_string(),
+            "sh".to_string(),
+            "-c".to_string(),
+            script.to_string(),
+        ],
+    )
+}
+
+fn local_image_exists(engine: &ContainerEngine, image: &str) -> bool {
+    Command::new(engine.binary())
+        .args(["image", "inspect", image])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn build_cache_has_entries() -> bool {
+    fs::read_dir(build_cache_root())
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
+/// Erst normal löschen; wenn root-eigene Reste bleiben, einmalig in einem
+/// Wegwerf-Container aufräumen. Repo-Cache und Lerndaten bleiben unberührt.
+pub fn cleanup_all_builds_with(engine: ContainerEngine, image: &str) -> usize {
+    let mut removed = cleanup_all_builds();
+    if !build_cache_has_entries() {
+        return removed;
+    }
+    if !local_image_exists(&engine, image) {
+        return removed;
+    }
+    let builds = build_cache_root();
+    let mut command_spec = container_cleanup_args(&builds, image);
+    command_spec.0 = engine.binary().to_string();
+    let ok = Command::new(&command_spec.0)
+        .args(&command_spec.1)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if ok {
+        removed += cleanup_all_builds();
+    }
+    removed
+}
+
 fn cleanup_all_builds_in(builds: &Path) -> usize {
     let Ok(entries) = fs::read_dir(builds) else {
         return 0;
@@ -554,6 +634,26 @@ fn remove_build_dir_recursively(work: &Path) -> Result<(), String> {
         let _ = fs::remove_dir(parent);
     }
     result
+}
+
+/// Nach einer Paket Nachinstallation muessen alle `find_package()`-Ergebnisse
+/// verworfen werden, sonst haelt CMake den alten Misserfolg im Cache fest.
+fn reset_cmake_caches(work: &Path) -> usize {
+    let mut removed = 0usize;
+    for dir in ["build", "deps-build", "deps/build"] {
+        let cache = work.join(dir).join("CMakeCache.txt");
+        if cache.is_file() && fs::remove_file(&cache).is_ok() {
+            removed += 1;
+        }
+        let files_dir = work.join(dir).join("CMakeFiles");
+        if files_dir.is_dir() {
+            make_tree_writable(&files_dir);
+            if fs::remove_dir_all(&files_dir).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
 }
 
 fn cleanup_successful_build(work: &Path, tx: &Sender<BuildEvent>) {
@@ -1006,6 +1106,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     .to_string(),
             ));
         }
+        for flag in cmake_option_flags(&src, effective_strategy) {
+            push_unique_string(&mut cmake_flags, flag);
+        }
         let mut script = build_script_with_flags(
             config,
             &system,
@@ -1294,6 +1397,34 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 }
             }
 
+            // Dateidatenbank des Paketmanagers: liefert das Paket zu einem Binary,
+            // dessen Name nicht dem Paketnamen entspricht.
+            if installed.is_none() && matches!(dep, MissingDep::Tool(_)) {
+                let tool = dep.raw_name();
+                for command in tool_file_database_commands(manager, tool) {
+                    if ensure_package_database(config, &container, tx, &mut db_synced).is_err() {
+                        continue;
+                    }
+                    let Ok(found) = container.exec(&command, tx) else {
+                        continue;
+                    };
+                    for package in packages_from_file_database(&found.text, tool) {
+                        if failed_candidates.contains(&package) {
+                            continue;
+                        }
+                        step(tx, texts.step_install(&package));
+                        if try_install(config, &container, &package, tx, &mut db_synced) {
+                            installed = Some(package);
+                            break;
+                        }
+                        failed_candidates.insert(package);
+                    }
+                    if installed.is_some() {
+                        break;
+                    }
+                }
+            }
+
             // Letzter Fallback für unbekannte Paketmanager.
             if installed.is_none() {
                 let search = search_command(manager, dep);
@@ -1350,6 +1481,13 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 extra_packages.push(package.clone());
             }
         }
+        let cleared_cmake = reset_cmake_caches(&work);
+        if cleared_cmake > 0 {
+            let _ = tx.send(BuildEvent::Log(
+                "[cmake] CMakeCache.txt und CMakeFiles nach Nachinstallation entfernt".to_string(),
+            ));
+        }
+
         let after_state = RetryState {
             packages: extra_packages.clone(),
             cmake_flags: cmake_flags.clone(),
@@ -3474,6 +3612,18 @@ mod tests {
             TargetFormat::NativePackage
         );
         assert_eq!(TargetFormat::NativePackage.key(), "package");
+    }
+
+    #[test]
+    fn container_cleanup_kommando_baut_mount_und_rm() {
+        let builds = Path::new("/tmp/example-builds");
+        let (program, args) = container_cleanup_args(builds, "example-image:latest");
+        assert_eq!(program, "docker");
+        assert_eq!(args[0], "run");
+        assert_eq!(args[1], "--rm");
+        assert_eq!(args[3], "/tmp/example-builds:/cleanup");
+        assert_eq!(args[4], "example-image:latest");
+        assert!(args[7].contains("rm -rf /cleanup/*"));
     }
 
     #[test]

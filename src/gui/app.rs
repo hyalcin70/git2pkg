@@ -2,7 +2,7 @@
 //! und deutsch/englisch/türkisch/spanisch/französischer Internationalisierung.
 
 use crate::core::container::{
-    cached_repo_has_local_dependencies, cleanup_all_builds, cleanup_failed_build_artifacts,
+    cached_repo_has_local_dependencies, cleanup_all_builds_with, cleanup_failed_build_artifacts,
     container_engine_available, default_output_dir, detect_engine, run_build, BuildConfig,
     BuildEvent, BuildOutcome, BuildStrategy, ContainerEngine, TargetFormat,
 };
@@ -1150,7 +1150,7 @@ impl eframe::App for Git2PkgApp {
             if choice > 0 {
                 match choice {
                     1 => {
-                        cleanup_all_builds();
+                        cleanup_all_builds_with(self.engine.clone(), &self.distro.base_image);
                         self.last_build_failed = false;
                     }
                     2 => {
