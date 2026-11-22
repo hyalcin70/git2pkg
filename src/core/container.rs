@@ -9,9 +9,9 @@ use crate::core::resolver::{
     analyze_output, candidate_names, cmake_alternative_flags, cmake_option_flags_from_text,
     detect_build_fixes, detect_repo_script_distro_rejection, detect_source_group_error, family_key,
     has_eigen_version_mismatch, is_cmake_policy_error, is_compiled_build_system,
-    package_from_search, packages_from_file_database, probe_commands, search_command,
-    tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore, MissingDep,
-    SourceGroupError,
+    is_transient_network_error, package_from_search, packages_from_file_database, probe_commands,
+    search_command, tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore,
+    MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -1267,6 +1267,19 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
         last_output = result.text.clone();
         let deps_failed = deps_fallback_needed(&last_output, config.skip_deps);
+
+        // Ein transienter Netzwerkfehler (HTTP 5xx, Timeout) ist kein Grund,
+        // die Strategie zu wechseln. Die Abhängigkeitsquelle bleibt erhalten.
+        if deps_failed
+            && heal_round < allowed_rounds
+            && is_transient_network_error(&tail_lines(&last_output, 120))
+        {
+            heal_round += 1;
+            let _ = tx.send(BuildEvent::Log(
+                "[retry] transient network error - retrying dependency download".to_string(),
+            ));
+            continue 'attempt;
+        }
 
         // Repo-Skripte pruefen oft nur wenige Distributionen. Wenn sie diese
         // Distro ablehnen, generisch weiterbauen statt den Lauf zu beenden.

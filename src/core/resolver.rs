@@ -1150,6 +1150,31 @@ pub fn valid_package_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "-_+.".contains(c))
 }
 
+/// Erkennt transiente Netzwerkfehler (z. B. HTTP 5xx beim Dependency-Download).
+/// Solche Fehler rechtfertigen einen erneuten Versuch derselben Strategie.
+pub fn is_transient_network_error(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    let patterns = [
+        "http/2 500",
+        "http/2 502",
+        "http/2 503",
+        "http/2 504",
+        "http/1.1 500",
+        "http/1.1 502",
+        "http/1.1 503",
+        "http/1.1 504",
+        "could not resolve host",
+        "temporary failure in name resolution",
+        "connection timed out",
+        "operation timed out",
+        "connection reset",
+        "could not connect to server",
+        "failed to connect to",
+        "ssl connect error",
+    ];
+    patterns.iter().any(|pattern| lower.contains(pattern))
+}
+
 /// Erkennt, dass ein Repository-Buildskript die Linux-Distribution ablehnt.
 /// Der Runner soll dann auf das generische Build-System zurueckfallen.
 pub fn detect_repo_script_distro_rejection(output: &str) -> bool {
@@ -1738,6 +1763,22 @@ mod tests {
             package_from_search("freeglut\n", "glut", "pacman"),
             Some("freeglut".to_string())
         );
+    }
+
+    #[test]
+    fn transiente_netzwerkfehler_werden_erkannt() {
+        assert!(is_transient_network_error(
+            "curl: (22) The requested URL returned error: 502\n< HTTP/2 502"
+        ));
+        assert!(is_transient_network_error(
+            "Could not resolve host: example.invalid"
+        ));
+        assert!(is_transient_network_error(
+            "Connection timed out after 30000 ms"
+        ));
+        assert!(!is_transient_network_error(
+            "CMake Error at CMakeLists.txt:10 (message): foo"
+        ));
     }
 
     #[test]
