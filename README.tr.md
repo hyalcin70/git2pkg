@@ -110,7 +110,8 @@ Tüm tarifler mevcut checkout'u derler ve Rust 1.89 veya üstünü gerektirir.
 
 ```sh
 cd packaging
-makepkg -si
+makepkg -sc      # paketi derler ve src/ ile pkg/ dizinlerini siler
+# makepkg -sic   # aynısı, ardından kurulum
 ```
 
 ### Debian / Ubuntu

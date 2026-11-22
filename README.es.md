@@ -109,7 +109,8 @@ recetas compilan el checkout actual y requieren Rust 1.89 o superior.
 
 ```sh
 cd packaging
-makepkg -si
+makepkg -sc      # compila el paquete y elimina src/ y pkg/
+# makepkg -sic   # igual, pero instalándolo
 ```
 
 ### Debian / Ubuntu

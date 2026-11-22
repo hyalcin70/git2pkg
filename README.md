@@ -105,7 +105,8 @@ recipes build the current checkout and require Rust 1.89 or newer.
 
 ```sh
 cd packaging
-makepkg -si
+makepkg -sc      # build the package and remove src/ and pkg/
+# makepkg -sic   # same, then install it
 ```
 
 ### Debian / Ubuntu

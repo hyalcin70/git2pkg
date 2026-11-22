@@ -111,7 +111,8 @@ voraus.
 
 ```sh
 cd packaging
-makepkg -si
+makepkg -sc      # baut das Paket und entfernt src/ und pkg/
+# makepkg -sic   # wie oben, anschließend installieren
 ```
 
 ### Debian / Ubuntu

@@ -83,6 +83,10 @@ The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
 `src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
 
+For local Arch builds use `makepkg -sc`: `-c` removes the `src/` and `pkg/`
+work directories after a successful build, so only the finished package
+remains. `makepkg -sic` additionally installs it.
+
 Generated Arch packages (`.pkg.tar.zst`) are assembled directly with
 `bsdtar` from `.PKGINFO`/`.MTREE`, because `makepkg`'s `fakeroot` step is
 unreliable inside root containers. In-tree `PKGBUILD` files still use
