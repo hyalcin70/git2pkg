@@ -768,6 +768,33 @@ fn reset_cmake_caches(work: &Path) -> usize {
     removed
 }
 
+/// Entfernt nur die Configure-Stempel der ExternalProjects. Downloads und
+/// entpackte Quellen bleiben erhalten; der nächste Versuch konfiguriert die
+/// Abhängigkeiten aber neu und erkennt frisch installierte Systempakete.
+fn reset_dependency_configure_stamps(work: &Path) -> usize {
+    fn walk(dir: &Path, removed: &mut usize) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, removed);
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with("-configure"))
+                && fs::remove_file(&path).is_ok()
+            {
+                *removed += 1;
+            }
+        }
+    }
+    let mut removed = 0usize;
+    walk(&work.join("deps-build"), &mut removed);
+    removed
+}
+
 fn cleanup_successful_build(work: &Path, tx: &Sender<BuildEvent>) {
     match remove_build_dir_recursively(work) {
         Ok(()) => {
@@ -1164,6 +1191,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut cmake_flags: Vec<String> = Vec::new();
     let mut last_output = String::new();
     let mut forced_strategy: Option<BuildStrategy> = None;
+    // Einmal pro Lauf dürfen die Abhängigkeiten nachinstallierter Pakete neu
+    // konfiguriert werden, wenn CMake den alten Stand zwischengespeichert hat.
+    let mut deps_reconfigured = false;
 
     let mut strategy_attempt: u8 = 1;
     let mut visited_strategies: HashSet<&'static str> = HashSet::new();
@@ -1625,6 +1655,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 if retry_state_changed(&round_state, &after_state) && heal_round < allowed_rounds {
                     heal_round += 1;
                     let _ = reset_cmake_caches(&work);
+                    reset_dependency_configure_stamps(&work);
                     let _ = tx.send(BuildEvent::Log(
                         "[retry] installed new packages - retrying the dependency build"
                             .to_string(),
@@ -1664,6 +1695,22 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             cmake_flags: cmake_flags.clone(),
         };
         if !retry_state_changed(&round_state, &after_state) {
+            // Pakete sind installiert, aber CMake hat den alten Stand noch im
+            // Cache (z. B. wxWidgets ohne cairo-Include). Einmalig die
+            // Configure-Stempel der Abhängigkeiten verwerfen.
+            if deps_failed && !deps_reconfigured {
+                let removed = reset_dependency_configure_stamps(&work);
+                if removed > 0 {
+                    deps_reconfigured = true;
+                    heal_round += 1;
+                    let _ = reset_cmake_caches(&work);
+                    let _ = tx.send(BuildEvent::Log(format!(
+                        "[retry] reconfiguring {} dependency project(s) after package installation",
+                        removed
+                    )));
+                    continue;
+                }
+            }
             let Some(next) =
                 next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
             else {
@@ -3072,6 +3119,26 @@ mod tests {
             }
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn nur_configure_stempel_werden_entfernt() {
+        let root = std::env::temp_dir().join(format!(
+            "g2p-stamps-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let stamp = root.join("deps-build/dep_X-prefix/src/dep_X-stamp");
+        std::fs::create_dir_all(&stamp).unwrap();
+        std::fs::write(stamp.join("dep_X-configure"), "").unwrap();
+        std::fs::write(stamp.join("dep_X-download"), "").unwrap();
+        assert_eq!(reset_dependency_configure_stamps(&root), 1);
+        assert!(!stamp.join("dep_X-configure").exists());
+        assert!(stamp.join("dep_X-download").exists());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
