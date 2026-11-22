@@ -1304,7 +1304,7 @@ fn with_deps_prebuild(script: &str) -> String {
         );
         lines.insert(
             index + 2,
-            "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then cmake -S \"$sub\" -B /work/deps-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build /work/deps-build && cmake --install /work/deps-build || { echo '[deps] Bau fehlgeschlagen - Resolver uebernimmt'; exit 1; }; fi; done"
+            "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] Nachinstallation abgeschlossen - konfiguriere lokale Abhaengigkeiten neu'; rm -rf /work/deps-build; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build /work/deps-build && cmake --install /work/deps-build || { echo '[deps] Bau fehlgeschlagen - Resolver uebernimmt'; exit 1; }; fi; done"
                 .to_string(),
         );
     }
@@ -2744,6 +2744,8 @@ mod tests {
         let patched = with_deps_prebuild(script);
         assert!(patched.contains("export CMAKE_PREFIX_PATH=/work/deps-install"));
         assert!(patched.contains("-DCMAKE_INSTALL_PREFIX=/work/deps-install"));
+        assert!(patched.contains("rm -rf /work/deps-build"));
+        assert!(patched.contains("konfiguriere lokale Abhaengigkeiten neu"));
         assert!(patched.contains("Resolver uebernimmt"));
         assert!(patched.lines().count() == script.lines().count() + 2);
     }
