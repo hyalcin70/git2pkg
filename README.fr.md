@@ -71,6 +71,7 @@ simple interface graphique.
   compilation et voir la commande d'installation exacte avant toute exécution.
 - Mode headless optionnel : `git2pkg-ai --cli <url> [--format=package|binary]`.
 - Réinitialisez les correspondances apprises avec `git2pkg-ai --reset-learning` (le cache du dépôt Git est conservé).
+- Affichez les correspondances de dépendances apprises avec `git2pkg-ai --explain-learning`.
 
 ## Prérequis
 

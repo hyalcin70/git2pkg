@@ -37,8 +37,21 @@ profiles and build recipes are persisted under
 The learning store is safe against concurrent writers (GUI + CLI): every save
 merges the on-disk state under a short-lived lock file and replaces the file
 atomically. All sections are bounded by deterministic LRU eviction
-(`MAX_LEARNED_PACKAGES`, `MAX_NEGATIVE_ENTRIES`, `MAX_BUILD_FIXES`,
-`MAX_REPO_PROFILES`, `MAX_BUILD_RECIPES` in `resolver.rs`).
+(`MAX_LEARNED_PACKAGES`, `MAX_DEP_ENTRIES`, `MAX_NEGATIVE_ENTRIES`,
+`MAX_BUILD_FIXES`, `MAX_REPO_PROFILES`, `MAX_BUILD_RECIPES` in `resolver.rs`).
+
+Dependency learnings are stored per kind and distro family
+(`family|kind|name`) with `package`, `verified`, `evidence`, `score` and
+`last_seen`. A package is learned only after it really provides the missing
+artifact (header, pkg-config module, CMake config, tool), verified inside the
+container. Mappings that fail verification are scored down and blocked after
+two strikes; defaults and legacy flat mappings remain as fallbacks.
+`git2pkg-ai --explain-learning` prints the learned table.
+
+Failures are classified (dependency, version/ABI, bundled dependency,
+source/compiler, packaging). If no dependency pattern remains and the failure
+is a source or packaging error, the build stops with a clear diagnosis instead
+of trying more packages.
 
 **Log language policy:** static UI text is localized in five languages
 (`src/gui/i18n.rs`), but live build logs are English technical diagnostics
@@ -166,6 +179,7 @@ classes instead.
 - `.github/workflows/ci.yml` — QA workflow (`fmt`, `clippy`, `test`, release build)
 - `.github/ISSUE_TEMPLATE/build_failure.md`
 - `.gitlab-ci.yml`
+- `scripts/test-corpus.sh` — manual smoke corpus across build systems
 - `install.sh`, `uninstall.sh`
 
 ---

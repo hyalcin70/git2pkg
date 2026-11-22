@@ -68,6 +68,7 @@ arayüzle herkes kullanabiliyor.
   çalıştırılmadan önce tam kurulum komutunu gör.
 - İsteğe bağlı başsız mod: `git2pkg-ai --cli <url> [--format=package|binary]`.
 - Öğrenilen eşleştirmeleri `git2pkg-ai --reset-learning` ile sıfırla (Git deposu önbelleği korunur).
+- Öğrenilen bağımlılık eşleştirmelerini `git2pkg-ai --explain-learning` ile görüntüle.
 
 ## Gereksinimler
 

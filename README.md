@@ -64,6 +64,7 @@ anyone through a simple GUI.
   exact install command before anything is executed.
 - Optional headless mode: `git2pkg-ai --cli <url> [--format=package|binary]`.
 - Reset learned mappings with `git2pkg-ai --reset-learning` (the Git repository cache is kept).
+- Inspect learned dependency mappings with `git2pkg-ai --explain-learning`.
 
 ## Requirements
 

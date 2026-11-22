@@ -66,6 +66,7 @@ o un único binario, utilizable por cualquiera desde una interfaz gráfica senci
   compilación y ver el comando exacto de instalación antes de ejecutarlo.
 - Modo headless opcional: `git2pkg-ai --cli <url> [--format=package|binary]`.
 - Restablece las asignaciones aprendidas con `git2pkg-ai --reset-learning` (la caché del repositorio Git se conserva).
+- Consulta las asignaciones de dependencias aprendidas con `git2pkg-ai --explain-learning`.
 
 ## Requisitos
 

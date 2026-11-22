@@ -844,14 +844,15 @@ impl Texts {
             "Échec de git clone – vérifiez l'URL.",
         )
     }
-    pub fn err_no_pattern(&self) -> &'static str {
-        self.get(
-            "Build failed; no known error pattern found. See the log.",
-            "Build fehlgeschlagen; kein bekanntes Fehlermuster gefunden. Siehe Log.",
-            "Derleme başarısız; bilinen bir hata deseni bulunamadı. Günlüğe bakın.",
-            "Falló la compilación; no se encontró un patrón de error conocido. Vea el registro.",
-            "Échec de la compilation ; aucun motif d'erreur connu. Consultez le journal.",
-        )
+    pub fn err_failure_class(&self, class: &str) -> String {
+        let head = self.get(
+            "Build failed. Diagnosis: ",
+            "Build fehlgeschlagen. Diagnose: ",
+            "Derleme başarısız. Tanı: ",
+            "Compilación fallida. Diagnóstico: ",
+            "Compilation échouée. Diagnostic : ",
+        );
+        format!("{}{}", head, class)
     }
     pub fn err_no_package(&self, label: &str) -> String {
         format!(

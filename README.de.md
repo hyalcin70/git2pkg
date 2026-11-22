@@ -67,6 +67,7 @@ einzelne Binary – per GUI für jeden nutzbar.
   exakten Installationsbefehl anzeigen, bevor etwas ausgeführt wird.
 - Optionaler Headless-Modus: `git2pkg-ai --cli <url> [--format=package|binary]`.
 - Gelernte Zuordnungen mit `git2pkg-ai --reset-learning` zurücksetzen (der Git-Repository-Cache bleibt erhalten).
+- Gelernte Abhängigkeits-Zuordnungen mit `git2pkg-ai --explain-learning` anzeigen.
 
 ## Voraussetzungen
 

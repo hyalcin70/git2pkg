@@ -18,6 +18,20 @@ pub fn reset_learning() {
     }
 }
 
+/// Zeigt die gelernten, verifizierten Abhängigkeits-Zuordnungen.
+pub fn explain_learning() {
+    let store = MappingStore::load();
+    let entries = store.explained_dependencies();
+    if entries.is_empty() {
+        println!("No learned dependency mappings yet.");
+        return;
+    }
+    println!("Learned dependency mappings ({}):", entries.len());
+    for line in entries {
+        println!("  {}", line);
+    }
+}
+
 pub fn run_cli(url: &str) {
     let _ = MappingStore::load();
     let language = Language::detect();

@@ -87,6 +87,7 @@ fn print_usage() {
     println!("  --target=auto|arch|debian|fedora|opensuse");
     println!("                                  Target distribution (default: auto)");
     println!("  --binary                        Alias for --format=binary");
+    println!("  --explain-learning              Show learned dependency mappings and exit");
     println!("  --reset-learning                Delete learned mappings and exit");
     println!("  -V, --version                   Show the version");
     println!("  -h, --help                      Show this help");
@@ -108,6 +109,10 @@ fn main() -> eframe::Result<()> {
         .any(|arg| arg == "-h" || arg == "--help")
     {
         print_usage();
+        return Ok(());
+    }
+    if args.iter().skip(1).any(|arg| arg == "--explain-learning") {
+        cli::explain_learning();
         return Ok(());
     }
     if args.iter().skip(1).any(|arg| arg == "--reset-learning") {

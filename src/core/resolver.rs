@@ -20,6 +20,9 @@ const MAX_NEGATIVE_ENTRIES: usize = 512;
 const MAX_BUILD_FIXES: usize = 128;
 const MAX_REPO_PROFILES: usize = 512;
 const MAX_BUILD_RECIPES: usize = 512;
+const MAX_DEP_ENTRIES: usize = 2000;
+const MAX_DEP_SCORE: i32 = 5;
+const MIN_DEP_SCORE: i32 = -1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MissingDep {
@@ -222,6 +225,88 @@ fn package_name_matches(name: &str, term: &str) -> bool {
     term.ends_with(name) && name.len() >= 3
 }
 
+/// Stabile Art-Bezeichnung einer Abhängigkeit für den Lernschlüssel.
+pub fn dependency_kind(dep: &MissingDep) -> &'static str {
+    match dep {
+        MissingDep::Header(_) => "header",
+        MissingDep::PkgConfig(_) => "pkg_config",
+        MissingDep::CMakeModule(_) => "cmake_module",
+        MissingDep::Tool(_) => "tool",
+    }
+}
+
+fn dependency_key(family: &str, dep: &MissingDep) -> String {
+    format!(
+        "{}|{}|{}",
+        family,
+        dependency_kind(dep),
+        dep.raw_name().to_ascii_lowercase()
+    )
+}
+
+fn legacy_dependency_key(family: &str, dep: &MissingDep) -> String {
+    format!("{}|unknown|{}", family, dep.raw_name().to_ascii_lowercase())
+}
+
+/// Grobe Klassifikation eines fehlgeschlagenen Builds. Sie entscheidet, ob
+/// weitere Paketinstallationen überhaupt helfen können.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureKind {
+    Dependency,
+    VersionMismatch,
+    Vendored,
+    SourceCode,
+    Packaging,
+    Unknown,
+}
+
+impl FailureKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            FailureKind::Dependency => "dependency error",
+            FailureKind::VersionMismatch => "version/ABI mismatch",
+            FailureKind::Vendored => "bundled dependency error",
+            FailureKind::SourceCode => "source-code/compiler error",
+            FailureKind::Packaging => "packaging error",
+            FailureKind::Unknown => "unknown error",
+        }
+    }
+}
+
+pub fn classify_failure(output: &str) -> FailureKind {
+    if !analyze_output(output).is_empty() {
+        return FailureKind::Dependency;
+    }
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("bad exit status from")
+        || lower.contains("dpkg-deb: error")
+        || lower.contains("rpmbuild")
+        || lower.contains("makepkg")
+    {
+        return FailureKind::Packaging;
+    }
+    if lower.contains("at least version")
+        || lower.contains("but at least")
+        || lower.contains("version mismatch")
+    {
+        return FailureKind::VersionMismatch;
+    }
+    if lower.contains("using bundled") || lower.contains("no_default_path") {
+        return FailureKind::Vendored;
+    }
+    if lower.contains("undefined reference to")
+        || lower.contains("collect2: error")
+        || lower.contains("ld returned")
+        || lower.contains("compilation terminated")
+        || lower.contains("error: expected")
+        || lower.contains("error: no matching")
+        || lower.contains("error: invalid")
+    {
+        return FailureKind::SourceCode;
+    }
+    FailureKind::Unknown
+}
+
 /// Kurzschlüssel für die Wissensdatenbank, z. B. `arch` oder `debian`.
 pub fn family_key(family: &DistroFamily) -> &'static str {
     match family {
@@ -386,10 +471,27 @@ pub struct BuildRecipe {
 }
 
 /// Lokale, dauerhafte Paket-Zuordnungen ("Live-Lernen" ohne KI).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DependencyLearning {
+    #[serde(default)]
+    pub package: String,
+    #[serde(default)]
+    pub verified: bool,
+    #[serde(default)]
+    pub evidence: String,
+    #[serde(default)]
+    pub score: i32,
+    #[serde(default)]
+    pub last_seen: u64,
+}
+
+/// Lokale, dauerhafte Paket-Zuordnungen ("Live-Lernen" ohne KI).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct LearnedFile {
     #[serde(default)]
     packages: HashMap<String, String>,
+    #[serde(default)]
+    deps: HashMap<String, DependencyLearning>,
     #[serde(default)]
     negative_cache: Vec<String>,
     #[serde(default)]
@@ -418,6 +520,8 @@ fn is_obsolete_incomplete_strategy(strategy: &str) -> bool {
 pub struct MappingStore {
     path: PathBuf,
     learned: HashMap<String, String>,
+    /// Verifizierte Zuordnungen je Abhängigkeitsart (header, tool, …).
+    deps: HashMap<String, DependencyLearning>,
     negative_cache: Vec<String>,
     build_fixes: HashMap<String, String>,
     repo_profiles: HashMap<String, Vec<String>>,
@@ -426,6 +530,9 @@ pub struct MappingStore {
     /// Profil-Keys, die dieser Prozess bewusst geleert hat. Das Merge darf sie
     /// nicht aus dem älteren Dateistand wiederherstellen.
     cleared_profiles: HashSet<String>,
+    /// Ebenso für abgewertete Abhängigkeits- und Alt-Zuordnungen.
+    cleared_deps: HashSet<String>,
+    cleared_learned: HashSet<String>,
     defaults: HashMap<String, String>,
 }
 
@@ -457,7 +564,7 @@ impl MappingStore {
         let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
 
         // Neue datei mit Sektionen; alte flache Dateien werden übernommen.
-        let (learned, negative_cache, build_fixes, repo_profiles, build_recipes, last_used) =
+        let (learned, deps, negative_cache, build_fixes, repo_profiles, build_recipes, last_used) =
             if value.get("packages").is_some()
                 || value.get("build_fixes").is_some()
                 || value.get("negative_cache").is_some()
@@ -495,16 +602,23 @@ impl MappingStore {
                     .get("build_recipes")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
                     .unwrap_or_default();
+                let deps = value
+                    .get("deps")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
                 let last_used = value
                     .get("last_used")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
                     .unwrap_or_default();
-                (packages, negative, fixes, profiles, recipes, last_used)
+                (
+                    packages, deps, negative, fixes, profiles, recipes, last_used,
+                )
             } else {
                 let flat =
                     serde_json::from_value::<HashMap<String, String>>(value).unwrap_or_default();
                 (
                     flat,
+                    HashMap::new(),
                     Vec::new(),
                     HashMap::new(),
                     HashMap::new(),
@@ -516,14 +630,30 @@ impl MappingStore {
         let mut store = Self {
             path,
             learned,
+            deps,
             negative_cache,
             build_fixes,
             repo_profiles,
             build_recipes,
             last_used,
             cleared_profiles: HashSet::new(),
+            cleared_deps: HashSet::new(),
+            cleared_learned: HashSet::new(),
             defaults,
         };
+        // Alte flache Zuordnungen als unverifizierte Einträge übernehmen.
+        for (key, package) in &store.learned {
+            if let Some((family, name)) = key.split_once(':') {
+                let dep_key = format!("{}|unknown|{}", family, name.to_ascii_lowercase());
+                store.deps.entry(dep_key).or_insert(DependencyLearning {
+                    package: package.clone(),
+                    verified: false,
+                    evidence: "legacy".to_string(),
+                    score: 0,
+                    last_seen: 0,
+                });
+            }
+        }
         store.save();
         store
     }
@@ -540,6 +670,7 @@ impl MappingStore {
         self.prune();
         let file = LearnedFile {
             packages: self.learned.clone(),
+            deps: self.deps.clone(),
             negative_cache: self.negative_cache.clone(),
             build_fixes: self.build_fixes.clone(),
             repo_profiles: self.repo_profiles.clone(),
@@ -564,6 +695,9 @@ impl MappingStore {
             return;
         };
         for (key, value) in disk.packages {
+            if self.cleared_learned.contains(&key) {
+                continue;
+            }
             self.learned.entry(key).or_insert(value);
         }
         for package in disk.negative_cache {
@@ -593,6 +727,12 @@ impl MappingStore {
         for (key, stamp) in disk.last_used {
             let entry = self.last_used.entry(key).or_insert(0);
             *entry = (*entry).max(stamp);
+        }
+        for (key, entry) in disk.deps {
+            if self.cleared_deps.contains(&key) || self.deps.contains_key(&key) {
+                continue;
+            }
+            self.deps.insert(key, entry);
         }
     }
 
@@ -636,6 +776,23 @@ impl MappingStore {
         for key in stale {
             self.last_used.remove(&key);
         }
+        self.prune_deps();
+    }
+
+    fn prune_deps(&mut self) {
+        if self.deps.len() <= MAX_DEP_ENTRIES {
+            return;
+        }
+        let mut keys: Vec<(String, u64)> = self
+            .deps
+            .iter()
+            .map(|(key, entry)| (key.clone(), entry.last_seen))
+            .collect();
+        keys.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        let remove = self.deps.len() - MAX_DEP_ENTRIES;
+        for (key, _) in keys.into_iter().take(remove) {
+            self.deps.remove(&key);
+        }
     }
 
     fn tracks_key(&self, key: &str) -> bool {
@@ -662,6 +819,7 @@ impl MappingStore {
     }
 
     /// Erst die gelernten Einträge prüfen, dann die mitgelieferte Basis.
+    #[allow(dead_code)]
     pub fn get(&mut self, family: &str, name: &str) -> Option<String> {
         let key = format!("{}:{}", family, name);
         if let Some(value) = self.learned.get(&key).cloned() {
@@ -671,6 +829,7 @@ impl MappingStore {
         self.defaults.get(&key).cloned()
     }
 
+    #[allow(dead_code)]
     pub fn learn(&mut self, family: &str, name: &str, package: &str) {
         let key = format!("{}:{}", family, name);
         if self.learned.get(&key).map(String::as_str) == Some(package) {
@@ -678,9 +837,141 @@ impl MappingStore {
             return;
         }
         self.learned.insert(key.clone(), package.to_string());
+        self.cleared_learned.remove(&key);
         self.negative_cache.retain(|item| item != package);
         self.touch(format!("packages:{}", key));
         self.save();
+    }
+
+    /// Sucht die beste bekannte Zuordnung für eine Abhängigkeit.
+    pub fn lookup_dependency(
+        &mut self,
+        family: &str,
+        dep: &MissingDep,
+    ) -> Option<DependencyLearning> {
+        let key = dependency_key(family, dep);
+        if let Some(entry) = self.deps.get_mut(&key) {
+            if entry.score <= MIN_DEP_SCORE {
+                return None;
+            }
+            entry.last_seen = now_secs();
+            return Some(entry.clone());
+        }
+        let legacy = legacy_dependency_key(family, dep);
+        if let Some(entry) = self.deps.get(&legacy) {
+            return Some(entry.clone());
+        }
+        // Mitgelieferte Wissensbasis.
+        for name in [
+            dep.raw_name().to_string(),
+            dep.raw_name().to_ascii_lowercase(),
+            dep.search_term(),
+        ] {
+            let defaults_key = format!("{}:{}", family, name);
+            if let Some(package) = self.defaults.get(&defaults_key) {
+                return Some(DependencyLearning {
+                    package: package.clone(),
+                    verified: true,
+                    evidence: "default".to_string(),
+                    score: 1,
+                    last_seen: now_secs(),
+                });
+            }
+        }
+        // Alte flache Zuordnung.
+        let old_key = format!("{}:{}", family, dep.raw_name());
+        self.learned
+            .get(&old_key)
+            .map(|package| DependencyLearning {
+                package: package.clone(),
+                verified: false,
+                evidence: "legacy".to_string(),
+                score: 0,
+                last_seen: now_secs(),
+            })
+    }
+
+    /// Lernt eine Zuordnung erst nach erfolgreicher Verifikation.
+    pub fn learn_dependency(
+        &mut self,
+        family: &str,
+        dep: &MissingDep,
+        package: &str,
+        verified: bool,
+        evidence: &str,
+    ) {
+        let key = dependency_key(family, dep);
+        let now = now_secs();
+        match self.deps.get_mut(&key) {
+            Some(entry) if entry.package == package => {
+                entry.score = (entry.score + 1).min(MAX_DEP_SCORE);
+                entry.verified |= verified;
+                if verified && !evidence.is_empty() {
+                    entry.evidence = evidence.to_string();
+                }
+                entry.last_seen = now;
+            }
+            _ => {
+                self.deps.insert(
+                    key,
+                    DependencyLearning {
+                        package: package.to_string(),
+                        verified,
+                        evidence: evidence.to_string(),
+                        score: 1,
+                        last_seen: now,
+                    },
+                );
+            }
+        }
+        self.learned.insert(
+            format!("{}:{}", family, dep.raw_name()),
+            package.to_string(),
+        );
+        self.negative_cache.retain(|item| item != package);
+        self.save();
+    }
+
+    /// Wertet eine Zuordnung ab, die die fehlende Abhängigkeit nicht liefert.
+    pub fn penalize_dependency(&mut self, family: &str, dep: &MissingDep, package: &str) {
+        let key = dependency_key(family, dep);
+        {
+            let entry = self
+                .deps
+                .entry(key.clone())
+                .or_insert_with(|| DependencyLearning {
+                    package: package.to_string(),
+                    ..DependencyLearning::default()
+                });
+            if entry.package == package {
+                entry.score = (entry.score - 1).max(MIN_DEP_SCORE);
+                entry.verified = false;
+                entry.last_seen = now_secs();
+            }
+        }
+        self.cleared_deps.insert(key);
+        let legacy = format!("{}:{}", family, dep.raw_name());
+        if self.learned.get(&legacy).map(String::as_str) == Some(package) {
+            self.learned.remove(&legacy);
+            self.cleared_learned.insert(legacy);
+        }
+        self.save();
+    }
+
+    /// Lesbare Liste der gelernten Abhängigkeits-Zuordnungen.
+    pub fn explained_dependencies(&self) -> Vec<String> {
+        let mut lines: Vec<String> = self
+            .deps
+            .iter()
+            .map(|(key, entry)| {
+                format!(
+                    "{} -> {} | verified={} score={} evidence={}",
+                    key, entry.package, entry.verified, entry.score, entry.evidence
+                )
+            })
+            .collect();
+        lines.sort();
+        lines
     }
 
     /// Merkt sich Paketnamen, die auf keiner Distro installierbar waren.
@@ -822,7 +1113,8 @@ impl MappingStore {
     }
 
     pub fn learned_rule_count(&self) -> usize {
-        self.learned.len()
+        self.deps.len()
+            + self.learned.len()
             + self.negative_cache.len()
             + self.build_fixes.len()
             + self.repo_profile_count()
@@ -2392,6 +2684,71 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.join("learned_mappings.json")
+    }
+
+    #[test]
+    fn klassifiziert_fehler_richtig() {
+        assert_eq!(
+            classify_failure("CMake Error: Could NOT find ZLIB"),
+            FailureKind::Dependency
+        );
+        assert_eq!(
+            classify_failure("dpkg-deb: error: parsing file '/x' near line 6"),
+            FailureKind::Packaging
+        );
+        assert_eq!(
+            classify_failure("Eigen3 version 5 found, but at least version 3.3 is required"),
+            FailureKind::VersionMismatch
+        );
+        assert_eq!(
+            classify_failure("undefined reference to `example_symbol'"),
+            FailureKind::SourceCode
+        );
+        assert_eq!(classify_failure("something odd"), FailureKind::Unknown);
+    }
+
+    #[test]
+    fn abhaengigkeiten_lernen_mit_evidenz_und_score() {
+        let path = temp_mapping_path("deps");
+        let mut store = MappingStore::from_path(path.clone());
+        let dep = MissingDep::CMakeModule("ExampleModule".into());
+
+        assert!(store.lookup_dependency("arch", &dep).is_none());
+        store.learn_dependency(
+            "arch",
+            &dep,
+            "example-package",
+            true,
+            "ExampleModuleConfig.cmake",
+        );
+
+        let found = store.lookup_dependency("arch", &dep).unwrap();
+        assert_eq!(found.package, "example-package");
+        assert!(found.verified);
+        assert_eq!(found.score, 1);
+        assert_eq!(found.evidence, "ExampleModuleConfig.cmake");
+        assert_eq!(store.explained_dependencies().len(), 1);
+
+        // Derselbe Paketname stärkt die Zuordnung.
+        store.learn_dependency(
+            "arch",
+            &dep,
+            "example-package",
+            true,
+            "ExampleModuleConfig.cmake",
+        );
+        assert_eq!(store.lookup_dependency("arch", &dep).unwrap().score, 2);
+
+        // Drei Fehlschläge entfernen die Zuordnung wieder.
+        for _ in 0..3 {
+            store.penalize_dependency("arch", &dep, "example-package");
+        }
+        assert!(store.lookup_dependency("arch", &dep).is_none());
+
+        // Andere Art = eigener Schlüssel.
+        let tool = MissingDep::Tool("example-tool".into());
+        assert!(store.lookup_dependency("arch", &tool).is_none());
+        let _ = fs::remove_file(path);
     }
 
     #[test]

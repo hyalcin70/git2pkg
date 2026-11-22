@@ -6,12 +6,12 @@
 use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem, ProjectFingerprint};
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::{
-    analyze_output, candidate_names, cmake_alternative_flags, cmake_option_flags_from_text,
-    detect_build_fixes, detect_repo_script_distro_rejection, detect_source_group_error, family_key,
-    has_eigen_version_mismatch, is_cmake_policy_error, is_compiled_build_system,
-    is_transient_network_error, package_from_search, packages_from_file_database, probe_commands,
-    search_command, tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore,
-    MissingDep, SourceGroupError,
+    analyze_output, candidate_names, classify_failure, cmake_alternative_flags,
+    cmake_option_flags_from_text, detect_build_fixes, detect_repo_script_distro_rejection,
+    detect_source_group_error, family_key, has_eigen_version_mismatch, is_cmake_policy_error,
+    is_compiled_build_system, is_transient_network_error, package_from_search,
+    packages_from_file_database, probe_commands, search_command, tool_file_database_commands,
+    valid_package_name, BuildRecipe, MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -964,6 +964,250 @@ pub fn run_build(mut config: BuildConfig, tx: Sender<BuildEvent>) {
     }
 }
 
+/// Installiert einen Kandidaten und prüft anschließend, ob er die fehlende
+/// Abhängigkeit wirklich bereitstellt. Nur dann gilt er als Lösung.
+#[allow(clippy::too_many_arguments)]
+fn try_candidate(
+    config: &BuildConfig,
+    container: &BuildContainer,
+    dep: &MissingDep,
+    family: &str,
+    candidate: &str,
+    mappings: &mut MappingStore,
+    failed_candidates: &mut HashSet<String>,
+    db_synced: &mut bool,
+    tx: &Sender<BuildEvent>,
+    texts: &Texts,
+) -> Option<(String, String)> {
+    let package = sanitize_package(candidate);
+    if package.is_empty() || failed_candidates.contains(&package) || mappings.is_negative(&package)
+    {
+        return None;
+    }
+    step(tx, texts.step_install(&package));
+    if !try_install(config, container, &package, tx, db_synced) {
+        failed_candidates.insert(package.clone());
+        mappings.learn_negative(&package);
+        return None;
+    }
+    if let Some(evidence) = verify_dependency(container, dep, tx) {
+        return Some((package, evidence));
+    }
+    let _ = tx.send(BuildEvent::Log(format!(
+        "[learn] package '{}' installed but does not provide {}",
+        package,
+        dep.label()
+    )));
+    mappings.penalize_dependency(family, dep, &package);
+    failed_candidates.insert(package);
+    None
+}
+
+/// Prüft im Container, ob eine Abhängigkeit nach der Installation vorhanden ist.
+fn verify_dependency(
+    container: &BuildContainer,
+    dep: &MissingDep,
+    tx: &Sender<BuildEvent>,
+) -> Option<String> {
+    let command = match dep {
+        MissingDep::Header(header) => {
+            let base = Path::new(header).file_name()?.to_str()?;
+            if base.is_empty()
+                || !base
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c))
+            {
+                return None;
+            }
+            format!(
+                "find /usr/include /usr/local/include -maxdepth 3 -name {} -print -quit 2>/dev/null",
+                shell_quote(base)
+            )
+        }
+        MissingDep::PkgConfig(name) => {
+            if !valid_package_name(name) {
+                return None;
+            }
+            format!(
+                "pkg-config --exists {} && pkg-config --modversion {}",
+                shell_quote(name),
+                shell_quote(name)
+            )
+        }
+        MissingDep::CMakeModule(module) => {
+            let safe: String = module
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || "_+-".contains(*c))
+                .collect();
+            if safe.is_empty() {
+                return None;
+            }
+            let lower = safe.to_ascii_lowercase();
+            format!(
+                "find /usr /usr/local -maxdepth 6 \\( -name '{}Config.cmake' -o -name '{}-config.cmake' -o -name 'Find{}.cmake' \\) -print -quit 2>/dev/null",
+                safe, lower, safe
+            )
+        }
+        MissingDep::Tool(tool) => {
+            if !valid_package_name(tool) {
+                return None;
+            }
+            format!("command -v {} 2>/dev/null", shell_quote(tool))
+        }
+    };
+    let output = container.exec(&command, tx).ok()?;
+    if !output.success {
+        return None;
+    }
+    let evidence = output
+        .text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string);
+    Some(evidence.unwrap_or(command))
+}
+
+/// Löst eine fehlende Abhängigkeit auf: gelernte Zuordnung, Datei-Datenbank,
+/// Namensvarianten, Tool-Datenbank und zuletzt eine generische Suche.
+#[allow(clippy::too_many_arguments)]
+fn resolve_dependency(
+    config: &BuildConfig,
+    container: &BuildContainer,
+    dep: &MissingDep,
+    family: &str,
+    manager: &str,
+    mappings: &mut MappingStore,
+    failed_candidates: &mut HashSet<String>,
+    db_synced: &mut bool,
+    tx: &Sender<BuildEvent>,
+) -> Option<(String, String)> {
+    let texts = Texts::new(config.language);
+    let term = dep.search_term();
+
+    // 1. Gelernte, verifizierte Zuordnung.
+    if let Some(learning) = mappings.lookup_dependency(family, dep) {
+        if let Some(result) = try_candidate(
+            config,
+            container,
+            dep,
+            family,
+            &learning.package,
+            mappings,
+            failed_candidates,
+            db_synced,
+            tx,
+            &texts,
+        ) {
+            return Some(result);
+        }
+    }
+
+    // 2. Datei-Datenbank: liefert das Paket, das die Datei/ das Modul enthält.
+    for command in probe_commands(manager, dep) {
+        if ensure_package_database(config, container, tx, db_synced).is_err() {
+            continue;
+        }
+        let Ok(found) = container.exec(&command, tx) else {
+            continue;
+        };
+        let mut probe_packages: Vec<String> = Vec::new();
+        if manager == "pacman" {
+            probe_packages.extend(packages_from_file_database(&found.text, &term));
+        }
+        probe_packages.extend(
+            found
+                .text
+                .lines()
+                .filter_map(|line| package_from_search(line, &term, manager)),
+        );
+        for candidate in probe_packages {
+            if let Some(result) = try_candidate(
+                config,
+                container,
+                dep,
+                family,
+                &candidate,
+                mappings,
+                failed_candidates,
+                db_synced,
+                tx,
+                &texts,
+            ) {
+                return Some(result);
+            }
+        }
+    }
+
+    // 3. Namensvarianten (exakt, lib…, …-dev, …-devel).
+    for candidate in candidate_names(dep, manager) {
+        if let Some(result) = try_candidate(
+            config,
+            container,
+            dep,
+            family,
+            &candidate,
+            mappings,
+            failed_candidates,
+            db_synced,
+            tx,
+            &texts,
+        ) {
+            return Some(result);
+        }
+    }
+
+    // 4. Tool-Dateidatenbank (Binary heißt anders als das Paket).
+    if let MissingDep::Tool(tool) = dep {
+        for command in tool_file_database_commands(manager, tool) {
+            if ensure_package_database(config, container, tx, db_synced).is_err() {
+                continue;
+            }
+            let Ok(found) = container.exec(&command, tx) else {
+                continue;
+            };
+            for package in packages_from_file_database(&found.text, tool) {
+                if let Some(result) = try_candidate(
+                    config,
+                    container,
+                    dep,
+                    family,
+                    &package,
+                    mappings,
+                    failed_candidates,
+                    db_synced,
+                    tx,
+                    &texts,
+                ) {
+                    return Some(result);
+                }
+            }
+        }
+    }
+
+    // 5. Generische Suche.
+    let search = search_command(manager, dep);
+    if !search.is_empty() && ensure_package_database(config, container, tx, db_synced).is_ok() {
+        if let Ok(found) = container.exec(&search, tx) {
+            if let Some(candidate) = package_from_search(&found.text, &term, manager) {
+                return try_candidate(
+                    config,
+                    container,
+                    dep,
+                    family,
+                    &candidate,
+                    mappings,
+                    failed_candidates,
+                    db_synced,
+                    tx,
+                    &texts,
+                );
+            }
+        }
+    }
+    None
+}
+
 /// Findet den Include-Pfad eines fehlenden Headers in den Systemverzeichnissen.
 fn header_include_dirs(
     container: &BuildContainer,
@@ -1558,7 +1802,12 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 continue 'attempt;
             }
             mark_failed_build(&work);
-            return Err(texts.err_no_pattern().to_string());
+            let kind = classify_failure(&last_output);
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[failure] {} - installing packages cannot help",
+                kind.label()
+            )));
+            return Err(texts.err_failure_class(kind.label()));
         }
 
         let mut unresolved: Option<MissingDep> = None;
@@ -1588,148 +1837,43 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 }
             }
             step(tx, texts.step_search(&dep.label()));
-            let term = dep.search_term();
-            let raw_name = dep.raw_name().to_string();
             let target = config.target_distro.info(&config.distro);
             let family = family_key(&target.family);
             let manager = &target.package_manager;
 
-            // Gelernte Zuordnung zuerst, dann die Kaskade aus Stufe 1.
-            let mut candidates: Vec<String> = Vec::new();
-            if let Some(learned) = mappings.get(family, &raw_name) {
-                candidates.push(learned);
-            }
-            candidates.extend(candidate_names(dep, manager));
-
-            let mut installed: Option<String> = None;
-            for candidate in &candidates {
-                let package = sanitize_package(candidate);
-                if package.is_empty()
-                    || failed_candidates.contains(&package)
-                    || mappings.is_negative(&package)
-                {
-                    continue;
-                }
-                step(tx, texts.step_install(&package));
-                if try_install(config, &container, &package, tx, &mut db_synced) {
-                    installed = Some(package);
-                    break;
-                }
-                failed_candidates.insert(package.clone());
-                mappings.learn_negative(&package);
-            }
-
-            // Stufe 2/3: CMake-Config, .pc-Datei oder Header in der Paketdatenbank suchen.
-            if installed.is_none() {
-                for command in probe_commands(manager, dep) {
-                    if ensure_package_database(config, &container, tx, &mut db_synced).is_err() {
-                        continue;
-                    }
-                    let Ok(found) = container.exec(&command, tx) else {
-                        continue;
-                    };
-                    // pacman liefert `repo/pkg` bzw. `is owned by repo/pkg`;
-                    // der Dateidatenbank-Parser versteht beide Formen. Für die
-                    // übrigen Manager bleibt der Suchparser zuständig.
-                    let mut probe_packages: Vec<String> = Vec::new();
-                    if manager == "pacman" {
-                        probe_packages.extend(packages_from_file_database(&found.text, &term));
-                    }
-                    probe_packages.extend(
-                        found
-                            .text
-                            .lines()
-                            .filter_map(|line| package_from_search(line, &term, manager)),
-                    );
-                    for candidate in probe_packages {
-                        let package = sanitize_package(&candidate);
-                        if package.is_empty() || failed_candidates.contains(&package) {
-                            continue;
-                        }
-                        step(tx, texts.step_install(&package));
-                        if try_install(config, &container, &package, tx, &mut db_synced) {
-                            installed = Some(package);
-                            break;
-                        }
-                        failed_candidates.insert(package);
-                    }
-                    if installed.is_some() {
-                        break;
-                    }
-                }
-            }
-
-            // Dateidatenbank des Paketmanagers: liefert das Paket zu einem Binary,
-            // dessen Name nicht dem Paketnamen entspricht.
-            if installed.is_none() && matches!(dep, MissingDep::Tool(_)) {
-                let tool = dep.raw_name();
-                for command in tool_file_database_commands(manager, tool) {
-                    if ensure_package_database(config, &container, tx, &mut db_synced).is_err() {
-                        continue;
-                    }
-                    let Ok(found) = container.exec(&command, tx) else {
-                        continue;
-                    };
-                    for package in packages_from_file_database(&found.text, tool) {
-                        if failed_candidates.contains(&package) {
-                            continue;
-                        }
-                        step(tx, texts.step_install(&package));
-                        if try_install(config, &container, &package, tx, &mut db_synced) {
-                            installed = Some(package);
-                            break;
-                        }
-                        failed_candidates.insert(package);
-                    }
-                    if installed.is_some() {
-                        break;
-                    }
-                }
-            }
-
-            // Letzter Fallback für unbekannte Paketmanager.
-            if installed.is_none() {
-                let search = search_command(manager, dep);
-                if !search.is_empty()
-                    && ensure_package_database(config, &container, tx, &mut db_synced).is_ok()
-                {
-                    if let Ok(found) = container.exec(&search, tx) {
-                        if let Some(candidate) = package_from_search(&found.text, &term, manager) {
-                            let package = sanitize_package(&candidate);
-                            if package.is_empty() || failed_candidates.contains(&package) {
-                                continue;
-                            }
-                            if try_install(config, &container, &package, tx, &mut db_synced) {
-                                installed = Some(package);
-                            } else {
-                                failed_candidates.insert(package);
-                            }
-                        }
-                    }
-                }
-            }
-
-            let Some(package) = installed else {
+            let Some((package, evidence)) = resolve_dependency(
+                config,
+                &container,
+                dep,
+                family,
+                manager,
+                &mut mappings,
+                &mut failed_candidates,
+                &mut db_synced,
+                tx,
+            ) else {
                 // Eine unauflösbare Abhängigkeit darf die späteren, vielleicht
-                // lösbaren nicht blockieren. Erst alle bearbeiten, dann
-                // entscheiden.
+                // lösbaren nicht blockieren.
                 if unresolved.is_none() {
                     unresolved = Some(dep.clone());
                 }
                 continue;
             };
-            // Nach der ersten erfolgreichen Nachinstallation brauchen große
-            // C++-Workspaces mehr als 5 Runden für alle find_package()-Aufrufe.
             allowed_rounds = MAX_HEAL_ROUNDS;
-            mappings.learn(family, &raw_name, &package);
+            let verified = !evidence.is_empty();
+            mappings.learn_dependency(family, dep, &package, verified, &evidence);
             let _ = tx.send(BuildEvent::Log(format!(
-                "[learn] learned from error and saved: {} -> {}",
-                raw_name, package
+                "[learn] {} -> {} | verified={} evidence={}",
+                dep.raw_name(),
+                package,
+                verified,
+                evidence
             )));
             if matches!(dep, MissingDep::PkgConfig(_)) {
                 let _ = tx.send(BuildEvent::Log(format!(
                     "[learn] error pattern detected -> fix applied and saved: pkg-config {} -> {}",
-                    raw_name, package
+                    dep.raw_name(),
+                    package
                 )));
             }
             if !extra_packages.contains(&package) {
