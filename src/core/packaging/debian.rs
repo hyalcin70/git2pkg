@@ -4,11 +4,14 @@ use super::{line_echo, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![line_echo("[pkg] building Debian package")];
-    lines.push(format!("cd /work/src && {}", ctx.build_step));
-    lines.push(format!(
+    lines.push(super::run_step(&format!(
+        "cd /work/src && {}",
+        ctx.build_step
+    )));
+    lines.push(super::run_step(&format!(
         "cd /work/src && pkgdir=/work/out && {} && {}",
         ctx.install_step, ctx.asset_step
-    ));
+    )));
     lines.push("mkdir -p /work/deb/DEBIAN /work/debian".to_string());
     lines.push(format!(
         "cat > /work/debian/control <<'CONTROL_EOF'\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",

@@ -4,11 +4,14 @@ use super::{line_echo, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![line_echo("[pkg] building RPM package")];
-    lines.push(format!("cd /work/src && {}", ctx.build_step));
-    lines.push(format!(
+    lines.push(super::run_step(&format!(
+        "cd /work/src && {}",
+        ctx.build_step
+    )));
+    lines.push(super::run_step(&format!(
         "cd /work/src && pkgdir=/work/out && {} && {}",
         ctx.install_step, ctx.asset_step
-    ));
+    )));
     lines.push("mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}".to_string());
     lines.push(format!(
         "cat > /root/rpmbuild/SPECS/{name}.spec <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg-ai\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg-ai.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/package-files.list\n%files -f /tmp/package-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",

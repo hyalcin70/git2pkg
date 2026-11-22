@@ -26,11 +26,14 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
 
     // Generischer Weg: erst bauen und nach /work/out stagen, dann Laufzeit-
     // abhängigkeiten aus den erzeugten Binaries ermitteln und makepkg aufrufen.
-    lines.push(format!("cd /work/src && {}", ctx.build_step));
-    lines.push(format!(
+    lines.push(super::run_step(&format!(
+        "cd /work/src && {}",
+        ctx.build_step
+    )));
+    lines.push(super::run_step(&format!(
         "cd /work/src && pkgdir=/work/out && {} && {}",
         ctx.install_step, ctx.asset_step
-    ));
+    )));
     lines.push(
         r#"depends=()
 for binary in $(find /work/out/usr/bin /work/out/usr/lib /work/out/usr/lib64 -type f -perm -u+x 2>/dev/null); do

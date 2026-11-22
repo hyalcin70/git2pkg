@@ -126,8 +126,19 @@ pub fn listing_program_files(text: &str, kind: &str) -> usize {
     count
 }
 
+/// Ergebnis der Paketprüfung. Der Aufrufer entscheidet anhand dieses
+/// Ergebnisses, ob die nächste Strategiestufe versucht wird.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifyOutcome {
+    Ok,
+    /// Kompiliertes Projekt, aber das Paket enthält keine Programmdateien.
+    NoProgramFiles,
+    /// Paket ist leer oder besteht nur aus Metadaten.
+    Invalid,
+}
+
 /// Prüft alle gebauten Pakete im Container. Ein Paket ohne Nutzdateien wird
-/// entfernt und führt zum automatischen Wechsel auf das direkte Build-System.
+/// entfernt und führt zum automatischen Wechsel auf die nächste Strategie.
 pub fn verify_built_packages(
     container: &BuildContainer,
     config: &BuildConfig,
@@ -135,9 +146,9 @@ pub fn verify_built_packages(
     compiled: bool,
     strategy_label: &str,
     mappings: &mut MappingStore,
-) -> bool {
+) -> VerifyOutcome {
     let Ok(listing) = container.exec("find /work/dist -maxdepth 1 -type f", tx) else {
-        return true;
+        return VerifyOutcome::Ok;
     };
     let mut checked = 0usize;
     let mut invalid: Vec<String> = Vec::new();
@@ -201,25 +212,27 @@ pub fn verify_built_packages(
     }
 
     if checked == 0 || invalid.is_empty() {
-        return true;
+        return VerifyOutcome::Ok;
     }
 
-    if compiled_without_program {
+    let outcome = if compiled_without_program {
         mappings.mark_incomplete_strategy(&config.url, strategy_label);
         let _ = tx.send(crate::core::container::BuildEvent::Log(
             "[warn] produced package contains no program files - marking strategy as incomplete"
                 .to_string(),
         ));
+        VerifyOutcome::NoProgramFiles
     } else {
         let _ = tx.send(crate::core::container::BuildEvent::Log(
-            "[warn] produced package contains no program files - switching to the direct build system..."
+            "[warn] produced package is empty or invalid - switching to the next strategy"
                 .to_string(),
         ));
-    }
+        VerifyOutcome::Invalid
+    };
     for path in invalid {
         let _ = container.exec(&format!("rm -f '{}'", path), tx);
     }
-    false
+    outcome
 }
 
 #[cfg(test)]

@@ -73,6 +73,13 @@ pub fn line_echo(text: &str) -> String {
     format!("echo '{}'", text.replace('\'', "'\\''"))
 }
 
+/// Führt einen zusammengesetzten Shell-Schritt fail-fast aus. `set -e` allein
+/// beendet ein Skript bei einem Fehler innerhalb einer `&&`-Kette nicht;
+/// deshalb wird der Status der gesamten Kette explizit geprüft.
+pub fn run_step(command: &str) -> String {
+    format!("if ! ( {command} ); then echo '[build] step failed - aborting' >&2; exit 1; fi")
+}
+
 /// Cargo-Build: nur echte ausführbare Artefakte nach `/work/dist` kopieren.
 pub fn cargo_build_step() -> &'static str {
     r#"mkdir -p /work/dist "${CARGO_TARGET_DIR:-target}/release"
@@ -112,6 +119,13 @@ pub fn generate(ctx: &PackageContext<'_>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_step_bricht_bei_fehler_in_und_kette_ab() {
+        let step = run_step("cd /work/src && cmake . && cmake --build .");
+        assert!(step.starts_with("if ! ( cd /work/src && cmake . && cmake --build . ); then"));
+        assert!(step.contains("echo '[build] step failed - aborting' >&2; exit 1; fi"));
+    }
 
     #[test]
     fn cargo_staging_sucht_beide_verzeichnisse() {
@@ -168,6 +182,11 @@ mod tests {
                 family,
                 std::process::id()
             ));
+            assert!(
+                script.contains("step failed - aborting"),
+                "Build-Schritt ist nicht fail-fast fuer {:?}",
+                family
+            );
             std::fs::write(&path, format!("{}\n", script)).unwrap();
             let ok = std::process::Command::new("bash")
                 .arg("-n")

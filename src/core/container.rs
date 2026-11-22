@@ -9,9 +9,9 @@ use crate::core::resolver::{
     analyze_output, candidate_names, cmake_alternative_flags, cmake_option_flags_from_text,
     detect_build_fixes, detect_repo_script_distro_rejection, detect_source_group_error, family_key,
     has_eigen_version_mismatch, is_cmake_policy_error, is_compiled_build_system,
-    package_from_search, package_lacks_executable, packages_from_file_database, probe_commands,
-    search_command, tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore,
-    MissingDep, SourceGroupError,
+    package_from_search, packages_from_file_database, probe_commands, search_command,
+    tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore, MissingDep,
+    SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -884,6 +884,20 @@ fn step(tx: &Sender<BuildEvent>, message: impl Into<String>) {
     let _ = tx.send(BuildEvent::Step(message.into()));
 }
 
+/// Kürzt lange Build-Ausgaben für Fehlermeldungen auf die letzten Zeilen.
+fn tail_lines(text: &str, count: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= count {
+        return text.to_string();
+    }
+    format!(
+        "... (last {} of {} lines)\n{}",
+        count,
+        lines.len(),
+        lines[lines.len() - count..].join("\n")
+    )
+}
+
 pub fn run_build(mut config: BuildConfig, tx: Sender<BuildEvent>) {
     match execute(&mut config, &tx) {
         Ok(outcome) => {
@@ -952,6 +966,10 @@ fn comment_source_group_block(path: &Path, line: usize) -> bool {
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     let start = line.saturating_sub(1);
     if start >= lines.len() || !lines[start].contains("source_group") {
+        return false;
+    }
+    // Bereits geheilt (z. B. nach einem früheren Versuch): nichts zu tun.
+    if lines[start].trim_start().starts_with('#') {
         return false;
     }
     let mut balance = 0_i32;
@@ -1026,7 +1044,6 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let texts = Texts::new(config.language);
     let mut mappings = MappingStore::load();
     let mut failed_candidates: HashSet<String> = HashSet::new();
-    let mut healed_source_groups: HashSet<(String, usize, String)> = HashSet::new();
     let mut skipped_incomplete: HashSet<String> = HashSet::new();
 
     step(tx, texts.step_workdir());
@@ -1127,7 +1144,6 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut cmake_flags: Vec<String> = Vec::new();
     let mut last_output = String::new();
     let mut forced_strategy: Option<BuildStrategy> = None;
-    let mut direct_tried = false;
 
     let mut strategy_attempt: u8 = 1;
     let mut heal_round: u8 = 1;
@@ -1251,76 +1267,33 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
 
         if result.text.contains(OK_MARKER) {
-            if !verify_built_packages(
+            let verification = verify_built_packages(
                 &container,
                 config,
                 tx,
                 is_compiled_build_system(system.label()),
                 strategy_name,
                 &mut mappings,
-            ) {
-                // Lernprofil: kompiliertes Projekt ohne ausführbare Datei im Paket.
-                let mut incomplete_profile = false;
-                let unresolved_dependencies = !analyze_output(&last_output).is_empty();
-                if is_compiled_build_system(system.label())
-                    && !deps_failed
-                    && !unresolved_dependencies
-                {
-                    if let Ok(listing) = container.exec("find /work/dist -maxdepth 1 -type f", tx) {
-                        for raw in listing.text.lines() {
-                            let path = raw.trim();
-                            let kind = if path.ends_with(".pkg.tar.zst") {
-                                "pkg"
-                            } else if path.ends_with(".deb") {
-                                "deb"
-                            } else if path.ends_with(".rpm") {
-                                "rpm"
-                            } else {
-                                continue;
-                            };
-                            if let Ok(archive) =
-                                container.exec(&archive_listing_command(kind, path), tx)
-                            {
-                                if package_lacks_executable(&archive.text) {
-                                    let _ = tx.send(BuildEvent::Log(
-                                        "[warn] produced package contains no executable program file - marking this strategy as incomplete for the repository".to_string(),
-                                    ));
-                                    mappings.mark_incomplete_strategy(&config.url, strategy_name);
-                                    incomplete_profile = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                if incomplete_profile {
-                    let next = effective_strategy.next(has_deps);
-                    strategy_attempt += 1;
-                    heal_round = 1;
-                    allowed_rounds = INITIAL_HEAL_ROUNDS;
-                    config.skip_deps = next == BuildStrategy::SystemLibsOnly;
-                    forced_strategy = Some(next);
-                    let _ = tx.send(BuildEvent::Log(format!(
-                        "[strategy] {} (incomplete profile)",
-                        next.label()
-                    )));
-                    continue;
-                }
-                if direct_tried {
+            );
+            if verification != VerifyOutcome::Ok {
+                // Die Prüfung hat das Paket bereits verworfen. Im direkten
+                // Fallback gibt es keine weitere Stufe mehr.
+                if effective_strategy == BuildStrategy::DirectStagingFallback {
                     mark_failed_build(&work);
                     return Err(
                         "build produced no usable package even with the direct build system"
                             .to_string(),
                     );
                 }
-                direct_tried = true;
+                let next = effective_strategy.next(has_deps);
                 strategy_attempt += 1;
                 heal_round = 1;
                 allowed_rounds = INITIAL_HEAL_ROUNDS;
-                forced_strategy = Some(BuildStrategy::DirectStagingFallback);
+                config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+                forced_strategy = Some(next);
                 let _ = tx.send(BuildEvent::Log(format!(
-                    "[strategy] {}",
-                    BuildStrategy::DirectStagingFallback.label()
+                    "[strategy] {} (verification failed)",
+                    next.label()
                 )));
                 continue;
             }
@@ -1368,13 +1341,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
 
         if let Some(error) = detect_source_group_error(&last_output) {
-            let key = (
-                error.file.clone(),
-                error.line,
-                error.hint.clone().unwrap_or_default(),
-            );
-            if !healed_source_groups.contains(&key) && heal_source_group(&work, &error, tx) {
-                healed_source_groups.insert(key);
+            if heal_source_group(&work, &error, tx) {
                 heal_round += 1;
                 if heal_round > allowed_rounds {
                     let next = effective_strategy.next(has_deps);
@@ -1616,7 +1583,10 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     }
 
     mark_failed_build(&work);
-    Err(texts.err_max_attempts(strategy_attempt.saturating_sub(1), &last_output))
+    Err(texts.err_max_attempts(
+        strategy_attempt.saturating_sub(1),
+        &tail_lines(&last_output, 80),
+    ))
 }
 
 /// Nur echte Fehlermeldungen als `[err]` markieren - nicht alles, was auf stderr kommt.
@@ -1743,7 +1713,7 @@ fn with_deps_prebuild_flags(script: &str, flags: &[String]) -> String {
         lines.insert(
             index + 2,
             format!(
-                "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] package installation finished - reconfiguring local dependencies'; rm -rf /work/deps-build; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_INSTALL_PREFIX=/work/deps-install {configure_flags} && cmake --build /work/deps-build && cmake --install /work/deps-build || {{ echo '[deps] build failed - resolver takes over'; exit 1; }}; fi; done"
+                "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] reconfiguring local dependencies (downloaded sources are kept)'; rm -f /work/deps-build/CMakeCache.txt; rm -rf /work/deps-build/CMakeFiles; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_INSTALL_PREFIX=/work/deps-install {configure_flags} && cmake --build /work/deps-build && cmake --install /work/deps-build || {{ echo '[deps] build failed - resolver takes over'; exit 1; }}; fi; done"
             ),
         );
     }
@@ -2401,11 +2371,17 @@ fn build_script_with_flags(
     match &config.target {
         TargetFormat::StandaloneBinary => {
             lines.push(echo_line(texts.log_binary_build()));
-            lines.push(format!("cd /work/src && {}", build_step));
+            lines.push(crate::core::packaging::run_step(&format!(
+                "cd /work/src && {}",
+                build_step
+            )));
         }
         TargetFormat::NativePackage => {
             if target.family == DistroFamily::Unknown {
-                lines.push(format!("cd /work/src && {}", build_step));
+                lines.push(crate::core::packaging::run_step(&format!(
+                    "cd /work/src && {}",
+                    build_step
+                )));
             } else {
                 lines.extend(crate::core::packaging::generate(&pkg_ctx));
             }
@@ -2526,7 +2502,7 @@ fn install_command(config: &BuildConfig, artifacts: &[PathBuf]) -> String {
 
 #[allow(unused_imports)]
 pub use crate::core::packaging::verify::{
-    archive_listing_command, listing_payload, verify_built_packages,
+    archive_listing_command, listing_payload, verify_built_packages, VerifyOutcome,
 };
 
 fn package_result(
@@ -2591,6 +2567,18 @@ fn package_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lange_ausgaben_werden_fuer_fehler_gekuerzt() {
+        let text = (0..200)
+            .map(|index| format!("line {}", index))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tail = tail_lines(&text, 80);
+        assert!(tail.contains("last 80 of 200 lines"));
+        assert!(tail.contains("line 199"));
+        assert!(!tail.contains("line 119"));
+    }
 
     fn config(family: DistroFamily, target: TargetFormat) -> BuildConfig {
         let distro = DistroInfo::from_os_release(match family {
@@ -3264,8 +3252,10 @@ mod tests {
         let patched = with_deps_prebuild(script);
         assert!(patched.contains("export CMAKE_PREFIX_PATH=/work/deps-install"));
         assert!(patched.contains("-DCMAKE_INSTALL_PREFIX=/work/deps-install"));
-        assert!(patched.contains("rm -rf /work/deps-build"));
-        assert!(patched.contains("reconfiguring local dependencies"));
+        assert!(patched.contains("rm -f /work/deps-build/CMakeCache.txt"));
+        assert!(patched.contains("rm -rf /work/deps-build/CMakeFiles"));
+        assert!(!patched.contains("rm -rf /work/deps-build;"));
+        assert!(patched.contains("downloaded sources are kept"));
         assert!(patched.contains("resolver takes over"));
         assert!(patched.lines().count() == script.lines().count() + 2);
     }

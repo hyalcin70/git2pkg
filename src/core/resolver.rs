@@ -326,28 +326,6 @@ pub fn repo_hash(url: &str) -> String {
     repo_profile_key(url)
 }
 
-/// Ein Paket ohne ausführbare Datei in den Standardsystempfaden ist unvollständig.
-pub fn package_lacks_executable(listing: &str) -> bool {
-    let prefixes = ["usr/bin/", "usr/local/bin/", "bin/", "usr/sbin/", "opt/"];
-    for line in listing.lines() {
-        let tokens: Vec<&str> = line.split_whitespace().collect();
-        if tokens.is_empty() {
-            continue;
-        }
-        let flags = tokens[0];
-        let path = (*tokens.last().unwrap())
-            .trim_start_matches("./")
-            .trim_start_matches('/');
-        if !prefixes.iter().any(|prefix| path.starts_with(prefix)) {
-            continue;
-        }
-        if flags.contains('x') || flags.contains("-rwx") {
-            return false;
-        }
-    }
-    true
-}
-
 /// Nur kompilierte Build-Systeme werden für unvollständige Pakete profiliert.
 pub fn is_compiled_build_system(label: &str) -> bool {
     let value = label.to_ascii_lowercase();
@@ -1317,8 +1295,9 @@ pub fn cmake_alternative_flags(output: &str) -> Vec<String> {
     };
     let mut flags: Vec<String> = Vec::new();
     for found in regex.captures_iter(output) {
-        let flag = found[1].to_string();
-        if !flags.contains(&flag) {
+        // Satzzeichen aus Fließtext gehören nicht zum Flag-Wert.
+        let flag = found[1].trim_end_matches(['.', ',', ';', ':']).to_string();
+        if !flag.ends_with('=') && !flags.contains(&flag) {
             flags.push(flag);
         }
     }
@@ -1895,10 +1874,6 @@ mod tests {
         assert_eq!(reloaded.learned_rule_count(), 1);
         assert_eq!(repo_profile_key(url), sha256_hex(&normalize_repo_url(url)));
 
-        assert!(package_lacks_executable(
-            "-rw-r--r-- 0 0 12 usr/share/repo/data.txt"
-        ));
-        assert!(!package_lacks_executable("-rwxr-xr-x 0 0 12 usr/bin/repo"));
         assert!(is_compiled_build_system("Cargo (Rust)"));
         assert!(!is_compiled_build_system("Unknown"));
         let _ = fs::remove_dir_all(dir);
@@ -2026,6 +2001,11 @@ mod tests {
                 "-DENABLE_XYZ=OFF".to_string(),
                 "-DUSE_SYSTEM_FOO=ON".to_string(),
             ]
+        );
+        // Satzpunkt am Satzende gehört nicht zum Flag.
+        assert_eq!(
+            cmake_alternative_flags("Alternatively pass -DFOO=ON."),
+            vec!["-DFOO=ON".to_string()]
         );
         assert!(cmake_alternative_flags("no hint here").is_empty());
     }
