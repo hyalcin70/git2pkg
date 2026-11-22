@@ -101,13 +101,49 @@ masaüstü veya özel bir yol. Ardından başlat menüsü girişi önerilir.
 `./uninstall.sh` ikiliyi ve menü girişini kaldırır; yolu `.desktop` dosyasından
 okur.
 
-## Arch / CachyOS paketi
+## Yerel paketler
 
-`packaging/PKGBUILD`, `git2pkg`'i normal bir sistem paketi olarak derler:
+`git2pkg` uygulamasını dağıtımınız için normal bir sistem paketi olarak derleyin.
+Tüm tarifler mevcut checkout'u derler ve Rust 1.89 veya üstünü gerektirir.
+
+### Arch / CachyOS
 
 ```sh
 cd packaging
 makepkg -si
+```
+
+### Debian / Ubuntu
+
+```sh
+sudo apt install debhelper dpkg-dev build-essential cargo rustc pkg-config \
+  libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libxi-dev \
+  libxcursor-dev libx11-dev libgl1-mesa-dev libatk1.0-dev libgtk-3-dev \
+  libasound2-dev
+dpkg-buildpackage -us -uc -b
+sudo apt install ../git2pkg_*.deb
+```
+
+Dağıtımın Rust sürümü 1.89'dan eskiyse önce `rustup` ile güncel kararlı
+araç zincirini kurun.
+
+### Fedora / RHEL
+
+```sh
+sudo dnf install rpm-build rpmdevtools cargo rust pkgconf-pkg-config dnf-plugins-core
+sudo dnf builddep packaging/git2pkg.spec
+./packaging/build-rpm.sh
+sudo dnf install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
+```
+
+### openSUSE
+
+```sh
+sudo zypper install rpm-build cargo rust pkgconf-pkg-config \
+  libxkbcommon-devel wayland-devel libxcb-devel libXrandr-devel \
+  libXi-devel libXcursor-devel Mesa-libGL-devel atk-devel gtk3-devel alsa-devel
+./packaging/build-rpm.sh
+sudo zypper install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
 ```
 
 ## Proje yapısı
@@ -129,7 +165,8 @@ src/
     settings.rs      GUI ayarları (çıktı klasörü, tema)
 assets/              yazı tipleri, simge, bağımlılık bilgi tabanı
 scripts/             elle duman testi korpusu (argüman olarak depo URL'leri)
-packaging/           git2pkg için PKGBUILD ve masaüstü dosyası
+packaging/           Arch PKGBUILD, RPM spec/build betiği ve masaüstü dosyası
+debian/              Debian/Ubuntu paketleme (dpkg-buildpackage)
 .github/workflows/   CI ve etiket tetikli release akışları
 .gitlab-ci.yml       GitLab CI derleme ve paketleme işi
 ```

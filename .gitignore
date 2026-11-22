@@ -12,3 +12,10 @@
 
 # Logs
 *.log
+
+# Debian build output
+/debian/.debhelper/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/git2pkg/
+/debian/*.substvars

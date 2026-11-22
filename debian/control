@@ -1,0 +1,31 @@
+Source: git2pkg
+Section: utils
+Priority: optional
+Maintainer: Hakan Yalçın <hyalcin70@github.com>
+Build-Depends: debhelper-compat (= 13),
+               build-essential,
+               cargo,
+               rustc,
+               pkg-config,
+               libxkbcommon-dev,
+               libwayland-dev,
+               libxcb1-dev,
+               libxrandr-dev,
+               libxi-dev,
+               libxcursor-dev,
+               libx11-dev,
+               libgl1-mesa-dev,
+               libatk1.0-dev,
+               libgtk-3-dev,
+               libasound2-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/hyalcin70/git2pkg
+Rules-Requires-Root: no
+
+Package: git2pkg
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Isolated package builder from Git repositories
+ git2pkg builds a Git repository inside a disposable Podman or Docker
+ container and produces a native package or a standalone binary.
+ The host system does not need a compiler toolchain or build libraries.

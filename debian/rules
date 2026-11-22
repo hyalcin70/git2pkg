@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_clean:
+override_dh_auto_configure:
+override_dh_auto_test:
+
+override_dh_auto_build:
+	cargo build --release --locked
+
+override_dh_auto_install:
+	install -Dm755 target/release/git2pkg debian/git2pkg/usr/bin/git2pkg
+	install -Dm644 packaging/git2pkg.desktop debian/git2pkg/usr/share/applications/git2pkg.desktop
+	install -Dm644 assets/app_icon.png debian/git2pkg/usr/share/icons/hicolor/256x256/apps/git2pkg.png
+	install -Dm644 assets/app_icon.png debian/git2pkg/usr/share/pixmaps/git2pkg.png

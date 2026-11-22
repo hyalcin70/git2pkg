@@ -1,0 +1,5 @@
+git2pkg (0.2.0~alpha.26) unstable; urgency=medium
+
+  * Native Debian package for 0.2.0-alpha.26.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Sun, 22 Nov 2026 23:15:00 +0100

@@ -105,13 +105,49 @@ release puis demande **où** le placer : le dossier du projet (par défaut),
 d'applications est ensuite proposée. `./uninstall.sh` retire le binaire et
 l'entrée en lisant le chemin dans le fichier `.desktop`.
 
-## Paquet Arch / CachyOS
+## Paquets natifs
 
-`packaging/PKGBUILD` compile `git2pkg` comme un paquet système classique :
+Compilez `git2pkg` comme paquet système pour votre distribution. Toutes les
+recettes compilent le checkout courant et nécessitent Rust 1.89 ou plus récent.
+
+### Arch / CachyOS
 
 ```sh
 cd packaging
 makepkg -si
+```
+
+### Debian / Ubuntu
+
+```sh
+sudo apt install debhelper dpkg-dev build-essential cargo rustc pkg-config \
+  libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libxi-dev \
+  libxcursor-dev libx11-dev libgl1-mesa-dev libatk1.0-dev libgtk-3-dev \
+  libasound2-dev
+dpkg-buildpackage -us -uc -b
+sudo apt install ../git2pkg_*.deb
+```
+
+Si le Rust de la distribution est antérieur à 1.89, installez d'abord la
+chaîne stable actuelle avec `rustup`.
+
+### Fedora / RHEL
+
+```sh
+sudo dnf install rpm-build rpmdevtools cargo rust pkgconf-pkg-config dnf-plugins-core
+sudo dnf builddep packaging/git2pkg.spec
+./packaging/build-rpm.sh
+sudo dnf install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
+```
+
+### openSUSE
+
+```sh
+sudo zypper install rpm-build cargo rust pkgconf-pkg-config \
+  libxkbcommon-devel wayland-devel libxcb-devel libXrandr-devel \
+  libXi-devel libXcursor-devel Mesa-libGL-devel atk-devel gtk3-devel alsa-devel
+./packaging/build-rpm.sh
+sudo zypper install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
 ```
 
 ## Structure du projet
@@ -133,7 +169,8 @@ src/
     settings.rs      réglages de l'interface (dossier de sortie, thème)
 assets/              polices, icône, base de connaissances des dépendances
 scripts/             corpus de tests manuel (URLs en arguments)
-packaging/           PKGBUILD et fichier .desktop pour git2pkg
+packaging/           PKGBUILD Arch, spec/script RPM et fichier .desktop
+debian/              empaquetage Debian/Ubuntu (dpkg-buildpackage)
 .github/workflows/   workflows CI et release déclenchés par les tags
 .gitlab-ci.yml       compilation et paquetage GitLab CI
 ```

@@ -101,13 +101,50 @@ Anschließend wird ein Startmenü-Eintrag angeboten. Mit `./uninstall.sh` werden
 Binary und Menüeintrag wieder entfernt – der Pfad wird aus der `.desktop`-Datei
 gelesen.
 
-## Arch-/CachyOS-Paket
+## Native Pakete
 
-`packaging/PKGBUILD` baut `git2pkg` als normales Systempaket:
+`git2pkg` selbst als reguläres Systempaket für die eigene Distribution bauen.
+Alle Rezepte bauen den aktuellen Checkout und setzen Rust 1.89 oder neuer
+voraus.
+
+### Arch / CachyOS
 
 ```sh
 cd packaging
 makepkg -si
+```
+
+### Debian / Ubuntu
+
+```sh
+sudo apt install debhelper dpkg-dev build-essential cargo rustc pkg-config \
+  libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libxi-dev \
+  libxcursor-dev libx11-dev libgl1-mesa-dev libatk1.0-dev libgtk-3-dev \
+  libasound2-dev
+dpkg-buildpackage -us -uc -b
+sudo apt install ../git2pkg_*.deb
+```
+
+Ist das Rust der Distribution älter als 1.89, vorher die aktuelle stabile
+Toolchain mit `rustup` installieren.
+
+### Fedora / RHEL
+
+```sh
+sudo dnf install rpm-build rpmdevtools cargo rust pkgconf-pkg-config dnf-plugins-core
+sudo dnf builddep packaging/git2pkg.spec
+./packaging/build-rpm.sh
+sudo dnf install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
+```
+
+### openSUSE
+
+```sh
+sudo zypper install rpm-build cargo rust pkgconf-pkg-config \
+  libxkbcommon-devel wayland-devel libxcb-devel libXrandr-devel \
+  libXi-devel libXcursor-devel Mesa-libGL-devel atk-devel gtk3-devel alsa-devel
+./packaging/build-rpm.sh
+sudo zypper install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
 ```
 
 ## Projektstruktur
@@ -129,7 +166,8 @@ src/
     settings.rs      GUI-Einstellungen (Ausgabeordner, Theme)
 assets/              Schriften, Icon, Abhängigkeits-Wissensbasis
 scripts/             manueller Smoke-Test-Korpus (Repo-URLs als Argumente)
-packaging/           PKGBUILD und Desktop-Datei für git2pkg selbst
+packaging/           Arch-PKGBUILD, RPM-Spec/Build-Skript und Desktop-Datei
+debian/              Debian/Ubuntu-Paketierung (dpkg-buildpackage)
 .github/workflows/   CI- und taggesteuerter Release-Workflow
 .gitlab-ci.yml       GitLab-CI-Build und -Paketierung
 ```

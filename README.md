@@ -96,13 +96,49 @@ the Desktop, or a custom path. A start-menu entry is offered afterwards.
 Use `./uninstall.sh` to remove the binary and the menu entry again — it reads
 the installed path from the `.desktop` file.
 
-## Arch / CachyOS package
+## Native packages
 
-`packaging/PKGBUILD` builds `git2pkg` as a regular system package:
+Build `git2pkg` itself as a regular system package for your distribution. All
+recipes build the current checkout and require Rust 1.89 or newer.
+
+### Arch / CachyOS
 
 ```sh
 cd packaging
 makepkg -si
+```
+
+### Debian / Ubuntu
+
+```sh
+sudo apt install debhelper dpkg-dev build-essential cargo rustc pkg-config \
+  libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libxi-dev \
+  libxcursor-dev libx11-dev libgl1-mesa-dev libatk1.0-dev libgtk-3-dev \
+  libasound2-dev
+dpkg-buildpackage -us -uc -b
+sudo apt install ../git2pkg_*.deb
+```
+
+If the distribution's Rust is older than 1.89, install the current stable
+toolchain with `rustup` first.
+
+### Fedora / RHEL
+
+```sh
+sudo dnf install rpm-build rpmdevtools cargo rust pkgconf-pkg-config dnf-plugins-core
+sudo dnf builddep packaging/git2pkg.spec
+./packaging/build-rpm.sh
+sudo dnf install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
+```
+
+### openSUSE
+
+```sh
+sudo zypper install rpm-build cargo rust pkgconf-pkg-config \
+  libxkbcommon-devel wayland-devel libxcb-devel libXrandr-devel \
+  libXi-devel libXcursor-devel Mesa-libGL-devel atk-devel gtk3-devel alsa-devel
+./packaging/build-rpm.sh
+sudo zypper install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
 ```
 
 ## Project layout
@@ -124,7 +160,8 @@ src/
     settings.rs      GUI settings (output folder, theme)
 assets/              fonts, icon, dependency knowledge base
 scripts/             manual smoke corpus (repository URLs as arguments)
-packaging/           PKGBUILD and desktop entry for git2pkg itself
+packaging/           Arch PKGBUILD, RPM spec/build script and desktop entry
+debian/              Debian/Ubuntu packaging (dpkg-buildpackage)
 .github/workflows/   CI and tag-driven release workflows
 .gitlab-ci.yml       GitLab CI build and package job
 ```

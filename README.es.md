@@ -100,13 +100,49 @@ binario de release y pregunta **dónde** colocarlo: la carpeta del proyecto
 Después ofrece crear una entrada en el menú de aplicaciones. `./uninstall.sh`
 elimina el binario y la entrada leyendo la ruta del archivo `.desktop`.
 
-## Paquete Arch / CachyOS
+## Paquetes nativos
 
-`packaging/PKGBUILD` compila `git2pkg` como un paquete del sistema normal:
+Compile `git2pkg` como paquete del sistema para su distribución. Todas las
+recetas compilan el checkout actual y requieren Rust 1.89 o superior.
+
+### Arch / CachyOS
 
 ```sh
 cd packaging
 makepkg -si
+```
+
+### Debian / Ubuntu
+
+```sh
+sudo apt install debhelper dpkg-dev build-essential cargo rustc pkg-config \
+  libxkbcommon-dev libwayland-dev libxcb1-dev libxrandr-dev libxi-dev \
+  libxcursor-dev libx11-dev libgl1-mesa-dev libatk1.0-dev libgtk-3-dev \
+  libasound2-dev
+dpkg-buildpackage -us -uc -b
+sudo apt install ../git2pkg_*.deb
+```
+
+Si el Rust de la distribución es anterior a 1.89, instale primero la cadena
+estable actual con `rustup`.
+
+### Fedora / RHEL
+
+```sh
+sudo dnf install rpm-build rpmdevtools cargo rust pkgconf-pkg-config dnf-plugins-core
+sudo dnf builddep packaging/git2pkg.spec
+./packaging/build-rpm.sh
+sudo dnf install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
+```
+
+### openSUSE
+
+```sh
+sudo zypper install rpm-build cargo rust pkgconf-pkg-config \
+  libxkbcommon-devel wayland-devel libxcb-devel libXrandr-devel \
+  libXi-devel libXcursor-devel Mesa-libGL-devel atk-devel gtk3-devel alsa-devel
+./packaging/build-rpm.sh
+sudo zypper install ~/rpmbuild/RPMS/*/git2pkg-*.rpm
 ```
 
 ## Estructura del proyecto
@@ -128,7 +164,8 @@ src/
     settings.rs      ajustes de la GUI (carpeta de salida, tema)
 assets/              fuentes, icono, base de conocimiento de dependencias
 scripts/             corpus de pruebas manual (URLs como argumentos)
-packaging/           PKGBUILD y archivo .desktop para git2pkg
+packaging/           PKGBUILD de Arch, spec/script RPM y archivo .desktop
+debian/              empaquetado Debian/Ubuntu (dpkg-buildpackage)
 .github/workflows/   flujos de CI y release por etiquetas
 .gitlab-ci.yml       compilación y empaquetado en GitLab CI
 ```
