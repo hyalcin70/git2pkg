@@ -2392,6 +2392,9 @@ fn build_script_with_flags(
         "export CARGO_HOME=/work/cargo-home".to_string(),
         "export CCACHE_DIR=/work/ccache".to_string(),
         "mkdir -p /work/cargo-target /work/cargo-home /work/ccache".to_string(),
+        // Gemountete Quellen gehören dem Host-Nutzer; der Container läuft als
+        // root. Ohne diese Ausnahme verweigert git seine Arbeit.
+        "git config --global --add safe.directory '*' 2>/dev/null || true".to_string(),
         echo_line(&texts.log_setup(&target.package_manager)),
         base_dependencies(&target.family, system),
     ];
@@ -3380,6 +3383,11 @@ mod tests {
             );
             assert!(script.contains("set -e"), "{:?}", family);
             assert!(script.contains("set -o pipefail"), "{:?}", family);
+            assert!(
+                script.contains("safe.directory"),
+                "{:?}: git-Ownership-Ausnahme fehlt",
+                family
+            );
             assert!(
                 !script.contains("yes '' |"),
                 "{:?}: SIGPIPE-Pipeline",

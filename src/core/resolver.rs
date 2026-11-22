@@ -1392,6 +1392,64 @@ fn is_generic_tool_word(name: &str) -> bool {
             | "cmake"
             | "pkgconfig"
             | "configure"
+            | "libraries"
+            | "packages"
+            | "files"
+            | "modules"
+            | "headers"
+            | "components"
+            | "missing"
+            | "available"
+            | "compiler"
+            | "compilers"
+            | "linker"
+            // Häufige englische Füllwörter aus Statusmeldungen
+            // (z. B. "libraries were not found").
+            | "were"
+            | "was"
+            | "are"
+            | "is"
+            | "be"
+            | "been"
+            | "being"
+            | "have"
+            | "has"
+            | "had"
+            | "do"
+            | "does"
+            | "did"
+            | "can"
+            | "could"
+            | "may"
+            | "might"
+            | "must"
+            | "shall"
+            | "should"
+            | "will"
+            | "would"
+            | "some"
+            | "all"
+            | "any"
+            | "no"
+            | "this"
+            | "that"
+            | "these"
+            | "those"
+            | "they"
+            | "them"
+            | "their"
+            | "there"
+            | "which"
+            | "who"
+            | "what"
+            | "when"
+            | "where"
+            | "and"
+            | "but"
+            | "if"
+            | "then"
+            | "so"
+            | "such"
     )
 }
 
@@ -1527,6 +1585,15 @@ mod tests {
             analyze_output(out),
             vec![MissingDep::Header("openssl/sha.h".into())]
         );
+    }
+
+    #[test]
+    fn statusmeldungen_erzeugen_keine_falschen_tools() {
+        let out =
+            "-- Some or all of the gtk libraries were not found. (missing: GTK2_GTK_LIBRARY)\n";
+        assert!(!analyze_output(out)
+            .iter()
+            .any(|dep| matches!(dep, MissingDep::Tool(name) if name == "were")));
     }
 
     #[test]
