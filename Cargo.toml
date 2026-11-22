@@ -1,5 +1,5 @@
 [package]
-name = "git2pkg-ai"
+name = "git2pkg"
 version = "0.2.0-alpha.25"
 edition = "2021"
 authors = ["SattNEK"]

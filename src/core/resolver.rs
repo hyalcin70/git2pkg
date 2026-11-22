@@ -650,7 +650,7 @@ impl MappingStore {
         std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join(".config/git2pkg-ai/learned_mappings.json")
+            .join(".config/git2pkg/learned_mappings.json")
     }
 
     pub fn load() -> Self {
@@ -2513,11 +2513,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "git2pkg-ai-map-{}-{}.json",
-            std::process::id(),
-            nanos
-        ));
+        let path =
+            std::env::temp_dir().join(format!("git2pkg-map-{}-{}.json", std::process::id(), nanos));
         let mut store = MappingStore::from_path(path.clone());
         assert!(path.exists(), "Datei muss automatisch angelegt werden");
         assert_eq!(store.get("arch", "Boost").as_deref(), Some("boost"));
@@ -2700,7 +2697,7 @@ mod tests {
     #[test]
     fn build_recipes_werden_gelernt_und_wiedergefunden() {
         let dir = std::env::temp_dir().join(format!(
-            "git2pkg-ai-recipes-{}-{}",
+            "git2pkg-recipes-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2738,7 +2735,7 @@ mod tests {
     #[test]
     fn repo_profiles_werden_gelernt_und_uebersprungen() {
         let dir = std::env::temp_dir().join(format!(
-            "git2pkg-ai-profiles-{}-{}",
+            "git2pkg-profiles-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2791,7 +2788,7 @@ mod tests {
     #[test]
     fn gelernte_repo_pakete_werden_sofort_wiedergefunden() {
         let dir = std::env::temp_dir().join(format!(
-            "git2pkg-ai-repo-packages-{}-{}",
+            "git2pkg-repo-packages-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

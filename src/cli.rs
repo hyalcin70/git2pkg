@@ -1,4 +1,4 @@
-//! Headless-Modus: `git2pkg-ai --cli <url> [--format=package|binary] [--target=auto|arch|debian|fedora|opensuse]`.
+//! Headless-Modus: `git2pkg --cli <url> [--format=package|binary] [--target=auto|arch|debian|fedora|opensuse]`.
 
 use crate::core::container::{
     default_output_dir, detect_engine, run_build, BuildConfig, BuildEvent, TargetFormat,

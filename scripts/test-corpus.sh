@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manual smoke corpus for git2pkg-ai.
+# Manual smoke corpus for git2pkg.
 #
 # Pass one or more repository URLs to build them one after another. The
 # script contains no project names on purpose: the corpus is yours to choose
@@ -15,7 +15,7 @@ set -uo pipefail
 
 TARGET="${1:-auto}"
 shift || true
-BIN="./target/release/git2pkg-ai"
+BIN="./target/release/git2pkg"
 
 if [[ $# -gt 0 ]]; then
   REPOS=("$@")

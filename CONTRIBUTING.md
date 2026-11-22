@@ -1,6 +1,6 @@
-# Contributing to git2pkg-ai
+# Contributing to git2pkg
 
-Thanks for helping out. `git2pkg-ai` is a small, dependency-light Rust project:
+Thanks for helping out. `git2pkg` is a small, dependency-light Rust project:
 keep changes focused, deterministic and free of any network/AI calls at runtime.
 
 ## Pull requests

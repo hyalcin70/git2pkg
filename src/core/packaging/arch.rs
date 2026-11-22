@@ -6,7 +6,7 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![
         line_echo("[pkg] building Arch package"),
         "id builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder".to_string(),
-        "echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/git2pkg-ai-builder && chmod 440 /etc/sudoers.d/git2pkg-ai-builder".to_string(),
+        "echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/git2pkg-builder && chmod 440 /etc/sudoers.d/git2pkg-builder".to_string(),
     ];
 
     if ctx.has_pkgbuild
@@ -59,10 +59,10 @@ cat > /work/out/.PKGINFO <<PKGINFO_EOF
 pkgname = {name}
 pkgbase = {name}
 pkgver = {version}-1
-pkgdesc = Built by git2pkg-ai
+pkgdesc = Built by git2pkg
 url = https://example.invalid
 builddate = $(date +%s)
-packager = git2pkg-ai <noreply@example.invalid>
+packager = git2pkg <noreply@example.invalid>
 size = $installed_size
 arch = {arch}
 license = GPL-3.0-or-later

@@ -28,7 +28,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const OK_MARKER: &str = "__GIT2PKG_AI_BUILD_OK__";
+const OK_MARKER: &str = "__GIT2PKG_BUILD_OK__";
 const DEPS_FAILURE_MARKER: &str = "[deps] build failed";
 
 fn deps_fallback_needed(output: &str, skip_deps: bool) -> bool {
@@ -151,7 +151,7 @@ impl BuildContainer {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let name = format!("git2pkg-ai-build-{}-{}", std::process::id(), nanos);
+        let name = format!("git2pkg-build-{}-{}", std::process::id(), nanos);
         let args = vec![
             "run".to_string(),
             "-d".to_string(),
@@ -333,11 +333,11 @@ fn next_unvisited_strategy(
         .find(|strategy| !visited.contains(strategy.key()))
 }
 
-/// Standard-Ausgabeordner: `~/Downloads/git2pkg-ai`, relativ zum Home-Verzeichnis
+/// Standard-Ausgabeordner: `~/Downloads/git2pkg`, relativ zum Home-Verzeichnis
 /// des aktuellen Nutzers und nicht zum Arbeitsverzeichnis.
 pub fn default_output_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join("Downloads/git2pkg-ai")
+    Path::new(&home).join("Downloads/git2pkg")
 }
 
 /// Markiert einen fehlgeschlagenen Build im Cache, damit die GUI beim Beenden
@@ -346,19 +346,19 @@ pub fn mark_failed_build(work: &Path) {
     let _ = fs::write(work.join("FAILED"), "failed\n");
 }
 
-fn git2pkg_ai_cache_root() -> PathBuf {
+fn git2pkg_cache_root() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join(".cache/git2pkg-ai")
+    Path::new(&home).join(".cache/git2pkg")
 }
 
 fn build_cache_root() -> PathBuf {
-    git2pkg_ai_cache_root().join("builds")
+    git2pkg_cache_root().join("builds")
 }
 
 /// Dauerhafter, sauber gehaltener Klon-Cache. Er wird niemals vom Build-Cache-
 /// Cleanup geloescht und bei jedem Lauf nur aktualisiert.
 fn repo_cache_root() -> PathBuf {
-    git2pkg_ai_cache_root().join("repos")
+    git2pkg_cache_root().join("repos")
 }
 
 fn repo_cache_dir_name(url: &str) -> String {
@@ -599,7 +599,7 @@ fn local_cleanup_image(engine: &ContainerEngine, preferred: &str) -> Option<Stri
 
 fn stop_build_containers(engine: &ContainerEngine) {
     let Ok(output) = Command::new(engine.binary())
-        .args(["ps", "-aq", "--filter", "name=git2pkg-ai-build-"])
+        .args(["ps", "-aq", "--filter", "name=git2pkg-build-"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
@@ -623,10 +623,10 @@ fn cleanup_all_cache_in(cache: &Path) -> bool {
 }
 
 /// Beenden-Auswahl „Löschen“: kompletter Cache, inkl. Repos und Builds.
-/// Lern-Daten unter `~/.config/git2pkg-ai/` bleiben bewusst unberührt.
+/// Lern-Daten unter `~/.config/git2pkg/` bleiben bewusst unberührt.
 pub fn cleanup_all_cache_with(engine: ContainerEngine, image: &str) -> bool {
     stop_build_containers(&engine);
-    let cache = git2pkg_ai_cache_root();
+    let cache = git2pkg_cache_root();
     if cleanup_all_cache_in(&cache) {
         return true;
     }
@@ -890,7 +890,7 @@ pub enum BuildEvent {
     Cancelled,
 }
 
-const CANCEL_TOKEN: &str = "__GIT2PKG_AI_CANCELLED__";
+const CANCEL_TOKEN: &str = "__GIT2PKG_CANCELLED__";
 
 struct CancelWatchDone(Arc<AtomicBool>);
 impl Drop for CancelWatchDone {
@@ -3028,8 +3028,7 @@ fn build_script_with_flags(
     };
     lines.push(artifact_glob.to_string());
     lines.push(
-        "if [ -z \"$artifact\" ]; then echo '__GIT2PKG_AI_NO_ARTIFACT__' >&2; exit 1; fi"
-            .to_string(),
+        "if [ -z \"$artifact\" ]; then echo '__GIT2PKG_NO_ARTIFACT__' >&2; exit 1; fi".to_string(),
     );
     // Ein bloß vorhandenes Paket ist kein Erfolg: nach einem CMake-/Compiler-
     // Fehler darf kein leeres Artefakt den OK-Marker ausloesen.
@@ -3037,19 +3036,19 @@ fn build_script_with_flags(
         r#"case "$artifact" in
   *.pkg.tar.zst|*.tar.zst)
     if ! (tar -tf "$artifact" 2>/dev/null || tar --zstd -tf "$artifact" 2>/dev/null) | grep -E '(^|/)usr/(bin|lib|lib64)/[^/]' >/dev/null; then
-      echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
+      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.deb)
     if ! dpkg-deb -c "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/[^/]' >/dev/null; then
-      echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
+      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.rpm)
     if ! rpm -qlp "$artifact" 2>/dev/null | grep -E 'usr/(bin|lib|lib64)/[^/]' >/dev/null; then
-      echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
+      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
@@ -3249,7 +3248,7 @@ mod tests {
         assert!(script.starts_with("#!/usr/bin/env bash\n"));
         assert!(!script.contains("#!/bin/sh"));
         // Logzeilen müssen als echo-Befehle eingebettet sein, nicht als nackter Text.
-        assert!(script.contains("echo '== git2pkg-ai: Setup (pacman) =='"));
+        assert!(script.contains("echo '== git2pkg: Setup (pacman) =='"));
         assert!(script.lines().all(|line| !line.starts_with("==")));
     }
 
@@ -3327,8 +3326,7 @@ mod tests {
         assert!(script.contains("! -path '*/docs/*'"));
         assert!(script.contains("app_icon.*|icon.*"));
         assert!(script.contains("*icon*|*logo*"));
-        let path =
-            std::env::temp_dir().join(format!("git2pkg-ai-assets-{}.sh", std::process::id()));
+        let path = std::env::temp_dir().join(format!("git2pkg-assets-{}.sh", std::process::id()));
         std::fs::write(&path, script).unwrap();
         let ok = std::process::Command::new("bash")
             .arg("-n")
@@ -3376,7 +3374,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-ai-icon-stage-{}-{}",
+            "git2pkg-icon-stage-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3457,7 +3455,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-ai-fallback-{}-{}",
+            "git2pkg-fallback-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3616,7 +3614,7 @@ mod tests {
     #[test]
     fn repo_skripte_werden_generisch_erkannt() {
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-ai-script-scan-{}-{}",
+            "git2pkg-script-scan-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3692,7 +3690,7 @@ mod tests {
             BuildStrategy::DirectStagingFallback,
         ];
         let path =
-            std::env::temp_dir().join(format!("git2pkg-ai-buildmatrix-{}.sh", std::process::id()));
+            std::env::temp_dir().join(format!("git2pkg-buildmatrix-{}.sh", std::process::id()));
         for system in systems {
             for strategy in strategies {
                 let script =
@@ -4089,12 +4087,12 @@ mod tests {
                 family
             );
             let check = script
-                .find("__GIT2PKG_AI_NO_ARTIFACT__")
+                .find("__GIT2PKG_NO_ARTIFACT__")
                 .expect("artefaktcheck");
             let ok = script.find(OK_MARKER).expect("ok-marker");
             assert!(check < ok, "{:?}: check muss vor OK stehen", family);
             let empty = script
-                .find("__GIT2PKG_AI_EMPTY_PACKAGE__")
+                .find("__GIT2PKG_EMPTY_PACKAGE__")
                 .expect("leerpaketcheck");
             assert!(
                 empty < ok,
@@ -4169,7 +4167,7 @@ mod tests {
     #[test]
     fn nur_echte_fehler_werden_als_err_markiert() {
         assert!(!is_error_line("Klone nach /work/src ..."));
-        assert!(!is_error_line("Compiling git2pkg-ai v0.1.0"));
+        assert!(!is_error_line("Compiling git2pkg v0.1.0"));
         assert!(is_error_line("error: could not compile"));
         assert!(is_error_line("fatal: not a git repository"));
         assert!(is_error_line("FEHLER: Paket fehlt"));
@@ -4334,7 +4332,7 @@ mod tests {
     #[test]
     fn build_reste_bereinigen_laesst_quellcode_stehen() {
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-ai-cleanup-{}-{}",
+            "git2pkg-cleanup-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -4379,7 +4377,7 @@ mod tests {
     #[test]
     fn build_cache_loeschen_laesst_repo_cache_stehen() {
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-ai-builds-{}-{}",
+            "git2pkg-builds-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -4402,7 +4400,7 @@ mod tests {
     #[test]
     fn erfolgreicher_build_entfernt_hashordner_und_leeres_builds_verzeichnis() {
         let builds = std::env::temp_dir().join(format!(
-            "git2pkg-ai-success-cleanup-{}-{}",
+            "git2pkg-success-cleanup-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -4428,7 +4426,7 @@ mod tests {
     #[test]
     fn source_group_datei_aus_external_project_hint_findet() {
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-ai-hint-{}-{}",
+            "git2pkg-hint-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -4453,7 +4451,7 @@ mod tests {
     #[test]
     fn source_group_block_wird_kommentiert() {
         let path = std::env::temp_dir().join(format!(
-            "git2pkg-ai-source-group-{}-{}.txt",
+            "git2pkg-source-group-{}-{}.txt",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -4498,28 +4496,28 @@ mod tests {
     #[test]
     fn install_command_passt_zur_distro() {
         let artifact = vec![PathBuf::from(
-            "/tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst",
+            "/tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst",
         )];
         assert_eq!(
             install_command(
                 &config(DistroFamily::Arch, TargetFormat::NativePackage),
                 &artifact
             ),
-            "sudo pacman -U /tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst"
+            "sudo pacman -U /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
         assert_eq!(
             install_command(
                 &config(DistroFamily::Debian, TargetFormat::NativePackage),
                 &artifact
             ),
-            "sudo apt install /tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst"
+            "sudo apt install /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
         assert_eq!(
             install_command(
                 &config(DistroFamily::Suse, TargetFormat::NativePackage),
                 &artifact
             ),
-            "sudo zypper install /tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst"
+            "sudo zypper install /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
     }
 
@@ -4585,7 +4583,7 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        let cache = root.join("git2pkg-ai");
+        let cache = root.join("git2pkg");
         let mappings = root.join("learned_mappings.json");
         fs::create_dir_all(cache.join("builds/example-hash/src/.git/objects/aa")).unwrap();
         fs::create_dir_all(cache.join("repos/example-hash/.git/objects/bb")).unwrap();

@@ -175,7 +175,7 @@ mod tests {
                 DistroFamily::Unknown => unreachable!(),
             }
             let path = std::env::temp_dir().join(format!(
-                "git2pkg-ai-format-{:?}-{}.sh",
+                "git2pkg-format-{:?}-{}.sh",
                 family,
                 std::process::id()
             ));

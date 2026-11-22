@@ -8,13 +8,13 @@ assignees: ''
 
 **Git repository URL**
 
-<!-- The exact URL you pasted into git2pkg-ai. -->
+<!-- The exact URL you pasted into git2pkg. -->
 
 https://github.com/
 
 **Host distribution**
 
-<!-- From the status bar in git2pkg-ai, or: cat /etc/os-release -->
+<!-- From the status bar in git2pkg, or: cat /etc/os-release -->
 
 - Distribution:
 - Version / ID:
@@ -41,7 +41,7 @@ https://github.com/
 
 **Copied build log**
 
-<!-- Click "Log kopieren" / "Copy log" in git2pkg-ai and paste the COMPLETE output here. -->
+<!-- Click "Log kopieren" / "Copy log" in git2pkg and paste the COMPLETE output here. -->
 
 ```text
 PASTE THE FULL BUILD LOG HERE

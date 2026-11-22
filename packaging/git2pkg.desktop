@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=git2pkg-ai
+Name=git2pkg
 GenericName=Package Builder
 Comment=Isolated package builds from Git repositories
-Exec=git2pkg-ai
-Icon=git2pkg-ai
+Exec=git2pkg
+Icon=git2pkg
 Terminal=false
 Categories=Development;
 Keywords=package;build;git;container;

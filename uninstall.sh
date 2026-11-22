@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# git2pkg-ai - clean uninstallation.
+# git2pkg - clean uninstallation.
 # Reads the installation path from the start-menu entry, if present.
 set -euo pipefail
 
 BOLD=$'\033[1m'
 RESET=$'\033[0m'
 DESKTOP_DIR="$HOME/.local/share/applications"
-DESKTOP_FILE="$DESKTOP_DIR/git2pkg-ai.desktop"
-ICON_FILE="$HOME/.local/share/icons/hicolor/256x256/apps/git2pkg-ai.png"
+DESKTOP_FILE="$DESKTOP_DIR/git2pkg.desktop"
+ICON_FILE="$HOME/.local/share/icons/hicolor/256x256/apps/git2pkg.png"
 
 say() { printf '%s\n' "$*"; }
 bold() { printf '%s%s%s\n' "$BOLD" "$1" "$RESET"; }
@@ -31,9 +31,9 @@ fi
 
 if [[ -z "$BINARY" ]]; then
   say "No start-menu entry with a path was found."
-  printf "Please enter the path of the binary to remove (default ./git2pkg-ai): "
+  printf "Please enter the path of the binary to remove (default ./git2pkg): "
   read -r BINARY
-  BINARY=${BINARY:-./git2pkg-ai}
+  BINARY=${BINARY:-./git2pkg}
   case "$BINARY" in
     "~/"*) BINARY="$HOME/${BINARY#\~/}" ;;
   esac

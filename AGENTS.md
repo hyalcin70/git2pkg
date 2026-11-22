@@ -1,23 +1,23 @@
 # AGENTS.md — Working Rules for AI Coding Agents
 
 This file is the authoritative, durable instruction set for any AI coding agent
-working on `git2pkg-ai`. Read it before changing anything. Keep it accurate when
+working on `git2pkg`. Read it before changing anything. Keep it accurate when
 the repository structure or the workflow changes.
 
 > User-facing documentation is maintained in five languages: `README.md`
 > (EN), `README.de.md` (DE), `README.tr.md` (TR), `README.es.md` (ES) and
 > `README.fr.md` (FR). This agent guide is intentionally written in English.
 
-> **Local derivative.** `git2pkg-ai` is a local-only derivative of
-> `hyalcin70/git2pkg`. It is never pushed anywhere: the upstream remote is
-> named `upstream` and is read-only. Commits stay local. Keep the original
-> project directory untouched.
+> **Repository.** `git2pkg` is maintained at
+> [`hyalcin70/git2pkg`](https://github.com/hyalcin70/git2pkg); `origin` is the
+> canonical remote with push access. Never push without an explicit request
+> from the maintainer. Commits stay local until then.
 
 ---
 
 ## 1. Project Overview & Architecture
 
-`git2pkg-ai` is a **100 % deterministic, local Rust application**. It has an
+`git2pkg` is a **100 % deterministic, local Rust application**. It has an
 `egui`/`eframe` desktop GUI and a headless CLI. It builds public Git
 repositories inside ephemeral `docker` or `podman` containers and produces
 native Linux packages (`.pkg.tar.zst`, `.deb`, `.rpm`) or a standalone binary.
@@ -32,7 +32,7 @@ APIs, no LLM calls and no external services inside the shipped program.
 Dependency resolution is deterministic and self-learning. It lives in
 `src/core/resolver.rs` (NOT `src/resolver.rs`). Learned mappings, repository
 profiles and build recipes are persisted under
-`~/.config/git2pkg-ai/learned_mappings.json`.
+`~/.config/git2pkg/learned_mappings.json`.
 
 The learning store is safe against concurrent writers (GUI + CLI): every save
 merges the on-disk state under a short-lived lock file and replaces the file
@@ -51,7 +51,7 @@ a mapping whose package is still missing in the next round is scored down as
 well ("install success is not a fix"). Package names that cannot be installed
 are cached per distro family too, never globally. Defaults and legacy flat
 mappings remain as fallbacks.
-`git2pkg-ai --explain-learning` prints the learned table.
+`git2pkg --explain-learning` prints the learned table.
 
 Failures are classified (dependency, version/ABI, bundled dependency,
 source/compiler, packaging). If no dependency pattern remains and the failure
@@ -96,14 +96,14 @@ find their libraries. Project versions are read from Cargo, CMake,
 `pyproject.toml`, `AC_INIT`/`PACKAGE_VERSION`, then Git tags; untagged
 checkouts fall back to `0.1.0`.
 
-Persistent Git clones live in `~/.cache/git2pkg-ai/repos/repo-<repo_hash>/` and
+Persistent Git clones live in `~/.cache/git2pkg/repos/repo-<repo_hash>/` and
 are updated in place; build workspaces use the separate prefix
-`~/.cache/git2pkg-ai/builds/build-<unix_millis>-<pid>/src/` and are complete
+`~/.cache/git2pkg/builds/build-<unix_millis>-<pid>/src/` and are complete
 independent copies (no symlink or shared clone). The exit dialog option
 "Delete everything" first cancels the active build and stops build containers,
-then wipes the complete `~/.cache/git2pkg-ai/` tree (including `repos/`), using a
+then wipes the complete `~/.cache/git2pkg/` tree (including `repos/`), using a
 short-lived container if root-owned artifacts remain. Learned mappings in
-`~/.config/git2pkg-ai/learned_mappings.json` are never touched by cache cleanup;
+`~/.config/git2pkg/learned_mappings.json` are never touched by cache cleanup;
 only verified build recipes are reused. Recipes and their saved package names
 are scoped to the target distro family, so an Arch recipe never leaks into a
 Debian build. Unresolvable (often optional) CMake modules do not abort a build
@@ -118,7 +118,7 @@ applied to system-lib and shared-lib strategies. Generated CMake PKGBUILDs use
 
 ## 2. Strict Scope & Non-Goals
 
-`git2pkg-ai` is exclusively for **native Linux desktop and CLI applications**.
+`git2pkg` is exclusively for **native Linux desktop and CLI applications**.
 
 Strictly out of scope — never add support or special cases for:
 
@@ -168,7 +168,7 @@ it applies to every project and never special-cases one.
 - `src/core/packaging/rpm.rs` — Fedora/RHEL and openSUSE `.rpm`
 - `src/core/packaging/verify.rs` — package verification
 - `packaging/PKGBUILD` — Arch source package template
-- `packaging/git2pkg-ai.desktop` — desktop launcher
+- `packaging/git2pkg.desktop` — desktop launcher
 
 ### GUI
 
@@ -238,8 +238,8 @@ Additional practical rules:
 - The main GUI is `src/gui/app.rs`; never look for or create `src/ui.rs` as the
   primary GUI module.
 - After each completed code change: run QA, restart the GUI with the current
-  release binary and commit locally. **Never push** — this derivative has no
-  writable remote.
+  release binary and commit locally. Do not push unless the maintainer asks
+  explicitly.
 - Create physical backups under `/home/hakan/projects/` when a backup folder is
   requested; never delete old backups.
 
@@ -266,7 +266,7 @@ Then:
 
 - Review `git diff` and confirm no hardcoded project names or repository URLs
   were introduced in Rust code.
-- Restart the GUI with the freshly built `target/release/git2pkg-ai`.
+- Restart the GUI with the freshly built `target/release/git2pkg`.
 - Commit locally with a clear message. **Do not push.**
 
 The same gates run in CI (`.github/workflows/ci.yml`) on every push to `main`
@@ -279,7 +279,7 @@ Version bumps happen **only when cutting a release**:
   (for example `0.2.0alpha25`). This PKGBUILD builds the local checkout and
   deliberately has no `_tag` or source archive.
 - Create an annotated tag: `git tag -a v<VERSION> -m "Release v<VERSION>"`.
-- Tagging stays local for this derivative; do not push tags.
+- Do not push tags unless the maintainer asks explicitly.
 
 `--reset-learning` deletes `learned_mappings.json` without touching the Git
 repository cache and prints a confirmation.

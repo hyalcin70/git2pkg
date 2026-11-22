@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# git2pkg-ai - interactive installation script.
+# git2pkg - interactive installation script.
 # No hidden directories are used without asking the user first.
 set -euo pipefail
 
 BOLD=$'\033[1m'
 RESET=$'\033[0m'
-SOURCE="target/release/git2pkg-ai"
+SOURCE="target/release/git2pkg"
 DESKTOP_DIR="$HOME/.local/share/applications"
-DESKTOP_FILE="$DESKTOP_DIR/git2pkg-ai.desktop"
+DESKTOP_FILE="$DESKTOP_DIR/git2pkg.desktop"
 ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
-ICON_FILE="$ICON_DIR/git2pkg-ai.png"
+ICON_FILE="$ICON_DIR/git2pkg.png"
 ASSET_ICON="assets/app_icon.png"
 
 say() { printf '%s\n' "$*"; }
@@ -22,11 +22,11 @@ is_yes() {
 }
 
 if [[ ! -f Cargo.toml ]]; then
-  echo "Error: please run this script from the git2pkg-ai project directory." >&2
+  echo "Error: please run this script from the git2pkg project directory." >&2
   exit 1
 fi
 
-say "Building git2pkg-ai in release mode …"
+say "Building git2pkg in release mode …"
 if ! cargo build --release; then
   echo "The build failed - nothing has been installed." >&2
   exit 1
@@ -38,19 +38,19 @@ if [[ ! -f "$SOURCE" ]]; then
 fi
 
 say ""
-say "Where should the finished git2pkg-ai binary be copied?"
-say "  1) Right here in the project folder     -> ./git2pkg-ai               (default)"
-say "  2) Visible in your home folder          -> ~/Applications/git2pkg-ai"
-say "  3) Directly on the Desktop              -> ~/Desktop/git2pkg-ai"
+say "Where should the finished git2pkg binary be copied?"
+say "  1) Right here in the project folder     -> ./git2pkg               (default)"
+say "  2) Visible in your home folder          -> ~/Applications/git2pkg"
+say "  3) Directly on the Desktop              -> ~/Desktop/git2pkg"
 say "  4) Custom path"
 printf "Selection [1-4, default 1]: "
 read -r choice
 choice=${choice:-1}
 
 case "$choice" in
-  1) TARGET="$PWD/git2pkg-ai" ;;
-  2) TARGET="$HOME/Applications/git2pkg-ai" ;;
-  3) TARGET="$HOME/Desktop/git2pkg-ai" ;;
+  1) TARGET="$PWD/git2pkg" ;;
+  2) TARGET="$HOME/Applications/git2pkg" ;;
+  3) TARGET="$HOME/Desktop/git2pkg" ;;
   4)
     printf "Please enter the destination path (a leading ~/ is allowed): "
     read -r custom
@@ -67,7 +67,7 @@ case "$choice" in
       TARGET="$PWD/$TARGET"
     fi
     if [[ -d "$TARGET" || "$TARGET" == */ ]]; then
-      TARGET="${TARGET%/}/git2pkg-ai"
+      TARGET="${TARGET%/}/git2pkg"
     fi
     ;;
   *)
@@ -109,11 +109,11 @@ if is_yes "$menu_answer"; then
   cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Type=Application
-Name=git2pkg-ai
+Name=git2pkg
 GenericName=Package Builder
 Comment=Isolated package builds from Git repositories
 Exec="$TARGET"
-Icon=git2pkg-ai
+Icon=git2pkg
 Terminal=false
 Categories=Development;Utility;
 EOF
@@ -133,7 +133,7 @@ if [[ "$MENU_CREATED" == "yes" ]]; then
   say "Start-menu entry created: $DESKTOP_FILE"
 fi
 
-# Container engine check - git2pkg-ai needs either Podman or Docker.
+# Container engine check - git2pkg needs either Podman or Docker.
 say ""
 if command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
   say "Container engine: found (Podman or Docker)."
@@ -168,6 +168,6 @@ else
   esac
 
   echo "Warning: neither Podman nor Docker was found on this system."
-  echo "git2pkg-ai needs one of them to build packages. Install it with:"
+  echo "git2pkg needs one of them to build packages. Install it with:"
   printf '  %s\n' "$engine_cmd"
 fi

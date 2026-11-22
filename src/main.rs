@@ -76,11 +76,11 @@ fn parse_geometry(token: &str) -> Option<(i32, i32)> {
 }
 
 fn print_usage() {
-    println!("git2pkg-ai - isolated package builder from Git repositories");
+    println!("git2pkg - isolated package builder from Git repositories");
     println!();
     println!("Usage:");
-    println!("  git2pkg-ai                         Start the graphical interface");
-    println!("  git2pkg-ai --cli <URL> [options]   Build without the GUI");
+    println!("  git2pkg                         Start the graphical interface");
+    println!("  git2pkg --cli <URL> [options]   Build without the GUI");
     println!();
     println!("CLI options:");
     println!("  --format=package|binary         Package type (default: package)");
@@ -100,7 +100,7 @@ fn main() -> eframe::Result<()> {
         .skip(1)
         .any(|arg| arg == "-V" || arg == "--version")
     {
-        println!("git2pkg-ai {}", env!("CARGO_PKG_VERSION"));
+        println!("git2pkg {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     if args
@@ -120,7 +120,7 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
     if args.len() >= 2 && args[1] == "--cli" && args.len() < 3 {
-        eprintln!("git2pkg-ai: --cli requires a repository URL");
+        eprintln!("git2pkg: --cli requires a repository URL");
         print_usage();
         return Ok(());
     }
@@ -139,7 +139,7 @@ fn main() -> eframe::Result<()> {
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([1145.0, 780.0])
         .with_min_inner_size([785.0, 520.0])
-        .with_title(format!("git2pkg-ai v{}", env!("CARGO_PKG_VERSION")));
+        .with_title(format!("git2pkg v{}", env!("CARGO_PKG_VERSION")));
     let viewport = match app_icon() {
         Some(icon) => viewport.with_icon(icon),
         None => viewport,
@@ -155,12 +155,12 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "git2pkg-ai",
+        "git2pkg",
         options,
         Box::new(|cc| {
             gui::fonts::install(&cc.egui_ctx);
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Ok(Box::new(gui::app::Git2PkgAiApp::new()))
+            Ok(Box::new(gui::app::Git2PkgApp::new()))
         }),
     )
 }

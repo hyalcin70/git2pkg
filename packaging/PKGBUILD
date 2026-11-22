@@ -1,7 +1,7 @@
 # Maintainer: SattNEK
-# Local-only derivative: this PKGBUILD builds the checkout in the parent
-# directory instead of downloading an upstream archive.
-pkgname=git2pkg-ai
+# Local build: this PKGBUILD builds the checkout in the parent directory
+# instead of downloading a release archive.
+pkgname=git2pkg
 pkgver=0.2.0alpha25
 pkgrel=1
 pkgdesc="Isolated package builder from Git repositories for Linux distributions"
@@ -28,7 +28,7 @@ package() {
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/pixmaps/$pkgname.png"
 
-  install -Dm644 packaging/git2pkg-ai.desktop "$pkgdir/usr/share/applications/git2pkg-ai.desktop"
+  install -Dm644 packaging/git2pkg.desktop "$pkgdir/usr/share/applications/git2pkg.desktop"
 
   # Desktop- und Icon-Dateien liegen je nach Projekt in assets/ oder packaging/.
   for f in assets/*.desktop packaging/*.desktop; do
