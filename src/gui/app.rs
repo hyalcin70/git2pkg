@@ -56,7 +56,7 @@ impl EngineMode {
     }
 }
 
-pub struct Git2PkgApp {
+pub struct Git2PkgAiApp {
     url: String,
     target: TargetFormat,
     target_distro: TargetDistro,
@@ -205,7 +205,7 @@ impl egui::TextBuffer for ReadOnlyText<'_> {
     }
 }
 
-impl Git2PkgApp {
+impl Git2PkgAiApp {
     pub fn new() -> Self {
         // Wissensdatei beim Programmstart anlegen/befüllen.
         let _ = MappingStore::load();
@@ -303,7 +303,7 @@ impl Git2PkgApp {
             rgba.as_raw(),
         );
         self.app_icon =
-            Some(ctx.load_texture("git2pkg_app_icon", pixels, egui::TextureOptions::LINEAR));
+            Some(ctx.load_texture("git2pkg-ai_app_icon", pixels, egui::TextureOptions::LINEAR));
     }
 
     /// Lädt das eingebettete "Made for Linux"-Badge für die Statusleiste.
@@ -377,13 +377,7 @@ impl Git2PkgApp {
 
     /// Menschlich lesbarer Name der nächsten Strategie in der aktiven Sprache.
     fn next_strategy_label(&self) -> &'static str {
-        let texts = self.texts();
-        match self.next_strategy {
-            BuildStrategy::Default => texts.strategy_default(),
-            BuildStrategy::SystemLibsOnly => texts.strategy_system_libs(),
-            BuildStrategy::RepoScript => texts.strategy_repo_script(),
-            BuildStrategy::DirectStagingFallback => texts.strategy_direct(),
-        }
+        self.texts().strategy_label(self.next_strategy)
     }
 
     /// Neuer Anlauf mit dem vorhandenen Quellcode und der nächsten Strategie.
@@ -432,7 +426,7 @@ impl Git2PkgApp {
         self.log.clear();
         self.step = texts.starting().to_string();
         self.log.push_str(&format!(
-            "$ git2pkg build {} ({})\n",
+            "$ git2pkg-ai build {} ({})\n",
             url,
             self.target.key()
         ));
@@ -609,13 +603,13 @@ impl Git2PkgApp {
     }
 }
 
-impl Default for Git2PkgApp {
+impl Default for Git2PkgAiApp {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Git2PkgApp {
+impl Git2PkgAiApp {
     /// Distributionsspezifischer Installationsbefehl hinter `pkexec`.
     fn install_args(&self, path: &Path) -> Vec<String> {
         let package = path.to_string_lossy().into_owned();
@@ -706,7 +700,7 @@ fn is_system_package(path: &Path) -> bool {
     name.ends_with(".pkg.tar.zst") || name.ends_with(".deb") || name.ends_with(".rpm")
 }
 
-impl eframe::App for Git2PkgApp {
+impl eframe::App for Git2PkgAiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.building {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -738,7 +732,7 @@ impl eframe::App for Git2PkgApp {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                ui.strong("git2pkg");
+                ui.strong("git2pkg-ai");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .button(texts.reset_learning())
@@ -893,7 +887,7 @@ impl eframe::App for Git2PkgApp {
                             });
                             ui.add_space(6.0);
                         }
-                        ui.heading(format!("git2pkg v{}", env!("CARGO_PKG_VERSION")));
+                        ui.heading(format!("git2pkg-ai v{}", env!("CARGO_PKG_VERSION")));
                         ui.add_space(4.0);
                         ui.label(texts.about_description());
                         ui.add_space(6.0);
@@ -1239,7 +1233,7 @@ impl eframe::App for Git2PkgApp {
                     );
                 }
                 ui.vertical(|ui| {
-                    ui.heading("git2pkg");
+                    ui.heading("git2pkg-ai");
                     ui.label(texts.subtitle());
                 });
             });
@@ -1952,9 +1946,9 @@ mod tests {
 
     #[test]
     fn log_dateiname_enthält_den_versuch() {
-        assert_eq!(suggested_log_filename(1), "git2pkg-build-1.log");
-        assert_eq!(suggested_log_filename(3), "git2pkg-build-3.log");
-        assert_eq!(suggested_log_filename(0), "git2pkg-build-1.log");
+        assert_eq!(suggested_log_filename(1), "git2pkg-ai-build-1.log");
+        assert_eq!(suggested_log_filename(3), "git2pkg-ai-build-3.log");
+        assert_eq!(suggested_log_filename(0), "git2pkg-ai-build-1.log");
     }
 
     #[test]
@@ -2011,7 +2005,7 @@ mod tests {
             progress_from_line(0.0, "Strategie 1/5: Standard — Runde 1/5", 0),
             0.0
         );
-        assert_eq!(progress_from_line(0.0, "== git2pkg: Setup ==", 0), 0.30);
+        assert_eq!(progress_from_line(0.0, "== git2pkg-ai: Setup ==", 0), 0.30);
         let linking = progress_from_line(0.30, "[140/420] Linking", 200);
         assert!((0.60..0.63).contains(&linking), "Linking: {linking}");
         assert_eq!(progress_from_line(0.5, "Starting package() ...", 200), 0.90);

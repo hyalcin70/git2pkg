@@ -3,7 +3,7 @@
 use super::{line_echo, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
-    let mut lines = vec![line_echo("[pkg] RPM-Paket wird erzeugt")];
+    let mut lines = vec![line_echo("[pkg] building RPM package")];
     lines.push(format!("cd /work/src && {}", ctx.build_step));
     lines.push(format!(
         "cd /work/src && pkgdir=/work/out && {} && {}",
@@ -11,7 +11,7 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     ));
     lines.push("mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}".to_string());
     lines.push(format!(
-        "cat > /root/rpmbuild/SPECS/{name}.spec <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/package-files.list\n%files -f /tmp/package-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
+        "cat > /root/rpmbuild/SPECS/{name}.spec <<'SPEC_EOF'\n%define debug_package %{{nil}}\nName: {name}\nVersion: {version}\nRelease: 1\nSummary: Built by git2pkg-ai\nLicense: GPL-3.0-or-later\nBuildArch: {arch}\nAutoReqProv: yes\n%description\nPackage built by git2pkg-ai.\n%install\nmkdir -p %{{buildroot}}/usr/bin %{{buildroot}}/usr/lib %{{buildroot}}/usr/share\ncp -a /work/out/. %{{buildroot}}/\nstrip --strip-unneeded %{{buildroot}}/usr/bin/* 2>/dev/null || true\n(cd %{{buildroot}} && find . \\( -type f -o -type l \\) | sed 's|^\\.||') > /tmp/package-files.list\n%files -f /tmp/package-files.list\n%defattr(-,root,root,-)\nSPEC_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.rpm(),
@@ -24,7 +24,7 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
         [
             "rpm_file=$(find /root/rpmbuild/RPMS /usr/src/packages/RPMS -type f -name \"*.rpm\" 2>/dev/null | head -n 1 || true)",
             "if [ -z \"$rpm_file\" ]; then",
-            "  echo \"[pkg] Keine RPM-Datei gefunden\" >&2",
+            "  echo \"[pkg] no RPM file found\" >&2",
             "  find /root/rpmbuild/RPMS /usr/src/packages/RPMS -maxdepth 3 -print 2>/dev/null || true",
             "  exit 1",
             "fi",

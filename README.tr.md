@@ -1,16 +1,21 @@
-<p align="center"><img src="assets/app_icon.png" alt="git2pkg" width="128"></p>
+<p align="center"><img src="assets/app_icon.png" alt="git2pkg-ai" width="128"></p>
 
 [English](README.md) | [Deutsch](README.de.md) | [Türkçe](README.tr.md) | [Español](README.es.md) | [Français](README.fr.md)
 
-# git2pkg
+# git2pkg-ai
+
+> **Yerel türev:** `git2pkg-ai`, [`hyalcin70/git2pkg`](https://github.com/hyalcin70/git2pkg)
+> projesinin yalnızca yerel bir çatalıdır. Hiçbir yere yayımlanmaz. Arayüz beş
+> dilde yerelleştirilmiştir; canlı derleme günlükleri İngilizce teknik
+> tanılama mesajlarıdır.
 
 GitHub, GitLab ve benzeri platformlardaki Git depolarını **tek kullanımlık bir
 Podman/Docker konteynerinde** derleyen ve sonucu görünür bir çıktı klasörüne
-(varsayılan olarak `~/Downloads/git2pkg`) koyan küçük bir Linux masaüstü
+(varsayılan olarak `~/Downloads/git2pkg-ai`) koyan küçük bir Linux masaüstü
 arayüzü. Ana sistemin derleyici araç zincirine veya derleme kütüphanelerine
 ihtiyacı yoktur.
 
-`git2pkg` tamamen yerel, deterministik ve kural tabanlıdır. **İçinde yapay
+`git2pkg-ai` tamamen yerel, deterministik ve kural tabanlıdır. **İçinde yapay
 zekâ, LLM veya harici API çağrısı yoktur.** Derleme kararları dosya tespiti,
 derleyici çıktısı üzerinde düzenli ifadeler ve konteynerdeki paket yöneticisi
 ile alınır.
@@ -20,14 +25,14 @@ ile alınır.
 
 ## Kapsam ve Kapsam Dışı Alanlar
 
-`git2pkg` yalnızca yerel Linux masaüstü ve CLI uygulamaları için geliştirilmiştir (ör. C/C++, Rust, Go ve Python araçları). Gömülü/mikrodenetleyici araç zincirleri (ör. Arduino, PlatformIO, ESP-IDF), IDE eklentileri (ör. VS Code uzantıları), mobil uygulamalar ve web uygulamaları bilinçli olarak kapsam dışıdır.
+`git2pkg-ai` yalnızca yerel Linux masaüstü ve CLI uygulamaları için geliştirilmiştir (ör. C/C++, Rust, Go ve Python araçları). Gömülü/mikrodenetleyici araç zincirleri (ör. Arduino, PlatformIO, ESP-IDF), IDE eklentileri (ör. VS Code uzantıları), mobil uygulamalar ve web uygulamaları bilinçli olarak kapsam dışıdır.
 
 ## Neden bunu geliştirdim
 
 GitHub, GitLab ve benzeri yerlerde yeni açık kaynak araçları keşfetmeyi
 seviyorum; ama ana sistemimi onlarca derleme kütüphanesi ve başlık dosyasıyla
 doldurmak ya da AUR gibi üçüncü taraf depolara körü körüne bağımlı olmak
-istemedim. Bu yüzden `git2pkg`'i geliştirdim: Her şey geçici bir konteynerde
+istemedim. Bu yüzden `git2pkg-ai`'i geliştirdim: Her şey geçici bir konteynerde
 derleniyor, ana sistem tamamen temiz kalıyor ve sonunda yerel bir paket
 (`.pkg.tar.zst`, `.deb`, `.rpm`) ya da tek bir ikili dosya çıkıyor — basit bir
 arayüzle herkes kullanabiliyor.
@@ -56,13 +61,13 @@ arayüzle herkes kullanabiliyor.
   içine** kurulur ve derleme yeniden denenir (en fazla 5 deneme).
 - Yerel paketler: `.pkg.tar.zst` (Arch), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).
-- **Çıktı klasörü**: sonuçlar varsayılan olarak `~/Downloads/git2pkg` içine
+- **Çıktı klasörü**: sonuçlar varsayılan olarak `~/Downloads/git2pkg-ai` içine
   yazılır. GUI'deki yerel klasör seçici (`rfd`) veya doğrudan yol girişiyle
   değiştirilebilir.
 - Sonuç işlemleri: çıktı klasörünü aç, derleme tarifini kaydet ve bir şey
   çalıştırılmadan önce tam kurulum komutunu gör.
-- İsteğe bağlı başsız mod: `git2pkg --cli <url> [--format=package|binary]`.
-- Öğrenilen eşleştirmeleri `git2pkg --reset-learning` ile sıfırla (Git deposu önbelleği korunur).
+- İsteğe bağlı başsız mod: `git2pkg-ai --cli <url> [--format=package|binary]`.
+- Öğrenilen eşleştirmeleri `git2pkg-ai --reset-learning` ile sıfırla (Git deposu önbelleği korunur).
 
 ## Gereksinimler
 
@@ -74,7 +79,7 @@ arayüzle herkes kullanabiliyor.
 
 ```sh
 git clone https://github.com/hyalcin70/git2pkg.git
-cd git2pkg
+cd git2pkg-ai
 cargo build --release
 ```
 
@@ -91,7 +96,7 @@ okur.
 
 ## Arch / CachyOS paketi
 
-`packaging/PKGBUILD`, `git2pkg`'i normal bir sistem paketi olarak derler:
+`packaging/PKGBUILD`, `git2pkg-ai`'i normal bir sistem paketi olarak derler:
 
 ```sh
 cd packaging
@@ -116,14 +121,14 @@ src/
 assets/              gömülü Noto Sans + Noto Sans Mono (OFL 1.1)
 .github/workflows/   etiket tetikli GitHub release akışı
 .gitlab-ci.yml       GitLab CI derleme ve paketleme işi
-packaging/PKGBUILD   git2pkg için Arch paket tarifi
+packaging/PKGBUILD   git2pkg-ai için Arch paket tarifi
 ```
 
 ## CI / Sürümler
 
 `v*` ile eşleşen bir etiket `.github/workflows/release.yml` akışını tetikler:
 `ubuntu-latest` üzerinde Linux `x86_64` ikilisi derlenir,
-`git2pkg-linux-x86_64.tar.gz` ve `.sha256` dosyası oluşturulur ve ikisi de
+`git2pkg-ai-linux-x86_64.tar.gz` ve `.sha256` dosyası oluşturulur ve ikisi de
 GitHub sürümüne eklenir. `.gitlab-ci.yml` aynı arşivi GitLab'da derler ve iş
 çıktısı olarak sunar.
 
@@ -156,17 +161,17 @@ yeterli değildir.
 
 ## Destek
 
-Destek tamamen gönüllüdür. `git2pkg` size zaman kazandırdıysa depoya yıldız
+Destek tamamen gönüllüdür. `git2pkg-ai` size zaman kazandırdıysa depoya yıldız
 verin, paylaşın, kopyalanan günlükle bir hata bildirin veya bir çeviri
 katkısında bulunun. Telemetri yok, zorunluluk yok — araç bunların hiçbiri
 olmadan da aynı şekilde çalışır.
 
 > [!IMPORTANT]
-> **Proje Kapsamı ve Tek Kişilik Geliştirme:** `git2pkg`, boş zamanlarımda geliştirdiğim bağımsız bir tek kişilik hobi projesidir. Beta aşamasından itibaren sağlanacak destek yalnızca desteklenen ana dağıtım aileleriyle (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** ve **openSUSE**) sınırlıdır. Egzotik veya niş Linux dağıtımları kesinlikle desteklenmemektedir.
+> **Proje Kapsamı ve Tek Kişilik Geliştirme:** `git2pkg-ai`, boş zamanlarımda geliştirdiğim bağımsız bir tek kişilik hobi projesidir. Beta aşamasından itibaren sağlanacak destek yalnızca desteklenen ana dağıtım aileleriyle (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** ve **openSUSE**) sınırlıdır. Egzotik veya niş Linux dağıtımları kesinlikle desteklenmemektedir.
 
 ## Teşekkürler ve şeffaflık
 
-Bu projenin fikri bana ait; yönünü belirledim, testlerini yaptım ve hataları analiz ettim — ancak kaynak kodun neredeyse tamamı yapay zeka araçlarının yardımıyla oluşturuldu. Bunu özellikle açık ve dürüstçe belirtmek istiyorum. Bununla birlikte, ortaya çıkan `git2pkg` programının kendisi hiçbir yapay zeka veya harici API kullanmadan %100 yerel ve deterministik olarak çalışır.
+Bu projenin fikri bana ait; yönünü belirledim, testlerini yaptım ve hataları analiz ettim — ancak kaynak kodun neredeyse tamamı yapay zeka araçlarının yardımıyla oluşturuldu. Bunu özellikle açık ve dürüstçe belirtmek istiyorum. Bununla birlikte, ortaya çıkan `git2pkg-ai` programının kendisi hiçbir yapay zeka veya harici API kullanmadan %100 yerel ve deterministik olarak çalışır.
 
 ## Lisans
 
@@ -177,4 +182,4 @@ Noto Sans Mono yazı tipi dosyaları SIL Open Font License 1.1 ile lisanslıdır
 
 <a href="https://github.com/NousResearch/hermes-agent"><img src="assets/badges/hermes-agent.svg" alt="Hermes Agent" height="28"></a>
 
-`git2pkg` geliştirilirken yerel bir geliştirme aracı olarak yardımcı olan Nous Research ekibinin [Hermes Agent](https://github.com/NousResearch/hermes-agent) projesine özel teşekkürler (`git2pkg` uygulamasının kendisi ise herhangi bir yapay zeka bağımlılığı olmadan %100 deterministik olarak çalışır).
+`git2pkg-ai` geliştirilirken yerel bir geliştirme aracı olarak yardımcı olan Nous Research ekibinin [Hermes Agent](https://github.com/NousResearch/hermes-agent) projesine özel teşekkürler (`git2pkg-ai` uygulamasının kendisi ise herhangi bir yapay zeka bağımlılığı olmadan %100 deterministik olarak çalışır).

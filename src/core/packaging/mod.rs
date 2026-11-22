@@ -94,7 +94,7 @@ for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist
   done < <(find "$directory" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -print0 2>/dev/null)
 done
 if [ -z "$(find "$pkgdir/usr/bin" -maxdepth 1 -type f -print -quit 2>/dev/null)" ]; then
-  echo "[pkg] Keine ausführbaren Cargo-Binaries gefunden" >&2
+  echo "[pkg] no executable Cargo binaries found" >&2
   exit 1
 fi"#
 }
@@ -164,7 +164,7 @@ mod tests {
                 DistroFamily::Unknown => unreachable!(),
             }
             let path = std::env::temp_dir().join(format!(
-                "git2pkg-format-{:?}-{}.sh",
+                "git2pkg-ai-format-{:?}-{}.sh",
                 family,
                 std::process::id()
             ));

@@ -1401,7 +1401,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "git2pkg"
+name = "git2pkg-ai"
 version = "0.2.0-alpha.23"
 dependencies = [
  "arboard",

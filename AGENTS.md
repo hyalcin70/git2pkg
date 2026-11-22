@@ -1,18 +1,23 @@
 # AGENTS.md — Working Rules for AI Coding Agents
 
 This file is the authoritative, durable instruction set for any AI coding agent
-working on `git2pkg`. Read it before changing anything. Keep it accurate when
+working on `git2pkg-ai`. Read it before changing anything. Keep it accurate when
 the repository structure or the workflow changes.
 
 > User-facing documentation is maintained in five languages: `README.md`
 > (EN), `README.de.md` (DE), `README.tr.md` (TR), `README.es.md` (ES) and
 > `README.fr.md` (FR). This agent guide is intentionally written in English.
 
+> **Local derivative.** `git2pkg-ai` is a local-only derivative of
+> `hyalcin70/git2pkg`. It is never pushed anywhere: the upstream remote is
+> named `upstream` and is read-only. Commits stay local. Keep the original
+> project directory untouched.
+
 ---
 
 ## 1. Project Overview & Architecture
 
-`git2pkg` is a **100 % deterministic, local Rust application**. It has an
+`git2pkg-ai` is a **100 % deterministic, local Rust application**. It has an
 `egui`/`eframe` desktop GUI and a headless CLI. It builds public Git
 repositories inside ephemeral `docker` or `podman` containers and produces
 native Linux packages (`.pkg.tar.zst`, `.deb`, `.rpm`) or a standalone binary.
@@ -27,18 +32,31 @@ APIs, no LLM calls and no external services inside the shipped program.
 Dependency resolution is deterministic and self-learning. It lives in
 `src/core/resolver.rs` (NOT `src/resolver.rs`). Learned mappings, repository
 profiles and build recipes are persisted under
-`~/.config/git2pkg/learned_mappings.json`.
+`~/.config/git2pkg-ai/learned_mappings.json`.
+
+The learning store is safe against concurrent writers (GUI + CLI): every save
+merges the on-disk state under a short-lived lock file and replaces the file
+atomically. All sections are bounded by deterministic LRU eviction
+(`MAX_LEARNED_PACKAGES`, `MAX_NEGATIVE_ENTRIES`, `MAX_BUILD_FIXES`,
+`MAX_REPO_PROFILES`, `MAX_BUILD_RECIPES` in `resolver.rs`).
+
+**Log language policy:** static UI text is localized in five languages
+(`src/gui/i18n.rs`), but live build logs are English technical diagnostics
+(`[learn]`, `[warn]`, `[strategy]`, `[retry]`, `[cmake]`, ...). Do not add new
+German log strings; the strategy display names in the GUI come from
+`Texts::strategy_label`, while `BuildStrategy::label()` is the English
+canonical name used in logs and stored profiles.
 
 The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
 `src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
 
-Persistent Git clones live in `~/.cache/git2pkg/repos/<repo_hash>/` and are
+Persistent Git clones live in `~/.cache/git2pkg-ai/repos/<repo_hash>/` and are
 updated in place. Temporary build workspaces live in
-`~/.cache/git2pkg/builds/<build_id>/` and are removed after success or by the
+`~/.cache/git2pkg-ai/builds/<build_id>/` and are removed after success or by the
 exit cleanup. If root-owned Docker artifacts block host deletion, a short-lived
 container removes them; `repos/` and learned mappings are never touched.
-Learned mappings are in `~/.config/git2pkg/learned_mappings.json`; only verified
+Learned mappings are in `~/.config/git2pkg-ai/learned_mappings.json`; only verified
 build recipes are reused. After package installs `CMakeCache.txt`/`CMakeFiles`
 are reset; missing CLI tools are resolved through the package manager file
 database; `option(...)` flags in `CMakeLists.txt` are applied to system-lib and
@@ -48,7 +66,7 @@ shared-lib strategies.
 
 ## 2. Strict Scope & Non-Goals
 
-`git2pkg` is exclusively for **native Linux desktop and CLI applications**.
+`git2pkg-ai` is exclusively for **native Linux desktop and CLI applications**.
 
 Strictly out of scope — never add support or special cases for:
 
@@ -89,7 +107,7 @@ classes instead.
 - `src/core/packaging/rpm.rs` — Fedora/RHEL and openSUSE `.rpm`
 - `src/core/packaging/verify.rs` — package verification
 - `packaging/PKGBUILD` — Arch source package template
-- `packaging/git2pkg.desktop` — desktop launcher
+- `packaging/git2pkg-ai.desktop` — desktop launcher
 
 ### GUI
 
@@ -123,6 +141,7 @@ classes instead.
 ### Automation / installation
 
 - `.github/workflows/release.yml` — release workflow (tag push → GitHub Release)
+- `.github/workflows/ci.yml` — QA workflow (`fmt`, `clippy`, `test`, release build)
 - `.github/ISSUE_TEMPLATE/build_failure.md`
 - `.gitlab-ci.yml`
 - `install.sh`, `uninstall.sh`
@@ -157,7 +176,8 @@ Additional practical rules:
 - The main GUI is `src/gui/app.rs`; never look for or create `src/ui.rs` as the
   primary GUI module.
 - After each completed code change: run QA, restart the GUI with the current
-  release binary, commit cleanly and push to `origin main`.
+  release binary and commit locally. **Never push** — this derivative has no
+  writable remote.
 - Create physical backups under `/home/hakan/projects/` when a backup folder is
   requested; never delete old backups.
 
@@ -184,18 +204,20 @@ Then:
 
 - Review `git diff` and confirm no hardcoded project names or repository URLs
   were introduced in Rust code.
-- Restart the GUI with the freshly built `target/release/git2pkg`.
-- Commit with a clear message and push to `origin main`.
+- Restart the GUI with the freshly built `target/release/git2pkg-ai`.
+- Commit locally with a clear message. **Do not push.**
+
+The same gates run in CI (`.github/workflows/ci.yml`) on every push to `main`
+and on every pull request.
 
 Version bumps happen **only when cutting a release**:
 
 - Update `Cargo.toml` and `Cargo.lock` (via `cargo check`).
 - Update `packaging/PKGBUILD` with an Arch-compliant `pkgver` without hyphens
-  (for example `0.2.0alpha21`) and `_tag=v0.2.0-alpha.21`.
+  (for example `0.2.0alpha23`). This PKGBUILD builds the local checkout and
+  deliberately has no `_tag` or source archive.
 - Create an annotated tag: `git tag -a v<VERSION> -m "Release v<VERSION>"`.
-- Push both: `git push origin main && git push origin v<VERSION>`.
-- Verify that the GitHub Actions release workflow completed successfully and
-  that the release is visible on GitHub before reporting success.
+- Tagging stays local for this derivative; do not push tags.
 
 `--reset-learning` deletes `learned_mappings.json` without touching the Git
 repository cache and prints a confirmation.

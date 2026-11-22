@@ -4,16 +4,16 @@ use super::{line_echo, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![
-        line_echo("[pkg] Arch-Paket wird erzeugt"),
+        line_echo("[pkg] building Arch package"),
         "id builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder".to_string(),
-        "echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/git2pkg-builder && chmod 440 /etc/sudoers.d/git2pkg-builder".to_string(),
+        "echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/git2pkg-ai-builder && chmod 440 /etc/sudoers.d/git2pkg-ai-builder".to_string(),
     ];
 
     if ctx.has_pkgbuild
         && ctx.strategy != crate::core::container::BuildStrategy::DirectStagingFallback
     {
         lines.extend([
-            line_echo("[pkgbuild] Verwende vorhandene PKGBUILD direkt im Repo (makepkg in /work/src)"),
+            line_echo("[pkgbuild] using existing PKGBUILD directly from the repository (makepkg in /work/src)"),
             "rm -f /work/src/*.pkg.tar.zst".to_string(),
             "mkdir -p /work/cargo-target /work/cargo-home /work/ccache".to_string(),
             "chown -R builder:builder /work/src /work/dist /work/cargo-target /work/cargo-home /work/ccache".to_string(),
@@ -61,7 +61,7 @@ done"#.to_string(),
         "true"
     };
     lines.push(format!(
-        "cat > /work/pkg/PKGBUILD <<'PKGBUILD_EOF'\npkgname={name}\npkgver={version}\npkgrel=1\npkgdesc='Built by git2pkg'\narch=('{arch}')\nlicense=('GPL-3.0-or-later')\noptions=('!strip' '!debug')\ndepends=(${{dep_line}})\nbuild() {{\n  {build_body}\n}}\npackage() {{\n  {install_body}\n}}\nPKGBUILD_EOF",
+        "cat > /work/pkg/PKGBUILD <<'PKGBUILD_EOF'\npkgname={name}\npkgver={version}\npkgrel=1\npkgdesc='Built by git2pkg-ai'\narch=('{arch}')\nlicense=('GPL-3.0-or-later')\noptions=('!strip' '!debug')\ndepends=(${{dep_line}})\nbuild() {{\n  {build_body}\n}}\npackage() {{\n  {install_body}\n}}\nPKGBUILD_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.arch(),

@@ -223,7 +223,7 @@ mod tests {
 
     fn temp_root(name: &str, files: &[&str]) -> std::path::PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("git2pkg-detect-{}-{}", name, std::process::id()));
+            std::env::temp_dir().join(format!("git2pkg-ai-detect-{}-{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         for f in files {

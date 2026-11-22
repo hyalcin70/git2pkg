@@ -27,8 +27,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const OK_MARKER: &str = "__GIT2PKG_BUILD_OK__";
-const DEPS_FAILURE_MARKER: &str = "[deps] Bau fehlgeschlagen";
+const OK_MARKER: &str = "__GIT2PKG_AI_BUILD_OK__";
+const DEPS_FAILURE_MARKER: &str = "[deps] build failed";
 
 fn deps_fallback_needed(output: &str, skip_deps: bool) -> bool {
     !skip_deps && output.contains(DEPS_FAILURE_MARKER)
@@ -158,7 +158,7 @@ impl BuildContainer {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let name = format!("git2pkg-build-{}-{}", std::process::id(), nanos);
+        let name = format!("git2pkg-ai-build-{}-{}", std::process::id(), nanos);
         let args = vec![
             "run".to_string(),
             "-d".to_string(),
@@ -174,7 +174,7 @@ impl BuildContainer {
         ];
         let started = run_streamed(config.engine.binary(), &args, tx)?;
         if !started.success {
-            return Err("Container konnte nicht gestartet werden".to_string());
+            return Err("container could not be started".to_string());
         }
         *config.container_id.lock().unwrap() = Some(name.clone());
         let _ = tx.send(BuildEvent::Log(format!("[container] {}", name)));
@@ -312,19 +312,19 @@ impl BuildStrategy {
 
     pub fn label(self) -> &'static str {
         match self {
-            BuildStrategy::Default => "Standard",
-            BuildStrategy::SystemLibsOnly => "System-Bibliotheken ohne deps/-Vorbau",
-            BuildStrategy::RepoScript => "Repository-Buildskript",
-            BuildStrategy::DirectStagingFallback => "Direkter Build-System-Fallback",
+            BuildStrategy::Default => "Default",
+            BuildStrategy::SystemLibsOnly => "System libraries only (no deps/ prebuild)",
+            BuildStrategy::RepoScript => "Repository build script",
+            BuildStrategy::DirectStagingFallback => "Direct build-system fallback",
         }
     }
 }
 
-/// Standard-Ausgabeordner: `~/Downloads/git2pkg`, relativ zum Home-Verzeichnis
+/// Standard-Ausgabeordner: `~/Downloads/git2pkg-ai`, relativ zum Home-Verzeichnis
 /// des aktuellen Nutzers und nicht zum Arbeitsverzeichnis.
 pub fn default_output_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join("Downloads/git2pkg")
+    Path::new(&home).join("Downloads/git2pkg-ai")
 }
 
 /// Markiert einen fehlgeschlagenen Build im Cache, damit die GUI beim Beenden
@@ -335,14 +335,14 @@ pub fn mark_failed_build(work: &Path) {
 
 fn build_cache_root() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join(".cache/git2pkg/builds")
+    Path::new(&home).join(".cache/git2pkg-ai/builds")
 }
 
 /// Dauerhafter, sauber gehaltener Klon-Cache. Er wird niemals vom Build-Cache-
 /// Cleanup geloescht und bei jedem Lauf nur aktualisiert.
 fn repo_cache_root() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    Path::new(&home).join(".cache/git2pkg/repos")
+    Path::new(&home).join(".cache/git2pkg-ai/repos")
 }
 
 fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
@@ -660,12 +660,12 @@ fn cleanup_successful_build(work: &Path, tx: &Sender<BuildEvent>) {
     match remove_build_dir_recursively(work) {
         Ok(()) => {
             let _ = tx.send(BuildEvent::Log(
-                "[cache] Vollständiger Build-Cache automatisch entfernt".to_string(),
+                "[cache] full build cache removed automatically".to_string(),
             ));
         }
         Err(error) => {
             let _ = tx.send(BuildEvent::Log(format!(
-                "[warn] Build-Cache konnte nicht vollständig entfernt werden: {error}"
+                "[warn] build cache could not be removed completely: {error}"
             )));
         }
     }
@@ -754,7 +754,7 @@ pub enum BuildEvent {
     Cancelled,
 }
 
-const CANCEL_TOKEN: &str = "__GIT2PKG_CANCELLED__";
+const CANCEL_TOKEN: &str = "__GIT2PKG_AI_CANCELLED__";
 
 struct CancelWatchDone(Arc<AtomicBool>);
 impl Drop for CancelWatchDone {
@@ -771,7 +771,7 @@ fn abort_running_build(
     container.stop();
     *config.container_id.lock().unwrap() = None;
     let _ = tx.send(BuildEvent::Log(
-        "[warn] Build vom Benutzer abgebrochen.".to_string(),
+        "[warn] build cancelled by the user.".to_string(),
     ));
     CANCEL_TOKEN.to_string()
 }
@@ -924,7 +924,7 @@ fn heal_source_group(work: &Path, error: &SourceGroupError, tx: &Sender<BuildEve
         return false;
     }
     let _ = tx.send(BuildEvent::Log(format!(
-        "[learn] CMake source_group-Inkompatibilität in {} automatisch behoben",
+        "[learn] fixed CMake source_group incompatibility in {} automatically",
         error.file
     )));
     true
@@ -975,12 +975,12 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             .filter(|name| valid_package_name(name))
             .collect();
         let _ = tx.send(BuildEvent::Log(format!(
-            "[learn] Bekannte Bauweise für Struktur '{}' angewendet",
+            "[learn] applied known build recipe for structure '{}'",
             fingerprint.signature
         )));
         if !learned_packages.is_empty() {
             let _ = tx.send(BuildEvent::Log(format!(
-                "[learn] Gespeicherte Pakete für diesen Build vorinstallieren: {}",
+                "[learn] pre-installing saved packages for this build: {}",
                 learned_packages.join(" ")
             )));
         }
@@ -988,9 +988,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
     if config.strategy == BuildStrategy::RepoScript {
         let _ = tx.send(BuildEvent::Log(format!(
-            "[strategy] {} - Repo-Skript: {}",
+            "[strategy] {} - repository script: {}",
             config.strategy.label(),
-            repo_script.as_deref().unwrap_or("keines gefunden")
+            repo_script.as_deref().unwrap_or("none found")
         )));
     }
     let _ = tx.send(BuildEvent::Log(format!(
@@ -1054,7 +1054,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         step(
             tx,
             texts.step_strategy_round(
-                strategy_name,
+                texts.strategy_label(effective_strategy),
                 effective_strategy.index(),
                 MAX_ATTEMPTS,
                 heal_round,
@@ -1078,14 +1078,14 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             {
                 (
                     BuildStrategy::SystemLibsOnly,
-                    "[learn] Gespeichertes Lern-Profil aktiv — überspringe deps/ und baue direkt gegen System-Bibliotheken".to_string(),
+                    "[learn] stored learning profile active - skipping deps/ and building against system libraries".to_string(),
                 )
             } else {
                 let next = effective_strategy.next(has_deps);
                 (
                     next,
                     format!(
-                        "[learn] Bekanntes unvollständiges Profil für Strategie '{}' übersprungen — starte direkt mit alternativer Strategie",
+                        "[learn] known incomplete profile for strategy '{}' skipped - starting with an alternative strategy",
                         strategy_name
                     ),
                 )
@@ -1102,7 +1102,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         let deps_first = has_deps && effective_strategy == BuildStrategy::Default;
         if deps_first {
             let _ = tx.send(BuildEvent::Log(
-                "[deps] 'deps/CMakeLists.txt' erkannt - lokale Abhaengigkeiten werden zuerst gebaut"
+                "[deps] 'deps/CMakeLists.txt' detected - building local dependencies first"
                     .to_string(),
             ));
         }
@@ -1146,7 +1146,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             && detect_repo_script_distro_rejection(&last_output)
         {
             let _ = tx.send(BuildEvent::Log(
-                "[fallback] Repo-Buildskript unterstuetzt diese Distribution nicht - wechsle zum generischen Build-System"
+                "[fallback] repository build script does not support this distribution - switching to the generic build system"
                     .to_string(),
             ));
             repo_script = None;
@@ -1191,7 +1191,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                             {
                                 if package_lacks_executable(&archive.text) {
                                     let _ = tx.send(BuildEvent::Log(
-                                        "[warn] Erzeugtes Paket enthält keine ausführbare Programmdatei — merke Strategie für dieses Repository als unvollständig".to_string(),
+                                        "[warn] produced package contains no executable program file - marking this strategy as incomplete for the repository".to_string(),
                                     ));
                                     mappings.mark_incomplete_strategy(&config.url, strategy_name);
                                     incomplete_profile = true;
@@ -1209,7 +1209,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                     config.skip_deps = next == BuildStrategy::SystemLibsOnly;
                     forced_strategy = Some(next);
                     let _ = tx.send(BuildEvent::Log(format!(
-                        "[strategy] {} (unvollständiges Profil)",
+                        "[strategy] {} (incomplete profile)",
                         next.label()
                     )));
                     continue;
@@ -1217,7 +1217,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 if direct_tried {
                     mark_failed_build(&work);
                     return Err(
-                        "Build erzeugte auch mit direktem Build-System kein nutzbares Paket"
+                        "build produced no usable package even with the direct build system"
                             .to_string(),
                     );
                 }
@@ -1250,7 +1250,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 mappings.record_repo_packages(&config.url, &fingerprint.signature, &extra_packages);
                 mappings.clear_incomplete_strategy(&config.url, strategy_name);
                 let _ = tx.send(BuildEvent::Log(format!(
-                    "[learn] Verifizierte Bauweise für Struktur '{}' gespeichert",
+                    "[learn] saved verified build recipe for structure '{}'",
                     fingerprint.signature
                 )));
             }
@@ -1265,7 +1265,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         let discovered_flags = cmake_retry_flags(&last_output, &cmake_flags);
         if !discovered_flags.is_empty() {
             let _ = tx.send(BuildEvent::Log(format!(
-                "[cmake] Retry-Flags aus Fehlermeldung übernommen: {}",
+                "[cmake] retry flags taken from the error message: {}",
                 discovered_flags.join(" ")
             )));
             for flag in discovered_flags {
@@ -1299,7 +1299,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         for fix in detect_build_fixes(&last_output) {
             if mappings.learn_build_fix(&fix.key, &fix.value) {
                 let _ = tx.send(BuildEvent::Log(format!(
-                    "[learn] Fehlermuster erkannt -> Fix angewendet & gespeichert: {} -> {}",
+                    "[learn] error pattern detected -> fix applied and saved: {} -> {}",
                     fix.description, fix.value
                 )));
             }
@@ -1309,7 +1309,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         config.submodule_fix = mappings.build_fix("submodules").is_some();
         if !config.rustup_fix && mappings.build_fix("rustup_toolchain").is_some() {
             let _ = tx.send(BuildEvent::Log(
-                "[heal] Veraltete rustc-Toolchain erkannt – installiere stable ueber rustup"
+                "[heal] outdated rustc toolchain detected - installing stable via rustup"
                     .to_string(),
             ));
         }
@@ -1319,7 +1319,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         if missing.is_empty() {
             if deps_failed {
                 let _ = tx.send(BuildEvent::Log(
-                    "[warn] Lokaler deps/-Vorbau fehlgeschlagen – wechsle auf System-Bibliotheken der Distribution..."
+                    "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
                         .to_string(),
                 ));
                 config.skip_deps = true;
@@ -1450,7 +1450,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             let Some(package) = installed else {
                 if deps_failed {
                     let _ = tx.send(BuildEvent::Log(
-                        "[warn] Lokaler deps/-Vorbau fehlgeschlagen – wechsle auf System-Bibliotheken der Distribution..."
+                        "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
                             .to_string(),
                     ));
                     config.skip_deps = true;
@@ -1468,12 +1468,12 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             allowed_rounds = MAX_HEAL_ROUNDS;
             mappings.learn(family, &raw_name, &package);
             let _ = tx.send(BuildEvent::Log(format!(
-                "[learn] Aus Fehler gelernt & gespeichert: {} -> {}",
+                "[learn] learned from error and saved: {} -> {}",
                 raw_name, package
             )));
             if matches!(dep, MissingDep::PkgConfig(_)) {
                 let _ = tx.send(BuildEvent::Log(format!(
-                    "[learn] Fehlermuster erkannt -> Fix angewendet & gespeichert: pkg-config {} -> {}",
+                    "[learn] error pattern detected -> fix applied and saved: pkg-config {} -> {}",
                     raw_name, package
                 )));
             }
@@ -1484,7 +1484,8 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         let cleared_cmake = reset_cmake_caches(&work);
         if cleared_cmake > 0 {
             let _ = tx.send(BuildEvent::Log(
-                "[cmake] CMakeCache.txt und CMakeFiles nach Nachinstallation entfernt".to_string(),
+                "[cmake] removed CMakeCache.txt and CMakeFiles after installing packages"
+                    .to_string(),
             ));
         }
 
@@ -1500,7 +1501,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             config.skip_deps = next == BuildStrategy::SystemLibsOnly;
             forced_strategy = Some(next);
             let _ = tx.send(BuildEvent::Log(format!(
-                "[retry] Keine neuen Pakete oder Flags – wechsle zu Strategie {}",
+                "[retry] no new packages or flags - switching to strategy {}",
                 next.label()
             )));
             continue;
@@ -1514,7 +1515,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             config.skip_deps = next == BuildStrategy::SystemLibsOnly;
             forced_strategy = Some(next);
             let _ = tx.send(BuildEvent::Log(format!(
-                "[strategy] {} (Selbstheilungs-Runden erschöpft)",
+                "[strategy] {} (self-healing rounds exhausted)",
                 next.label()
             )));
         } else {
@@ -1650,7 +1651,7 @@ fn with_deps_prebuild_flags(script: &str, flags: &[String]) -> String {
         lines.insert(
             index + 2,
             format!(
-                "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] Nachinstallation abgeschlossen - konfiguriere lokale Abhaengigkeiten neu'; rm -rf /work/deps-build; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_INSTALL_PREFIX=/work/deps-install {configure_flags} && cmake --build /work/deps-build && cmake --install /work/deps-build || {{ echo '[deps] Bau fehlgeschlagen - Resolver uebernimmt'; exit 1; }}; fi; done"
+                "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] package installation finished - reconfiguring local dependencies'; rm -rf /work/deps-build; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_INSTALL_PREFIX=/work/deps-install {configure_flags} && cmake --build /work/deps-build && cmake --install /work/deps-build || {{ echo '[deps] build failed - resolver takes over'; exit 1; }}; fi; done"
             ),
         );
     }
@@ -2284,7 +2285,7 @@ fn build_script_with_flags(
         )
     {
         lines.push(echo_line(
-            "[pkgbuild] Arch-PKGBUILD wird fuer dieses Zielformat ignoriert - universelles Build-System wird verwendet",
+            "[pkgbuild] Arch PKGBUILD ignored for this target format - using the universal build system",
         ));
     }
 
@@ -2327,7 +2328,7 @@ fn build_script_with_flags(
     };
     lines.push(artifact_glob.to_string());
     lines.push(
-        "if [ ! -f \"${artifacts[0]}\" ]; then echo '__GIT2PKG_NO_ARTIFACT__' >&2; exit 1; fi"
+        "if [ ! -f \"${artifacts[0]}\" ]; then echo '__GIT2PKG_AI_NO_ARTIFACT__' >&2; exit 1; fi"
             .to_string(),
     );
     // Ein bloß vorhandenes Paket ist kein Erfolg: nach einem CMake-/Compiler-
@@ -2337,19 +2338,19 @@ fn build_script_with_flags(
 case "$artifact" in
   *.pkg.tar.zst|*.tar.zst)
     if ! tar -tf "$artifact" 2>/dev/null | grep -Eq '(^|/)usr/(bin|lib|lib64)/'; then
-      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
+      echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.deb)
     if ! dpkg-deb -c "$artifact" 2>/dev/null | grep -Eq 'usr/(bin|lib|lib64)/'; then
-      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
+      echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
   *.rpm)
     if ! rpm -qlp "$artifact" 2>/dev/null | grep -Eq 'usr/(bin|lib|lib64)/'; then
-      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
+      echo '__GIT2PKG_AI_EMPTY_PACKAGE__' >&2
       exit 1
     fi
     ;;
@@ -2391,7 +2392,7 @@ pub fn cached_repo_has_local_dependencies(url: &str) -> bool {
 fn temp_workdir(url: &str) -> Result<PathBuf, String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let dir = Path::new(&home)
-        .join(".cache/git2pkg/builds")
+        .join(".cache/git2pkg-ai/builds")
         .join(source_cache_key(url));
     fs::create_dir_all(dir.join("out")).map_err(|e| e.to_string())?;
     fs::create_dir_all(dir.join("dist")).map_err(|e| e.to_string())?;
@@ -2464,7 +2465,7 @@ fn package_result(
                     }
                     let mut final_name = name.to_string_lossy().into_owned();
                     if config.target == TargetFormat::StandaloneBinary
-                        && (final_name == "app" || final_name == "git2pkg-build")
+                        && (final_name == "app" || final_name == "git2pkg-ai-build")
                     {
                         final_name = identity.name.clone();
                     }
@@ -2545,7 +2546,7 @@ mod tests {
         assert!(script.starts_with("#!/usr/bin/env bash\n"));
         assert!(!script.contains("#!/bin/sh"));
         // Logzeilen müssen als echo-Befehle eingebettet sein, nicht als nackter Text.
-        assert!(script.contains("echo '== git2pkg: Setup (pacman) =='"));
+        assert!(script.contains("echo '== git2pkg-ai: Setup (pacman) =='"));
         assert!(script.lines().all(|line| !line.starts_with("==")));
     }
 
@@ -2623,7 +2624,8 @@ mod tests {
         assert!(script.contains("! -path '*/docs/*'"));
         assert!(script.contains("app_icon.*|icon.*"));
         assert!(script.contains("*icon*|*logo*"));
-        let path = std::env::temp_dir().join(format!("git2pkg-assets-{}.sh", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("git2pkg-ai-assets-{}.sh", std::process::id()));
         std::fs::write(&path, script).unwrap();
         let ok = std::process::Command::new("bash")
             .arg("-n")
@@ -2671,7 +2673,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-icon-stage-{}-{}",
+            "git2pkg-ai-icon-stage-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2752,7 +2754,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-fallback-{}-{}",
+            "git2pkg-ai-fallback-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2850,7 +2852,7 @@ mod tests {
             BuildStrategy::DirectStagingFallback,
         ];
         let path =
-            std::env::temp_dir().join(format!("git2pkg-buildmatrix-{}.sh", std::process::id()));
+            std::env::temp_dir().join(format!("git2pkg-ai-buildmatrix-{}.sh", std::process::id()));
         for system in systems {
             for strategy in strategies {
                 let script =
@@ -3169,8 +3171,8 @@ mod tests {
         assert!(patched.contains("export CMAKE_PREFIX_PATH=/work/deps-install"));
         assert!(patched.contains("-DCMAKE_INSTALL_PREFIX=/work/deps-install"));
         assert!(patched.contains("rm -rf /work/deps-build"));
-        assert!(patched.contains("konfiguriere lokale Abhaengigkeiten neu"));
-        assert!(patched.contains("Resolver uebernimmt"));
+        assert!(patched.contains("reconfiguring local dependencies"));
+        assert!(patched.contains("resolver takes over"));
         assert!(patched.lines().count() == script.lines().count() + 2);
     }
 
@@ -3195,12 +3197,12 @@ mod tests {
                 family
             );
             let check = script
-                .find("__GIT2PKG_NO_ARTIFACT__")
+                .find("__GIT2PKG_AI_NO_ARTIFACT__")
                 .expect("artefaktcheck");
             let ok = script.find(OK_MARKER).expect("ok-marker");
             assert!(check < ok, "{:?}: check muss vor OK stehen", family);
             let empty = script
-                .find("__GIT2PKG_EMPTY_PACKAGE__")
+                .find("__GIT2PKG_AI_EMPTY_PACKAGE__")
                 .expect("leerpaketcheck");
             assert!(
                 empty < ok,
@@ -3269,7 +3271,7 @@ mod tests {
     #[test]
     fn nur_echte_fehler_werden_als_err_markiert() {
         assert!(!is_error_line("Klone nach /work/src ..."));
-        assert!(!is_error_line("Compiling git2pkg v0.1.0"));
+        assert!(!is_error_line("Compiling git2pkg-ai v0.1.0"));
         assert!(is_error_line("error: could not compile"));
         assert!(is_error_line("fatal: not a git repository"));
         assert!(is_error_line("FEHLER: Paket fehlt"));
@@ -3292,7 +3294,7 @@ mod tests {
             BuildStrategy::Default,
             true,
         );
-        assert!(deb.contains("Arch-PKGBUILD wird fuer dieses Zielformat ignoriert"));
+        assert!(deb.contains("Arch PKGBUILD ignored for this target format"));
         assert!(deb.contains("cmake --install build"));
         assert!(deb.contains(
             "cmake --build build -j$(nproc) && [ -f build/cmake_install.cmake ] && DESTDIR="
@@ -3400,11 +3402,11 @@ mod tests {
     #[test]
     fn deps_fehler_erkennt_system_fallback() {
         assert!(deps_fallback_needed(
-            "[err] [deps] Bau fehlgeschlagen - Resolver uebernimmt",
+            "[err] [deps] build failed - resolver takes over",
             false
         ));
         assert!(!deps_fallback_needed(
-            "[err] [deps] Bau fehlgeschlagen - Resolver uebernimmt",
+            "[err] [deps] build failed - resolver takes over",
             true
         ));
         assert!(!deps_fallback_needed("[out] normals Build-Log", false));
@@ -3435,7 +3437,7 @@ mod tests {
     #[test]
     fn build_reste_bereinigen_laesst_quellcode_stehen() {
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-cleanup-{}-{}",
+            "git2pkg-ai-cleanup-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3480,7 +3482,7 @@ mod tests {
     #[test]
     fn erfolgreicher_build_entfernt_hashordner_und_leeres_builds_verzeichnis() {
         let builds = std::env::temp_dir().join(format!(
-            "git2pkg-success-cleanup-{}-{}",
+            "git2pkg-ai-success-cleanup-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -3506,7 +3508,7 @@ mod tests {
     #[test]
     fn source_group_datei_aus_external_project_hint_findet() {
         let root = std::env::temp_dir().join(format!(
-            "git2pkg-hint-{}-{}",
+            "git2pkg-ai-hint-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3531,7 +3533,7 @@ mod tests {
     #[test]
     fn source_group_block_wird_kommentiert() {
         let path = std::env::temp_dir().join(format!(
-            "git2pkg-source-group-{}-{}.txt",
+            "git2pkg-ai-source-group-{}-{}.txt",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -3576,28 +3578,28 @@ mod tests {
     #[test]
     fn install_command_passt_zur_distro() {
         let artifact = vec![PathBuf::from(
-            "/tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst",
+            "/tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst",
         )];
         assert_eq!(
             install_command(
                 &config(DistroFamily::Arch, TargetFormat::NativePackage),
                 &artifact
             ),
-            "sudo pacman -U /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
+            "sudo pacman -U /tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
         assert_eq!(
             install_command(
                 &config(DistroFamily::Debian, TargetFormat::NativePackage),
                 &artifact
             ),
-            "sudo apt install /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
+            "sudo apt install /tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
         assert_eq!(
             install_command(
                 &config(DistroFamily::Suse, TargetFormat::NativePackage),
                 &artifact
             ),
-            "sudo zypper install /tmp/dist/git2pkg-build-1.0.0-1-x86_64.pkg.tar.zst"
+            "sudo zypper install /tmp/dist/git2pkg-ai-build-1.0.0-1-x86_64.pkg.tar.zst"
         );
     }
 

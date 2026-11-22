@@ -1,7 +1,7 @@
 # Rust build output
 /target/
 
-# Build artifacts produced by git2pkg
+# Build artifacts produced by git2pkg-ai
 /dist/
 
 # Editor / OS

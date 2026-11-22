@@ -1,4 +1,4 @@
-//! Persistente, kleine GUI-Einstellungen (`~/.config/git2pkg/settings.json`).
+//! Persistente, kleine GUI-Einstellungen (`~/.config/git2pkg-ai/settings.json`).
 
 use crate::gui::i18n::ThemeMode;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ impl GuiSettings {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        home.join(".config/git2pkg/settings.json")
+        home.join(".config/git2pkg-ai/settings.json")
     }
 
     pub fn load_from(path: &Path) -> Self {
@@ -54,7 +54,7 @@ mod tests {
 
     fn test_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "git2pkg-settings-{}-{}.json",
+            "git2pkg-ai-settings-{}-{}.json",
             name,
             std::process::id()
         ))

@@ -1,6 +1,7 @@
 # Maintainer: SattNEK
-pkgname=git2pkg
-_tag=v0.2.0-alpha.23
+# Local-only derivative: this PKGBUILD builds the checkout in the parent
+# directory instead of downloading an upstream archive.
+pkgname=git2pkg-ai
 pkgver=0.2.0alpha23
 pkgrel=1
 pkgdesc="Isolated package builder from Git repositories for Linux distributions"
@@ -9,16 +10,16 @@ url="https://github.com/hyalcin70/git2pkg"
 license=('GPL-3.0-or-later')
 depends=('libxkbcommon' 'wayland' 'libxcb' 'libxrandr' 'libxi' 'libxcursor' 'mesa' 'hicolor-icon-theme')
 makedepends=('rust' 'cargo' 'pkgconf' 'libxkbcommon' 'mesa' 'wayland' 'libxcb' 'libxrandr' 'libxi' 'libxcursor')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$_tag.tar.gz")
-sha256sums=('SKIP')
+source=()
+sha256sums=()
 
 build() {
-  cd "$srcdir/$pkgname-${_tag#v}"
+  cd "$startdir/.."
   cargo build --release --locked
 }
 
 package() {
-  cd "$srcdir/$pkgname-${_tag#v}"
+  cd "$startdir/.."
   install -Dm755 "${CARGO_TARGET_DIR:-target}/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -27,7 +28,7 @@ package() {
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
   install -Dm644 assets/app_icon.png "$pkgdir/usr/share/pixmaps/$pkgname.png"
 
-  install -Dm644 packaging/git2pkg.desktop "$pkgdir/usr/share/applications/git2pkg.desktop"
+  install -Dm644 packaging/git2pkg-ai.desktop "$pkgdir/usr/share/applications/git2pkg-ai.desktop"
 
   # Desktop- und Icon-Dateien liegen je nach Projekt in assets/ oder packaging/.
   for f in assets/*.desktop packaging/*.desktop; do

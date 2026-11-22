@@ -207,12 +207,12 @@ pub fn verify_built_packages(
     if compiled_without_program {
         mappings.mark_incomplete_strategy(&config.url, strategy_label);
         let _ = tx.send(crate::core::container::BuildEvent::Log(
-            "[warn] Erzeugtes Paket enthält keine Programmdateien — merke Strategie als unvollständig"
+            "[warn] produced package contains no program files - marking strategy as incomplete"
                 .to_string(),
         ));
     } else {
         let _ = tx.send(crate::core::container::BuildEvent::Log(
-            "[warn] Erzeugtes Paket enthält keine Programmdateien – wechsle auf direktes Build-System..."
+            "[warn] produced package contains no program files - switching to the direct build system..."
                 .to_string(),
         ));
     }

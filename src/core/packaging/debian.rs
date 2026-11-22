@@ -3,7 +3,7 @@
 use super::{line_echo, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
-    let mut lines = vec![line_echo("[pkg] Debian-Paket wird erzeugt")];
+    let mut lines = vec![line_echo("[pkg] building Debian package")];
     lines.push(format!("cd /work/src && {}", ctx.build_step));
     lines.push(format!(
         "cd /work/src && pkgdir=/work/out && {} && {}",
@@ -11,7 +11,7 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     ));
     lines.push("mkdir -p /work/deb/DEBIAN /work/debian".to_string());
     lines.push(format!(
-        "cat > /work/debian/control <<'CONTROL_EOF'\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg <noreply@example.invalid>\nDescription: Package built by git2pkg\nCONTROL_EOF",
+        "cat > /work/debian/control <<'CONTROL_EOF'\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.deb(),
@@ -27,7 +27,7 @@ for binary in $(find /work/out/usr/bin /work/out/usr/lib /work/out/usr/lib/* -ty
 done"#.to_string(),
     );
     lines.push(format!(
-        "cat > /work/deb/DEBIAN/control <<'CONTROL_EOF'\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nDepends: ${{depends}}\nMaintainer: git2pkg <noreply@example.invalid>\nDescription: Package built by git2pkg\nCONTROL_EOF",
+        "cat > /work/deb/DEBIAN/control <<'CONTROL_EOF'\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nDepends: ${{depends}}\nMaintainer: git2pkg-ai <noreply@example.invalid>\nDescription: Package built by git2pkg-ai\nCONTROL_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.deb(),

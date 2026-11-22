@@ -1,15 +1,20 @@
-<p align="center"><img src="assets/app_icon.png" alt="git2pkg" width="128"></p>
+<p align="center"><img src="assets/app_icon.png" alt="git2pkg-ai" width="128"></p>
 
 [English](README.md) | [Deutsch](README.de.md) | [Türkçe](README.tr.md) | [Español](README.es.md) | [Français](README.fr.md)
 
-# git2pkg
+# git2pkg-ai
+
+> **Dérivé local :** `git2pkg-ai` est un fork purement local de
+> [`hyalcin70/git2pkg`](https://github.com/hyalcin70/git2pkg). Il n'est jamais
+> publié. L'interface est localisée en cinq langues ; les journaux de
+> compilation en direct sont des diagnostics techniques en anglais.
 
 Une petite interface graphique Linux qui compile un dépôt Git **dans un
 conteneur jetable (Podman/Docker)** et dépose le résultat dans un dossier de
-sortie visible (`~/Downloads/git2pkg` par défaut). L'hôte n'a besoin ni de
+sortie visible (`~/Downloads/git2pkg-ai` par défaut). L'hôte n'a besoin ni de
 chaîne de compilation ni de bibliothèques de build.
 
-`git2pkg` fonctionne à 100 % en local, de manière déterministe et basée sur des
+`git2pkg-ai` fonctionne à 100 % en local, de manière déterministe et basée sur des
 règles. **Il ne contient aucune IA, aucun LLM et aucun appel à une API externe.**
 Les décisions de compilation proviennent de la détection de fichiers, d'expressions
 régulières appliquées à la sortie du compilateur et du gestionnaire de paquets du
@@ -20,14 +25,14 @@ conteneur.
 
 ## Périmètre et exclusions
 
-`git2pkg` est conçu exclusivement pour les applications natives Linux de bureau et en ligne de commande (p. ex. outils C/C++, Rust, Go et Python). Les chaînes d'outils embarquées/microcontrôleurs (p. ex. Arduino, PlatformIO, ESP-IDF), les plugins d'IDE (p. ex. extensions VS Code), les applications mobiles et les applications web sont volontairement exclus du périmètre.
+`git2pkg-ai` est conçu exclusivement pour les applications natives Linux de bureau et en ligne de commande (p. ex. outils C/C++, Rust, Go et Python). Les chaînes d'outils embarquées/microcontrôleurs (p. ex. Arduino, PlatformIO, ESP-IDF), les plugins d'IDE (p. ex. extensions VS Code), les applications mobiles et les applications web sont volontairement exclus du périmètre.
 
 ## Pourquoi je l'ai créé
 
 J'adore découvrir de nouveaux outils open source sur GitHub, GitLab et ailleurs,
 mais je ne voulais pas encombrer mon système principal avec des dizaines de
 bibliothèques de compilation et d'en-têtes de développement, ni dépendre
-aveuglément de dépôts tiers comme l'AUR. C'est pourquoi j'ai créé `git2pkg` :
+aveuglément de dépôts tiers comme l'AUR. C'est pourquoi j'ai créé `git2pkg-ai` :
 tout est compilé dans un conteneur temporaire jetable, le système hôte reste
 entièrement propre, et l'on obtient au final un paquet natif (`.pkg.tar.zst`,
 `.deb`, `.rpm`) ou un binaire unique — utilisable par tout le monde via une
@@ -59,13 +64,13 @@ simple interface graphique.
   est relancée (5 tentatives maximum).
 - Paquets natifs : `.pkg.tar.zst` (Arch), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).
-- **Dossier de sortie** : les artefacts sont écrits dans `~/Downloads/git2pkg`
+- **Dossier de sortie** : les artefacts sont écrits dans `~/Downloads/git2pkg-ai`
   par défaut. Modifiable dans l'interface avec le sélecteur natif (`rfd`) ou
   en saisissant un chemin.
 - Actions de résultat : ouvrir le dossier de sortie, enregistrer la recette de
   compilation et voir la commande d'installation exacte avant toute exécution.
-- Mode headless optionnel : `git2pkg --cli <url> [--format=package|binary]`.
-- Réinitialisez les correspondances apprises avec `git2pkg --reset-learning` (le cache du dépôt Git est conservé).
+- Mode headless optionnel : `git2pkg-ai --cli <url> [--format=package|binary]`.
+- Réinitialisez les correspondances apprises avec `git2pkg-ai --reset-learning` (le cache du dépôt Git est conservé).
 
 ## Prérequis
 
@@ -77,7 +82,7 @@ simple interface graphique.
 
 ```sh
 git clone https://github.com/hyalcin70/git2pkg.git
-cd git2pkg
+cd git2pkg-ai
 cargo build --release
 ```
 
@@ -94,7 +99,7 @@ l'entrée en lisant le chemin dans le fichier `.desktop`.
 
 ## Paquet Arch / CachyOS
 
-`packaging/PKGBUILD` compile `git2pkg` comme un paquet système classique :
+`packaging/PKGBUILD` compile `git2pkg-ai` comme un paquet système classique :
 
 ```sh
 cd packaging
@@ -119,13 +124,13 @@ src/
 assets/              Noto Sans + Noto Sans Mono intégrées (OFL 1.1)
 .github/workflows/   workflow de release GitHub déclenché par les tags
 .gitlab-ci.yml       compilation et paquetage GitLab CI
-packaging/PKGBUILD   recette Arch pour git2pkg
+packaging/PKGBUILD   recette Arch pour git2pkg-ai
 ```
 
 ## CI / Releases
 
 Un tag `v*` déclenche `.github/workflows/release.yml` : le binaire Linux
-`x86_64` est compilé sur `ubuntu-latest`, `git2pkg-linux-x86_64.tar.gz` et son
+`x86_64` est compilé sur `ubuntu-latest`, `git2pkg-ai-linux-x86_64.tar.gz` et son
 `.sha256` sont générés, puis les deux sont joints à la release GitHub.
 `.gitlab-ci.yml` construit la même archive sur GitLab et l'expose comme artefact
 de tâche.
@@ -159,17 +164,17 @@ dernière ligne ne suffit généralement pas.
 
 ## Soutien
 
-Le soutien est entièrement volontaire. Si `git2pkg` vous fait gagner du temps,
+Le soutien est entièrement volontaire. Si `git2pkg-ai` vous fait gagner du temps,
 mettez une étoile au dépôt, partagez-le, signalez un bug avec le journal copié
 ou contribuez à une traduction. Aucune télémétrie, aucune obligation : l'outil
 fonctionne exactement de la même manière avec ou sans tout cela.
 
 > [!IMPORTANT]
-> **Périmètre du projet et développement en solo :** `git2pkg` est un projet personnel indépendant développé sur mon temps libre. À partir de la phase Beta, le support (selon disponibilité) se concentrera strictement sur les grandes familles de distributions prises en charge (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** et **openSUSE**). Les distributions exotiques ou de niche ne sont explicitement pas prises en charge.
+> **Périmètre du projet et développement en solo :** `git2pkg-ai` est un projet personnel indépendant développé sur mon temps libre. À partir de la phase Beta, le support (selon disponibilité) se concentrera strictement sur les grandes familles de distributions prises en charge (**Arch / CachyOS**, **Debian / Ubuntu / Linux Mint**, **Fedora / Red Hat** et **openSUSE**). Les distributions exotiques ou de niche ne sont explicitement pas prises en charge.
 
 ## Remerciements et transparence
 
-J’ai eu l’idée de ce projet, j’en ai orienté le développement, effectué les tests et analysé les bugs — tandis que la quasi-totalité du code source a été générée à l’aide d’outils d’IA. Je tiens à le dire ouvertement et honnêtement. Le programme `git2pkg` final fonctionne toutefois de manière 100 % locale et déterministe, sans aucune IA ni API externe.
+J’ai eu l’idée de ce projet, j’en ai orienté le développement, effectué les tests et analysé les bugs — tandis que la quasi-totalité du code source a été générée à l’aide d’outils d’IA. Je tiens à le dire ouvertement et honnêtement. Le programme `git2pkg-ai` final fonctionne toutefois de manière 100 % locale et déterministe, sans aucune IA ni API externe.
 
 ## Licence
 
@@ -180,4 +185,4 @@ et Noto Sans Mono dans `assets/` sont sous SIL Open Font License 1.1.
 
 <a href="https://github.com/NousResearch/hermes-agent"><img src="assets/badges/hermes-agent.svg" alt="Hermes Agent" height="28"></a>
 
-Un grand merci à [Hermes Agent](https://github.com/NousResearch/hermes-agent) de Nous Research, qui a servi d'outil de développement local lors de la création de `git2pkg` (tandis que `git2pkg` lui-même fonctionne de manière 100 % déterministe et sans aucune dépendance à l'IA).
+Un grand merci à [Hermes Agent](https://github.com/NousResearch/hermes-agent) de Nous Research, qui a servi d'outil de développement local lors de la création de `git2pkg-ai` (tandis que `git2pkg-ai` lui-même fonctionne de manière 100 % déterministe et sans aucune dépendance à l'IA).

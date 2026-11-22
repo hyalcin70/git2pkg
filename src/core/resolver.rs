@@ -4,12 +4,22 @@
 use crate::core::distro::DistroFamily;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Mitgelieferte Start-Wissensbasis; lokale Learnings ergänzen diese.
 const DEFAULT_MAPPINGS: &str = include_str!("../../assets/default_mappings.json");
+
+/// Obergrenzen für die Lerndatei. Sie verhindern unbegrenztes Wachstum; bei
+/// Überschreitung werden die am längsten nicht mehr benutzten Einträge entfernt.
+const MAX_LEARNED_PACKAGES: usize = 2000;
+const MAX_NEGATIVE_ENTRIES: usize = 512;
+const MAX_BUILD_FIXES: usize = 128;
+const MAX_REPO_PROFILES: usize = 512;
+const MAX_BUILD_RECIPES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MissingDep {
@@ -391,13 +401,20 @@ struct LearnedFile {
     repo_profiles: HashMap<String, Vec<String>>,
     #[serde(default)]
     build_recipes: HashMap<String, BuildRecipe>,
+    /// Unix-Zeitstempel der letzten Nutzung je Sektion (für die LRU-Eviction).
+    #[serde(default)]
+    last_used: HashMap<String, u64>,
 }
 
 /// Veraltete "unvollständig"-Marker aus älteren Lerndateien ignorieren.
+/// Ältere Versionen haben Anzeige-Labels statt Strategie-Keys gespeichert.
 fn is_obsolete_incomplete_strategy(strategy: &str) -> bool {
     matches!(
         strategy,
-        "System-Bibliotheken ohne deps/-Vorbau" | "Direkter Build-System-Fallback"
+        "Standard"
+            | "System-Bibliotheken ohne deps/-Vorbau"
+            | "Direkter Build-System-Fallback"
+            | "Repository-Buildskript"
     )
 }
 
@@ -408,6 +425,10 @@ pub struct MappingStore {
     build_fixes: HashMap<String, String>,
     repo_profiles: HashMap<String, Vec<String>>,
     build_recipes: HashMap<String, BuildRecipe>,
+    last_used: HashMap<String, u64>,
+    /// Profil-Keys, die dieser Prozess bewusst geleert hat. Das Merge darf sie
+    /// nicht aus dem älteren Dateistand wiederherstellen.
+    cleared_profiles: HashSet<String>,
     defaults: HashMap<String, String>,
 }
 
@@ -416,7 +437,7 @@ impl MappingStore {
         std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join(".config/git2pkg/learned_mappings.json")
+            .join(".config/git2pkg-ai/learned_mappings.json")
     }
 
     pub fn load() -> Self {
@@ -439,101 +460,229 @@ impl MappingStore {
         let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
 
         // Neue datei mit Sektionen; alte flache Dateien werden übernommen.
-        let (learned, negative_cache, build_fixes, repo_profiles, build_recipes) = if value
-            .get("packages")
-            .is_some()
-            || value.get("build_fixes").is_some()
-            || value.get("negative_cache").is_some()
-            || value.get("repo_profiles").is_some()
-            || value.get("build_recipes").is_some()
-        {
-            let packages = value
-                .get("packages")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let negative = value
-                .get("negative_cache")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let fixes = value
-                .get("build_fixes")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let profiles: HashMap<String, Vec<String>> = value
-                .get("repo_profiles")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let profiles = profiles
-                .into_iter()
-                .map(|(key, list)| {
-                    let list = list
-                        .into_iter()
-                        .filter(|entry| !is_obsolete_incomplete_strategy(entry))
-                        .collect();
-                    (key, list)
-                })
-                .collect();
-            let recipes = value
-                .get("build_recipes")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            (packages, negative, fixes, profiles, recipes)
-        } else {
-            let flat = serde_json::from_value::<HashMap<String, String>>(value).unwrap_or_default();
-            (
-                flat,
-                Vec::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-            )
-        };
+        let (learned, negative_cache, build_fixes, repo_profiles, build_recipes, last_used) =
+            if value.get("packages").is_some()
+                || value.get("build_fixes").is_some()
+                || value.get("negative_cache").is_some()
+                || value.get("repo_profiles").is_some()
+                || value.get("build_recipes").is_some()
+                || value.get("last_used").is_some()
+            {
+                let packages = value
+                    .get("packages")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let negative = value
+                    .get("negative_cache")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let fixes = value
+                    .get("build_fixes")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let profiles: HashMap<String, Vec<String>> = value
+                    .get("repo_profiles")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let profiles = profiles
+                    .into_iter()
+                    .map(|(key, list)| {
+                        let list = list
+                            .into_iter()
+                            .filter(|entry| !is_obsolete_incomplete_strategy(entry))
+                            .collect();
+                        (key, list)
+                    })
+                    .collect();
+                let recipes = value
+                    .get("build_recipes")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let last_used = value
+                    .get("last_used")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                (packages, negative, fixes, profiles, recipes, last_used)
+            } else {
+                let flat =
+                    serde_json::from_value::<HashMap<String, String>>(value).unwrap_or_default();
+                (
+                    flat,
+                    Vec::new(),
+                    HashMap::new(),
+                    HashMap::new(),
+                    HashMap::new(),
+                    HashMap::new(),
+                )
+            };
 
-        let store = Self {
+        let mut store = Self {
             path,
             learned,
             negative_cache,
             build_fixes,
             repo_profiles,
             build_recipes,
+            last_used,
+            cleared_profiles: HashSet::new(),
             defaults,
         };
         store.save();
         store
     }
 
-    fn save(&self) {
+    /// Persistiert den Lernstand. Die Datei wird unter einer Lock-Datei erneut
+    /// gelesen, mit dem vorhandenen Stand zusammengeführt und atomar ersetzt.
+    /// Dadurch gehen parallele Learnings (GUI + CLI) nicht verloren.
+    fn save(&mut self) {
         if let Some(parent) = self.path.parent() {
             let _ = fs::create_dir_all(parent);
         }
+        let _lock = FileLock::acquire(&lock_path_for(&self.path));
+        self.merge_from_disk();
+        self.prune();
         let file = LearnedFile {
             packages: self.learned.clone(),
             negative_cache: self.negative_cache.clone(),
             build_fixes: self.build_fixes.clone(),
             repo_profiles: self.repo_profiles.clone(),
             build_recipes: self.build_recipes.clone(),
+            last_used: self.last_used.clone(),
         };
         if let Ok(json) = serde_json::to_string_pretty(&file) {
-            let _ = fs::write(&self.path, json);
+            let tmp = temp_path_for(&self.path);
+            if fs::write(&tmp, json).is_ok() && fs::rename(&tmp, &self.path).is_err() {
+                let _ = fs::remove_file(&tmp);
+            }
         }
     }
 
-    /// Erst die gelernten Einträge prüfen, dann die mitgelieferte Basis.
-    pub fn get(&self, family: &str, name: &str) -> Option<String> {
-        let key = format!("{}:{}", family, name);
-        self.learned
-            .get(&key)
-            .or_else(|| self.defaults.get(&key))
+    /// Führt Einträge zusammen, die eine andere Instanz seit dem Laden
+    /// geschrieben hat. Lokal bekannte Werte haben Vorrang.
+    fn merge_from_disk(&mut self) {
+        let Ok(text) = fs::read_to_string(&self.path) else {
+            return;
+        };
+        let Ok(disk) = serde_json::from_str::<LearnedFile>(&text) else {
+            return;
+        };
+        for (key, value) in disk.packages {
+            self.learned.entry(key).or_insert(value);
+        }
+        for package in disk.negative_cache {
+            // Ein zwischenzeitlich gelerntes Mapping hebt den Negativ-Eintrag auf.
+            let learned_now = self.learned.values().any(|value| value == &package);
+            if !learned_now && !self.negative_cache.iter().any(|item| item == &package) {
+                self.negative_cache.push(package);
+            }
+        }
+        for (key, value) in disk.build_fixes {
+            self.build_fixes.entry(key).or_insert(value);
+        }
+        for (key, list) in disk.repo_profiles {
+            if self.cleared_profiles.contains(&key) {
+                continue;
+            }
+            let entry = self.repo_profiles.entry(key).or_default();
+            for strategy in list {
+                if !is_obsolete_incomplete_strategy(&strategy) && !entry.contains(&strategy) {
+                    entry.push(strategy);
+                }
+            }
+        }
+        for (key, recipe) in disk.build_recipes {
+            self.build_recipes.entry(key).or_insert(recipe);
+        }
+        for (key, stamp) in disk.last_used {
+            let entry = self.last_used.entry(key).or_insert(0);
+            *entry = (*entry).max(stamp);
+        }
+    }
+
+    /// Begrenzt die Lerndatei deterministisch über die Nutzungszeitpunkte.
+    fn prune(&mut self) {
+        prune_map(
+            &mut self.learned,
+            "packages",
+            MAX_LEARNED_PACKAGES,
+            &self.last_used,
+        );
+        prune_map(
+            &mut self.build_fixes,
+            "fixes",
+            MAX_BUILD_FIXES,
+            &self.last_used,
+        );
+        prune_map(
+            &mut self.repo_profiles,
+            "profiles",
+            MAX_REPO_PROFILES,
+            &self.last_used,
+        );
+        prune_map(
+            &mut self.build_recipes,
+            "recipes",
+            MAX_BUILD_RECIPES,
+            &self.last_used,
+        );
+        prune_negative(
+            &mut self.negative_cache,
+            MAX_NEGATIVE_ENTRIES,
+            &self.last_used,
+        );
+        let stale: Vec<String> = self
+            .last_used
+            .keys()
+            .filter(|key| !self.tracks_key(key))
             .cloned()
+            .collect();
+        for key in stale {
+            self.last_used.remove(&key);
+        }
+    }
+
+    fn tracks_key(&self, key: &str) -> bool {
+        if let Some(rest) = key.strip_prefix("packages:") {
+            return self.learned.contains_key(rest);
+        }
+        if let Some(rest) = key.strip_prefix("negative:") {
+            return self.negative_cache.iter().any(|item| item == rest);
+        }
+        if let Some(rest) = key.strip_prefix("fixes:") {
+            return self.build_fixes.contains_key(rest);
+        }
+        if let Some(rest) = key.strip_prefix("profiles:") {
+            return self.repo_profiles.contains_key(rest);
+        }
+        if let Some(rest) = key.strip_prefix("recipes:") {
+            return self.build_recipes.contains_key(rest);
+        }
+        false
+    }
+
+    fn touch(&mut self, key: String) {
+        self.last_used.insert(key, now_secs());
+    }
+
+    /// Erst die gelernten Einträge prüfen, dann die mitgelieferte Basis.
+    pub fn get(&mut self, family: &str, name: &str) -> Option<String> {
+        let key = format!("{}:{}", family, name);
+        if let Some(value) = self.learned.get(&key).cloned() {
+            self.touch(format!("packages:{}", key));
+            return Some(value);
+        }
+        self.defaults.get(&key).cloned()
     }
 
     pub fn learn(&mut self, family: &str, name: &str, package: &str) {
         let key = format!("{}:{}", family, name);
         if self.learned.get(&key).map(String::as_str) == Some(package) {
+            self.touch(format!("packages:{}", key));
             return;
         }
-        self.learned.insert(key, package.to_string());
+        self.learned.insert(key.clone(), package.to_string());
         self.negative_cache.retain(|item| item != package);
+        self.touch(format!("packages:{}", key));
         self.save();
     }
 
@@ -543,6 +692,7 @@ impl MappingStore {
             return;
         }
         self.negative_cache.push(package.to_string());
+        self.touch(format!("negative:{}", package));
         self.save();
     }
 
@@ -553,9 +703,11 @@ impl MappingStore {
     /// Merkt sich einen allgemeinen Build-Fix (z. B. `cstdint`, `cmake_policy`).
     pub fn learn_build_fix(&mut self, key: &str, value: &str) -> bool {
         if self.build_fixes.get(key).map(String::as_str) == Some(value) {
+            self.touch(format!("fixes:{}", key));
             return false;
         }
         self.build_fixes.insert(key.to_string(), value.to_string());
+        self.touch(format!("fixes:{}", key));
         self.save();
         true
     }
@@ -568,9 +720,11 @@ impl MappingStore {
     /// Paket erzeugt hat. Der Repository-Name wird nie im Klartext gespeichert.
     pub fn mark_incomplete_strategy(&mut self, url: &str, strategy: &str) {
         let key = repo_profile_key(url);
-        let list = self.repo_profiles.entry(key).or_default();
+        let list = self.repo_profiles.entry(key.clone()).or_default();
         if !list.iter().any(|entry| entry == strategy) {
             list.push(strategy.to_string());
+            self.cleared_profiles.remove(&key);
+            self.touch(format!("profiles:{}", key));
             self.save();
         }
     }
@@ -601,8 +755,10 @@ impl MappingStore {
         recipe.verified = true;
         let changed = self.build_recipes.get(&repo_key) != Some(&recipe)
             || self.build_recipes.get(&signature_key) != Some(&recipe);
-        self.build_recipes.insert(repo_key, recipe.clone());
-        self.build_recipes.insert(signature_key, recipe);
+        self.build_recipes.insert(repo_key.clone(), recipe.clone());
+        self.build_recipes.insert(signature_key.clone(), recipe);
+        self.touch(format!("recipes:{}", repo_key));
+        self.touch(format!("recipes:{}", signature_key));
         if changed {
             self.save();
         }
@@ -617,6 +773,7 @@ impl MappingStore {
             list.len() != before
         });
         if changed {
+            self.cleared_profiles.insert(key);
             self.save();
         }
     }
@@ -640,7 +797,8 @@ impl MappingStore {
             });
         recipe.packages = packages.to_vec();
         recipe.verified = verified;
-        self.build_recipes.insert(key, recipe);
+        self.build_recipes.insert(key.clone(), recipe);
+        self.touch(format!("recipes:{}", key));
         self.save();
     }
 
@@ -673,6 +831,121 @@ impl MappingStore {
             + self.repo_profile_count()
             + self.build_recipe_count()
     }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
+}
+
+fn lock_path_for(path: &Path) -> PathBuf {
+    path.with_extension("json.lock")
+}
+
+fn temp_path_for(path: &Path) -> PathBuf {
+    path.with_extension("json.tmp")
+}
+
+/// Einfache, prozessübergreifende Sperre über eine Lock-Datei. Sie ist nur
+/// best-effort: Schlägt das Sperren fehl, wird trotzdem zusammengeführt und
+/// atomar geschrieben, damit kein Learning verloren geht.
+struct FileLock {
+    path: PathBuf,
+}
+
+impl FileLock {
+    fn acquire(path: &Path) -> Option<Self> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match OpenOptions::new().write(true).create_new(true).open(path) {
+                Ok(_) => {
+                    return Some(Self {
+                        path: path.to_path_buf(),
+                    })
+                }
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                    if is_stale_lock(path) {
+                        let _ = fs::remove_file(path);
+                        continue;
+                    }
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn is_stale_lock(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .map(|age| age > Duration::from_secs(10))
+        .unwrap_or(false)
+}
+
+fn prune_map<V>(
+    map: &mut HashMap<String, V>,
+    prefix: &str,
+    limit: usize,
+    last_used: &HashMap<String, u64>,
+) {
+    if map.len() <= limit {
+        return;
+    }
+    let mut keys: Vec<String> = map.keys().cloned().collect();
+    keys.sort_by(|a, b| {
+        let stamp = |key: &str| {
+            last_used
+                .get(&format!("{}:{}", prefix, key))
+                .copied()
+                .unwrap_or(0)
+        };
+        stamp(a).cmp(&stamp(b)).then_with(|| a.cmp(b))
+    });
+    for key in keys.into_iter().take(map.len() - limit) {
+        map.remove(&key);
+    }
+}
+
+fn prune_negative(list: &mut Vec<String>, limit: usize, last_used: &HashMap<String, u64>) {
+    if list.len() <= limit {
+        return;
+    }
+    let stamp = |package: &str| {
+        last_used
+            .get(&format!("negative:{}", package))
+            .copied()
+            .unwrap_or(0)
+    };
+    let mut order: Vec<usize> = (0..list.len()).collect();
+    order.sort_by(|&a, &b| {
+        stamp(&list[a])
+            .cmp(&stamp(&list[b]))
+            .then_with(|| list[a].cmp(&list[b]))
+    });
+    let mut drop_flags = vec![false; list.len()];
+    for index in order.into_iter().take(list.len() - limit) {
+        drop_flags[index] = true;
+    }
+    let mut index = 0;
+    list.retain(|_| {
+        let keep = !drop_flags[index];
+        index += 1;
+        keep
+    });
 }
 
 /// Kandidaten der Such-Kaskade Stufe 1: kleingeschriebener Name und die
@@ -1401,8 +1674,11 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("git2pkg-map-{}-{}.json", std::process::id(), nanos));
+        let path = std::env::temp_dir().join(format!(
+            "git2pkg-ai-map-{}-{}.json",
+            std::process::id(),
+            nanos
+        ));
         let mut store = MappingStore::from_path(path.clone());
         assert!(path.exists(), "Datei muss automatisch angelegt werden");
         assert_eq!(store.get("arch", "Boost").as_deref(), Some("boost"));
@@ -1420,7 +1696,7 @@ mod tests {
         assert!(json.contains("packages"));
         assert!(json.contains("negative_cache"));
         assert!(json.contains("build_fixes"));
-        let reloaded = MappingStore::from_path(path.clone());
+        let mut reloaded = MappingStore::from_path(path.clone());
         assert_eq!(reloaded.get("arch", "MyLib").as_deref(), Some("mylib-dev"));
         assert!(reloaded.is_negative("bogus-pkg"));
         assert_eq!(
@@ -1556,7 +1832,7 @@ mod tests {
     #[test]
     fn build_recipes_werden_gelernt_und_wiedergefunden() {
         let dir = std::env::temp_dir().join(format!(
-            "git2pkg-recipes-{}-{}",
+            "git2pkg-ai-recipes-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1593,7 +1869,7 @@ mod tests {
     #[test]
     fn repo_profiles_werden_gelernt_und_uebersprungen() {
         let dir = std::env::temp_dir().join(format!(
-            "git2pkg-profiles-{}-{}",
+            "git2pkg-ai-profiles-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1650,7 +1926,7 @@ mod tests {
     #[test]
     fn gelernte_repo_pakete_werden_sofort_wiedergefunden() {
         let dir = std::env::temp_dir().join(format!(
-            "git2pkg-repo-packages-{}-{}",
+            "git2pkg-ai-repo-packages-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1735,7 +2011,7 @@ mod tests {
         fs::write(&path, json).unwrap();
         let store = MappingStore::from_path(path.clone());
         let list = store.repo_profiles.get("repo:abc").unwrap();
-        assert_eq!(list, &vec!["Standard".to_string()]);
+        assert!(list.is_empty(), "veraltete Labels muessen verworfen werden");
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1857,5 +2133,98 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         assert!(!path.exists());
         assert!(!MappingStore::reset_at(&path));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn temp_mapping_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "g2p-{}-{}-{}",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("learned_mappings.json")
+    }
+
+    #[test]
+    fn parallele_stores_verlieren_keine_learnings() {
+        let path = temp_mapping_path("merge");
+        let mut first = MappingStore::from_path(path.clone());
+        let mut second = MappingStore::from_path(path.clone());
+
+        first.learn("arch", "Alpha", "alpha-pkg");
+        second.learn("arch", "Beta", "beta-pkg");
+
+        let mut merged = MappingStore::from_path(path.clone());
+        assert_eq!(merged.get("arch", "Alpha").as_deref(), Some("alpha-pkg"));
+        assert_eq!(merged.get("arch", "Beta").as_deref(), Some("beta-pkg"));
+
+        // Ein gelerntes Mapping hebt einen zwischenzeitlichen Negativ-Eintrag auf.
+        first.learn_negative("gamma-pkg");
+        second.learn("arch", "Gamma", "gamma-pkg");
+        let mut merged = MappingStore::from_path(path.clone());
+        assert_eq!(merged.get("arch", "Gamma").as_deref(), Some("gamma-pkg"));
+        assert!(!merged.is_negative("gamma-pkg"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn geleertes_profil_wird_nicht_wiederhergestellt() {
+        let path = temp_mapping_path("clear");
+        let url = "https://example.invalid/example-app";
+        let mut store = MappingStore::from_path(path.clone());
+        store.mark_incomplete_strategy(url, "Default");
+        assert!(store.is_incomplete_strategy(url, "Default"));
+        store.clear_incomplete_strategy(url, "Default");
+        assert!(!store.is_incomplete_strategy(url, "Default"));
+
+        let reloaded = MappingStore::from_path(path.clone());
+        assert!(!reloaded.is_incomplete_strategy(url, "Default"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn lernspeicher_wird_deterministisch_begrenzt() {
+        let path = temp_mapping_path("prune");
+        let mut store = MappingStore::from_path(path.clone());
+        let total = MAX_NEGATIVE_ENTRIES + 10;
+        for index in 0..total {
+            let package = format!("pkg-{:04}", index);
+            store.negative_cache.push(package.clone());
+            store
+                .last_used
+                .insert(format!("negative:{}", package), index as u64);
+        }
+        store.save();
+
+        assert_eq!(store.negative_cache.len(), MAX_NEGATIVE_ENTRIES);
+        assert!(!store.is_negative("pkg-0000"));
+        assert!(store.is_negative(&format!("pkg-{:04}", total - 1)));
+        assert!(
+            !lock_path_for(&path).exists(),
+            "Lock-Datei muss entfernt sein"
+        );
+        assert!(
+            !temp_path_for(&path).exists(),
+            "Temp-Datei muss entfernt sein"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn lernspeicher_bleibt_abwaertskompatibel() {
+        let path = temp_mapping_path("legacy");
+        fs::write(&path, "{\"arch:Legacy\":\"legacy-pkg\"}").unwrap();
+        let mut store = MappingStore::from_path(path.clone());
+        assert_eq!(store.get("arch", "Legacy").as_deref(), Some("legacy-pkg"));
+        let json = fs::read_to_string(&path).unwrap();
+        assert!(json.contains("\"packages\""));
+        let _ = fs::remove_file(path);
     }
 }

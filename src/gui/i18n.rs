@@ -186,11 +186,11 @@ impl Texts {
     }
     pub fn engine_missing_text(&self) -> &'static str {
         self.get(
-            "Podman or Docker is required to run builds. Please install one of them and restart git2pkg.",
-            "Für Builds wird Podman oder Docker benötigt. Bitte installiere eine der beiden Engines und starte git2pkg neu.",
-            "Derleme yapmak için Podman veya Docker gerekir. Lütfen ikisinden birini kurun ve git2pkg'i yeniden başlatın.",
-            "Se necesita Podman o Docker para compilar. Instala uno de ellos y vuelve a iniciar git2pkg.",
-            "Podman ou Docker est nécessaire pour compiler. Installez l'un des deux puis redémarrez git2pkg.",
+            "Podman or Docker is required to run builds. Please install one of them and restart git2pkg-ai.",
+            "Für Builds wird Podman oder Docker benötigt. Bitte installiere eine der beiden Engines und starte git2pkg-ai neu.",
+            "Derleme yapmak için Podman veya Docker gerekir. Lütfen ikisinden birini kurun ve git2pkg-ai'yi yeniden başlatın.",
+            "Se necesita Podman o Docker para compilar. Instala uno de ellos y vuelve a iniciar git2pkg-ai.",
+            "Podman ou Docker est nécessaire pour compiler. Installez l'un des deux puis redémarrez git2pkg-ai.",
         )
     }
     pub fn copy(&self) -> &'static str {
@@ -334,6 +334,16 @@ impl Texts {
             "Respaldo directo del sistema de compilación",
             "Repli direct du système de compilation",
         )
+    }
+
+    /// Lokalisierter Anzeigename einer Build-Strategie für die GUI.
+    pub fn strategy_label(&self, strategy: crate::core::container::BuildStrategy) -> &'static str {
+        match strategy {
+            crate::core::container::BuildStrategy::Default => self.strategy_default(),
+            crate::core::container::BuildStrategy::SystemLibsOnly => self.strategy_system_libs(),
+            crate::core::container::BuildStrategy::RepoScript => self.strategy_repo_script(),
+            crate::core::container::BuildStrategy::DirectStagingFallback => self.strategy_direct(),
+        }
     }
 
     pub fn next_strategy(&self, label: &str) -> String {
@@ -669,11 +679,11 @@ impl Texts {
     }
     pub fn info_title(&self) -> &'static str {
         self.get(
-            "About git2pkg",
-            "Über git2pkg",
-            "git2pkg hakkında",
-            "Acerca de git2pkg",
-            "À propos de git2pkg",
+            "About git2pkg-ai",
+            "Über git2pkg-ai",
+            "git2pkg-ai hakkında",
+            "Acerca de git2pkg-ai",
+            "À propos de git2pkg-ai",
         )
     }
     pub fn about_description(&self) -> &'static str {
@@ -859,7 +869,7 @@ impl Texts {
     }
     pub fn log_setup(&self, manager: &str) -> String {
         format!(
-            "== git2pkg: {} ({}) ==",
+            "== git2pkg-ai: {} ({}) ==",
             self.get(
                 "Setup",
                 "Setup",
@@ -872,7 +882,7 @@ impl Texts {
     }
     pub fn log_extra(&self, packages: &str) -> String {
         format!(
-            "== git2pkg: {} {} ==",
+            "== git2pkg-ai: {} {} ==",
             self.get(
                 "Extra packages",
                 "Nachinstallation",
@@ -885,24 +895,24 @@ impl Texts {
     }
     pub fn log_binary_build(&self) -> &'static str {
         self.get(
-            "== git2pkg: binary build ==",
-            "== git2pkg: Binary-Build ==",
-            "== git2pkg: İkili derleme ==",
-            "== git2pkg: compilación binaria ==",
-            "== git2pkg: compilation binaire ==",
+            "== git2pkg-ai: binary build ==",
+            "== git2pkg-ai: Binary-Build ==",
+            "== git2pkg-ai: İkili derleme ==",
+            "== git2pkg-ai: compilación binaria ==",
+            "== git2pkg-ai: compilation binaire ==",
         )
     }
     #[allow(dead_code)]
     pub fn log_pkgbuild(&self) -> &'static str {
-        "== git2pkg: PKGBUILD/makepkg =="
+        "== git2pkg-ai: PKGBUILD/makepkg =="
     }
     #[allow(dead_code)]
     pub fn log_deb(&self) -> &'static str {
-        "== git2pkg: dpkg-deb =="
+        "== git2pkg-ai: dpkg-deb =="
     }
     #[allow(dead_code)]
     pub fn log_rpm(&self) -> &'static str {
-        "== git2pkg: rpmbuild =="
+        "== git2pkg-ai: rpmbuild =="
     }
     pub fn unknown_system(&self) -> &'static str {
         self.get(
@@ -923,7 +933,7 @@ impl Texts {
         )
     }
     pub fn cli_header(&self, engine: &str, distro: &str) -> String {
-        format!("git2pkg CLI – {} – {}", engine, distro)
+        format!("git2pkg-ai CLI – {} – {}", engine, distro)
     }
     pub fn cli_done(&self) -> &'static str {
         self.get(
@@ -1044,11 +1054,11 @@ impl Texts {
     }
     pub fn cleanup_body(&self) -> &'static str {
         self.get(
-            "The last build failed. Do you want to clean up the temporary build and source files in the cache before git2pkg exits?",
-            "Der letzte Build ist fehlgeschlagen. Möchtest du die temporären Build- und Quellcode-Dateien im Cache aufräumen, bevor git2pkg beendet wird?",
-            "Son derleme başarısız oldu. git2pkg kapanmadan önce önbellekteki geçici derleme ve kaynak kod dosyalarını temizlemek istiyor musun?",
-            "La última compilación falló. ¿Quieres limpiar los archivos temporales de compilación y el código fuente en la caché antes de que se cierre git2pkg?",
-            "La dernière compilation a échoué. Voulez-vous nettoyer les fichiers temporaires de compilation et les sources dans le cache avant que git2pkg ne se ferme ?",
+            "The last build failed. Do you want to clean up the temporary build and source files in the cache before git2pkg-ai exits?",
+            "Der letzte Build ist fehlgeschlagen. Möchtest du die temporären Build- und Quellcode-Dateien im Cache aufräumen, bevor git2pkg-ai beendet wird?",
+            "Son derleme başarısız oldu. git2pkg-ai kapanmadan önce önbellekteki geçici derleme ve kaynak kod dosyalarını temizlemek istiyor musun?",
+            "La última compilación falló. ¿Quieres limpiar los archivos temporales de compilación y el código fuente en la caché antes de que se cierre git2pkg-ai?",
+            "La dernière compilation a échoué. Voulez-vous nettoyer les fichiers temporaires de compilation et les sources dans le cache avant que git2pkg-ai ne se ferme ?",
         )
     }
 
