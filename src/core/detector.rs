@@ -207,9 +207,11 @@ pub fn detect_build_system(root: &Path) -> BuildSystem {
         return BuildSystem::Autotools;
     }
 
-    let markers: [(&str, BuildSystem); 5] = [
+    let markers: &[(&str, BuildSystem)] = &[
         ("go.mod", BuildSystem::Go),
         ("pyproject.toml", BuildSystem::Python),
+        ("setup.py", BuildSystem::Python),
+        ("setup.cfg", BuildSystem::Python),
         ("Makefile", BuildSystem::Make),
         ("makefile", BuildSystem::Make),
         ("GNUmakefile", BuildSystem::Make),
@@ -217,7 +219,7 @@ pub fn detect_build_system(root: &Path) -> BuildSystem {
 
     for (file, system) in markers {
         if root.join(file).is_file() {
-            return system;
+            return system.clone();
         }
     }
     BuildSystem::Unknown
@@ -270,6 +272,13 @@ mod tests {
     fn erkennt_cargo() {
         let root = temp_root("cargo", &["Cargo.toml", "Makefile"]);
         assert_eq!(detect_build_system(&root), BuildSystem::Cargo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn erkennt_python_setup_py() {
+        let root = temp_root("py-setup", &["setup.py"]);
+        assert_eq!(detect_build_system(&root), BuildSystem::Python);
         fs::remove_dir_all(root).unwrap();
     }
 
