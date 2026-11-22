@@ -802,56 +802,23 @@ impl eframe::App for Git2PkgApp {
                 ui.strong(texts.status_step());
                 ui.colored_label(green, self.step.as_str());
             });
-            if self.building {
-                ui.add_space(3.0);
-                ui.vertical_centered(|ui| {
-                    let percent = (self.build_progress * 100.0).round() as u32;
-                    let label = format!("{} % — {}", percent, self.step);
-                    let width = 420.0_f32.min(ui.available_width());
-                    ui.add(
-                        egui::ProgressBar::new(self.build_progress)
-                            .text(label)
-                            .desired_width(width),
-                    );
-                });
-            }
+            ui.add_space(3.0);
+            ui.vertical_centered(|ui| {
+                let percent = (self.build_progress * 100.0).round() as u32;
+                let label = texts.progress_label(percent, &self.step);
+                let width = 420.0_f32.min(ui.available_width());
+                ui.add(
+                    egui::ProgressBar::new(self.build_progress)
+                        .text(label)
+                        .desired_width(width),
+                );
+            });
         });
 
         // Log-Aktionen und Status sind unten angedockt und bleiben auch nach
         // einem fehlgeschlagenen Build immer sichtbar und bedienbar.
         egui::TopBottomPanel::bottom("log_actions").show(ctx, |ui| {
             ui.separator();
-            ui.horizontal(|ui| {
-                ui.strong(texts.live_log());
-                if ui.button(texts.copy_log()).clicked() {
-                    ctx.copy_text(self.log.clone());
-                }
-                if ui
-                    .add_enabled(!self.log.is_empty(), egui::Button::new(texts.save_log()))
-                    .clicked()
-                {
-                    let log_text = self.log.clone();
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name("git2pkg-build.log")
-                        .add_filter("Log files", &["log", "txt"])
-                        .save_file()
-                    {
-                        match fs::write(&path, log_text.as_bytes()) {
-                            Ok(()) => {
-                                self.hint = Some(
-                                    texts.log_saved().replace("{}", &path.display().to_string()),
-                                );
-                            }
-                            Err(error) => {
-                                let message =
-                                    texts.log_save_failed().replace("{}", &error.to_string());
-                                self.log.push_str(&format!("[warn] {message}\n"));
-                                self.error = Some(message);
-                            }
-                        }
-                    }
-                }
-            });
             if let Some(error) = &self.error {
                 ui.add(
                     egui::Label::new(egui::RichText::new(error).color(egui::Color32::RED))
@@ -1635,6 +1602,41 @@ impl eframe::App for Git2PkgApp {
                         });
                     });
             }
+
+            // Toolbar direkt ueber dem Log, aber ausserhalb der ScrollArea:
+            // damit bleibt sie auch bei langen Logs und im Fehlerfall sichtbar.
+            ui.horizontal(|ui| {
+                ui.strong(texts.live_log());
+                if ui.button(texts.copy_log()).clicked() {
+                    ctx.copy_text(self.log.clone());
+                }
+                if ui
+                    .add_enabled(!self.log.is_empty(), egui::Button::new(texts.save_log()))
+                    .clicked()
+                {
+                    let log_text = self.log.clone();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("git2pkg-build.log")
+                        .add_filter("Log files", &["log", "txt"])
+                        .save_file()
+                    {
+                        match fs::write(&path, log_text.as_bytes()) {
+                            Ok(()) => {
+                                self.hint = Some(
+                                    texts.log_saved().replace("{}", &path.display().to_string()),
+                                );
+                            }
+                            Err(error) => {
+                                let message =
+                                    texts.log_save_failed().replace("{}", &error.to_string());
+                                self.log.push_str(&format!("[warn] {message}\n"));
+                                self.error = Some(message);
+                            }
+                        }
+                    }
+                }
+            });
+            ui.separator();
 
             // Das Log nutzt den verbleibenden Platz dynamisch; die unteren
             // Panels werden dadurch nie überdeckt oder abgeschnitten.
