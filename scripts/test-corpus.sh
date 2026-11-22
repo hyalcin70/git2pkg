@@ -1,22 +1,31 @@
 #!/usr/bin/env bash
 # Manual smoke corpus for git2pkg-ai.
-# Runs a handful of small, neutral projects through the CLI for one target
-# format. Network and a container engine are required.
 #
-# Usage: scripts/test-corpus.sh [auto|arch|debian|fedora|opensuse]
+# Pass one or more repository URLs to build them one after another. The
+# script contains no project names on purpose: the corpus is yours to choose
+# (for example one small project per build system you care about). Network
+# and a container engine are required.
+#
+# Usage: scripts/test-corpus.sh <target> <repo-url> [<repo-url> ...]
+#        scripts/test-corpus.sh auto https://example.invalid/project.git
+#        GIT2PKG_TEST_REPOS="url1 url2" scripts/test-corpus.sh debian
+#
+# <target> is one of: auto, arch, debian, fedora, opensuse.
 set -uo pipefail
 
 TARGET="${1:-auto}"
+shift || true
 BIN="./target/release/git2pkg-ai"
 
-REPOS=(
-  "https://github.com/jqlang/jq"              # Autotools / C
-  "https://github.com/libcheck/check"         # CMake / C
-  "https://github.com/sharkdp/hyperfine"      # Cargo / Rust
-  "https://github.com/junegunn/fzf"           # Go
-  "https://github.com/pallets/click"          # Python
-  "https://github.com/karlstav/cava"          # CMake + system libs
-)
+if [[ $# -gt 0 ]]; then
+  REPOS=("$@")
+elif [[ -n "${GIT2PKG_TEST_REPOS:-}" ]]; then
+  read -r -a REPOS <<<"$GIT2PKG_TEST_REPOS"
+else
+  echo "Usage: $0 <target> <repo-url> [<repo-url> ...]" >&2
+  echo "   or: GIT2PKG_TEST_REPOS=\"url1 url2\" $0 <target>" >&2
+  exit 2
+fi
 
 if [[ ! -x "$BIN" ]]; then
   echo "Build first: cargo build --release" >&2

@@ -384,20 +384,20 @@ impl Texts {
     }
     pub fn error_empty_url(&self) -> &'static str {
         self.get(
-            "Please enter a GitHub URL.",
-            "Bitte eine GitHub-URL eingeben.",
-            "Lütfen bir GitHub URL'si girin.",
-            "Introduzca una URL de GitHub.",
-            "Veuillez saisir une URL GitHub.",
+            "Please enter a Git URL.",
+            "Bitte eine Git-URL eingeben.",
+            "Lütfen bir Git URL'si girin.",
+            "Introduzca una URL de Git.",
+            "Veuillez saisir une URL Git.",
         )
     }
     pub fn error_bad_scheme(&self) -> &'static str {
         self.get(
-            "The URL must start with https://.",
-            "Die URL muss mit https:// beginnen.",
-            "URL, https:// ile başlamalıdır.",
-            "La URL debe empezar por https://.",
-            "L'URL doit commencer par https://.",
+            "The URL must start with http:// or https://.",
+            "Die URL muss mit http:// oder https:// beginnen.",
+            "URL, http:// veya https:// ile başlamalıdır.",
+            "La URL debe empezar por http:// o https://.",
+            "L'URL doit commencer par http:// ou https://.",
         )
     }
     pub fn live_log(&self) -> &'static str {

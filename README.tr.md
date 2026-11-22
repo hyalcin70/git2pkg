@@ -25,7 +25,7 @@ ile alınır.
 
 ## Kapsam ve Kapsam Dışı Alanlar
 
-`git2pkg-ai` yalnızca yerel Linux masaüstü ve CLI uygulamaları için geliştirilmiştir (ör. C/C++, Rust, Go ve Python araçları). Gömülü/mikrodenetleyici araç zincirleri (ör. Arduino, PlatformIO, ESP-IDF), IDE eklentileri (ör. VS Code uzantıları), mobil uygulamalar ve web uygulamaları bilinçli olarak kapsam dışıdır.
+`git2pkg-ai` yalnızca yerel Linux masaüstü ve CLI uygulamaları için geliştirilmiştir (ör. C/C++, Rust, Go ve Python araçları). Gömülü/mikrodenetleyici araç zincirleri, IDE eklentileri, mobil uygulamalar ve web uygulamaları bilinçli olarak kapsam dışıdır.
 
 ## Neden bunu geliştirdim
 

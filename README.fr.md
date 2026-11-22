@@ -25,7 +25,7 @@ conteneur.
 
 ## Périmètre et exclusions
 
-`git2pkg-ai` est conçu exclusivement pour les applications natives Linux de bureau et en ligne de commande (p. ex. outils C/C++, Rust, Go et Python). Les chaînes d'outils embarquées/microcontrôleurs (p. ex. Arduino, PlatformIO, ESP-IDF), les plugins d'IDE (p. ex. extensions VS Code), les applications mobiles et les applications web sont volontairement exclus du périmètre.
+`git2pkg-ai` est conçu exclusivement pour les applications natives Linux de bureau et en ligne de commande (p. ex. outils C/C++, Rust, Go et Python). Les chaînes d'outils embarquées/microcontrôleurs, les plugins d'IDE, les applications mobiles et les applications web sont volontairement exclus du périmètre.
 
 ## Pourquoi je l'ai créé
 

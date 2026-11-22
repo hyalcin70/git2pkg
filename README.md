@@ -23,7 +23,7 @@ regular expressions over compiler output, and the container's package manager.
 
 ## Scope & Non-Goals
 
-`git2pkg-ai` is built exclusively for native Linux desktop and CLI applications (such as C/C++, Rust, Go, and Python tools). Embedded/microcontroller toolchains (e.g., Arduino, PlatformIO, ESP-IDF), IDE plugins (e.g., VS Code extensions), mobile apps, or web apps are intentionally out of scope.
+`git2pkg-ai` is built exclusively for native Linux desktop and CLI applications (such as C/C++, Rust, Go, and Python tools). Embedded/microcontroller toolchains, IDE plugins, mobile apps, or web apps are intentionally out of scope.
 
 ## Why I Built This
 

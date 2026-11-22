@@ -122,14 +122,23 @@ applied to system-lib and shared-lib strategies. Generated CMake PKGBUILDs use
 
 Strictly out of scope — never add support or special cases for:
 
-- Embedded / microcontroller toolchains (Arduino, PlatformIO, ESP-IDF)
-- IDE plugins (for example VS Code extensions)
+- Embedded / microcontroller toolchains
+- IDE plugins
 - Mobile apps
 - Web apps
 
 Do not add repository-specific or product-specific hacks to make such projects
 build. Generalize all changes to build systems, file structures and error
 classes instead.
+
+Concretely, the code must never branch on a repository URL or project name, and
+must not contain fixed lists of one project's files. Detect patterns (script
+names containing `build`/`compile`, error classes, file types) instead. Tests,
+scripts and documentation must not use real application names as fixtures or
+examples. The dependency table in `assets/default_mappings.json` and
+`distro_package_name` is generic library metadata (CMake module names and
+pkg-config identifiers mapped to distro packages) and is explicitly allowed;
+it applies to every project and never special-cases one.
 
 ---
 
@@ -196,7 +205,7 @@ classes instead.
 - `.github/workflows/ci.yml` — QA workflow (`fmt`, `clippy`, `test`, release build)
 - `.github/ISSUE_TEMPLATE/build_failure.md`
 - `.gitlab-ci.yml`
-- `scripts/test-corpus.sh` — manual smoke corpus across build systems
+- `scripts/test-corpus.sh` — manual smoke corpus; pass repository URLs as arguments
 - `install.sh`, `uninstall.sh`
 
 ---
@@ -284,9 +293,8 @@ Documentation-only commits do **not** require a version bump or release tag.
 Current release: `v0.2.0-alpha.25`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
-  C++/CMake superbuilds (for example Bambu Studio), Meson/C projects (for
-  example mpv) and Go projects (for example lazygit). Fix real failures
-  generically, never by hardcoding these project names into the code.
+  C++/CMake superbuilds, Meson/C projects and Go projects. Fix real failures
+  generically; never hardcode application or project names into the code.
 - **`v0.2.0-beta.1`**: feature freeze and a fresh VM test round —
   Debian/Ubuntu, Fedora, openSUSE, plus a Podman check.
 - **`v0.2.0-rc.1` → `v1.0.0`**: release candidate, then official support start.

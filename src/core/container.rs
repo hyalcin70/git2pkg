@@ -9,10 +9,10 @@ use crate::core::resolver::{
     analyze_output, candidate_names, classify_failure, cmake_alternative_flags,
     cmake_option_flags_from_text, dependency_id, detect_build_fixes,
     detect_repo_script_distro_rejection, detect_source_group_error, family_key,
-    has_eigen_version_mismatch, is_cmake_policy_error, is_compiled_build_system,
-    is_transient_network_error, package_from_search, packages_from_file_database, probe_commands,
-    search_command, tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore,
-    MissingDep, SourceGroupError,
+    is_cmake_policy_error, is_compiled_build_system, is_transient_network_error,
+    package_from_search, packages_from_file_database, probe_commands, search_command,
+    tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore, MissingDep,
+    SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -66,15 +66,6 @@ fn cmake_retry_flags(output: &str, current: &[String]) -> Vec<String> {
             .any(|flag| flag.starts_with("-DCMAKE_POLICY_VERSION_MINIMUM="))
     {
         push_unique_string(&mut flags, "-DCMAKE_POLICY_VERSION_MINIMUM=3.5".to_string());
-    }
-    if has_eigen_version_mismatch(output) {
-        for flag in [
-            "-DEigen3_FIND_VERSION_MAJOR=3",
-            "-DEigen3_FIND_VERSION_MINOR=3",
-            "-DEIGEN3_VERSION_OK=TRUE",
-        ] {
-            push_unique_string(&mut flags, flag.to_string());
-        }
     }
     flags.retain(|flag| !current.contains(flag));
     flags
@@ -2070,8 +2061,8 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         };
         if !retry_state_changed(&round_state, &after_state) {
             // Pakete sind installiert, aber CMake hat den alten Stand noch im
-            // Cache (z. B. wxWidgets ohne cairo-Include). Einmalig die
-            // Configure-Stempel der Abhängigkeiten verwerfen.
+            // Cache (z. B. ein Paket mit veralteten Include-Pfaden). Einmalig
+            // die Configure-Stempel der Abhängigkeiten verwerfen.
             if deps_failed && !deps_reconfigured {
                 let removed = reset_dependency_configure_stamps(&work);
                 if removed > 0 {
@@ -3109,18 +3100,7 @@ fn temp_workdir(_url: &str) -> Result<PathBuf, String> {
 }
 
 fn find_repo_script(src: &Path) -> Option<String> {
-    for name in [
-        "BuildLinux.sh",
-        "build.sh",
-        "build_linux.sh",
-        "build-linux.sh",
-        "compile.sh",
-    ] {
-        if src.join(name).is_file() {
-            return Some(name.to_string());
-        }
-    }
-    None
+    crate::core::detector::find_build_script(src)
 }
 
 fn install_command(config: &BuildConfig, artifacts: &[PathBuf]) -> String {
@@ -3174,9 +3154,9 @@ fn package_result(
                         continue;
                     }
                     let mut final_name = name.to_string_lossy().into_owned();
-                    if config.target == TargetFormat::StandaloneBinary
-                        && (final_name == "app" || final_name == "git2pkg-ai-build")
-                    {
+                    // Nur der generische Fallback-Name unseres eigenen
+                    // Go-Builds wird durch den Projektnamen ersetzt.
+                    if config.target == TargetFormat::StandaloneBinary && final_name == "app" {
                         final_name = identity.name.clone();
                     }
                     let target = config.output_dir.join(&final_name);
@@ -3634,6 +3614,31 @@ mod tests {
     }
 
     #[test]
+    fn repo_skripte_werden_generisch_erkannt() {
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-ai-script-scan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("install-deps.sh"), "").unwrap();
+        fs::write(root.join("compile-everything.sh"), "").unwrap();
+        fs::write(root.join("BuildProject.sh"), "").unwrap();
+        fs::write(root.join("run-tests.sh"), "").unwrap();
+        fs::write(root.join("build-docker.sh"), "").unwrap();
+        fs::write(root.join("build-ci.sh"), "").unwrap();
+        fs::write(root.join("notes.txt"), "").unwrap();
+
+        // Wortgrenzen statt Teilstrings: `build-docker.sh`/`build-ci.sh` sind
+        // keine Bau-Skripte, CamelCase wird aber erkannt.
+        assert_eq!(find_repo_script(&root).as_deref(), Some("BuildProject.sh"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn artefaktpruefung_vermeidet_sigpipe() {
         let script = build_script(
             &config(DistroFamily::Arch, TargetFormat::NativePackage),
@@ -3970,17 +3975,17 @@ mod tests {
         let script = build_step_text(
             &BuildSystem::CMake,
             BuildStrategy::RepoScript,
-            Some("BuildLinux.sh"),
+            Some("compile-repo.sh"),
         );
-        assert!(script.contains("./BuildLinux.sh"));
+        assert!(script.contains("./compile-repo.sh"));
         assert!(script.contains("bash \"$script\""));
         assert!(script.contains("usage|and then"));
         let default_with_script = build_step_text(
             &BuildSystem::CMake,
             BuildStrategy::Default,
-            Some("BuildLinux.sh"),
+            Some("compile-repo.sh"),
         );
-        assert!(!default_with_script.contains("BuildLinux.sh"));
+        assert!(!default_with_script.contains("compile-repo.sh"));
         let make = build_step_text(
             &BuildSystem::CMake,
             BuildStrategy::DirectStagingFallback,
@@ -4659,12 +4664,14 @@ mod tests {
 
     #[test]
     fn cmake_retry_flags_aus_fehlertext_und_policy() {
-        let output = "CMake Error: Missing backend, or pass -DFOO_BAR=ON\nmirrors: set -DUSE_SYSTEM_FOO=ON\nCompatibility with CMake < 3.5 has been removed.\nEigen3 version 5.0.0 found, but at least version 3.3 is required\n";
+        let output = "CMake Error: Missing backend, or pass -DFOO_BAR=ON\nmirrors: set -DUSE_SYSTEM_FOO=ON\nCompatibility with CMake < 3.5 has been removed.\n";
         let flags = cmake_retry_flags(output, &[]);
         assert!(flags.contains(&"-DFOO_BAR=ON".to_string()));
         assert!(flags.contains(&"-DUSE_SYSTEM_FOO=ON".to_string()));
         assert!(flags.contains(&"-DCMAKE_POLICY_VERSION_MINIMUM=3.5".to_string()));
-        assert!(flags.contains(&"-DEIGEN3_VERSION_OK=TRUE".to_string()));
+        assert!(!flags
+            .iter()
+            .any(|flag| flag.to_ascii_lowercase().contains("eigen")));
         let again = cmake_retry_flags(output, &flags);
         assert!(again.is_empty());
     }

@@ -24,7 +24,7 @@ del compilador y el gestor de paquetes del contenedor.
 
 ## Alcance y objetivos excluidos
 
-`git2pkg-ai` está diseñado exclusivamente para aplicaciones nativas de escritorio y CLI en Linux (p. ej., herramientas en C/C++, Rust, Go y Python). Las cadenas de herramientas embebidas/microcontroladores (p. ej., Arduino, PlatformIO, ESP-IDF), los complementos de IDE (p. ej., extensiones de VS Code), las aplicaciones móviles y las aplicaciones web quedan deliberadamente fuera del alcance.
+`git2pkg-ai` está diseñado exclusivamente para aplicaciones nativas de escritorio y CLI en Linux (p. ej., herramientas en C/C++, Rust, Go y Python). Las cadenas de herramientas embebidas/microcontroladores, los complementos de IDE, las aplicaciones móviles y las aplicaciones web quedan deliberadamente fuera del alcance.
 
 ## Por qué lo construí
 

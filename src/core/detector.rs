@@ -118,16 +118,95 @@ fn fingerprint_build_system(root: &Path) -> &'static str {
     }
 }
 
+/// Zerlegt einen Dateinamen in Wörter: Trennzeichen und CamelCase-Grenzen
+/// gelten als Wortgrenzen (`BuildProject.sh` -> `build`, `project`).
+fn script_tokens(stem: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut previous: Option<char> = None;
+    for ch in stem.chars() {
+        if !ch.is_ascii_alphanumeric() {
+            if !current.is_empty() {
+                tokens.push(current.to_ascii_lowercase());
+                current.clear();
+            }
+            previous = None;
+            continue;
+        }
+        if let Some(prev) = previous {
+            if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() && !current.is_empty() {
+                tokens.push(current.to_ascii_lowercase());
+                current.clear();
+            }
+        }
+        current.push(ch);
+        previous = Some(ch);
+    }
+    if !current.is_empty() {
+        tokens.push(current.to_ascii_lowercase());
+    }
+    tokens
+}
+
+/// Sucht ein Shell-Skript im Wurzelverzeichnis, das nach Bauen oder
+/// Konfigurieren klingt. Bewusst ohne feste Projekt- oder Dateinamen.
+pub fn find_build_script(root: &Path) -> Option<String> {
+    const BLOCKED: &[&str] = &[
+        "test",
+        "tests",
+        "lint",
+        "format",
+        "fmt",
+        "clean",
+        "ci",
+        "uninstall",
+        "doc",
+        "docs",
+        "example",
+        "examples",
+        "sample",
+        "samples",
+        "bench",
+        "benchmark",
+        "benchmarks",
+        "docker",
+        "container",
+        "containers",
+    ];
+    // Nur echte Bau-/Konfigurationsskripte; `install.sh`, `setup.sh` und
+    // `package.sh` installieren oder paketieren meist nur und würden den
+    // Build-Schritt nicht ersetzen.
+    const BUILD: &[&str] = &["build", "compile", "make", "bootstrap", "configure"];
+    let mut candidates: Vec<(u8, String)> = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false)
+        })
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.len() > 3 && name.to_ascii_lowercase().ends_with(".sh"))
+        .filter_map(|name| {
+            let tokens = script_tokens(&name[..name.len() - 3]);
+            if tokens.iter().any(|token| BLOCKED.contains(&token.as_str())) {
+                return None;
+            }
+            let priority = BUILD.iter().position(|keyword| {
+                tokens
+                    .iter()
+                    .any(|token| token == keyword || token.starts_with(keyword))
+            })?;
+            Some((priority as u8, name))
+        })
+        .collect();
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    candidates.into_iter().next().map(|(_, name)| name)
+}
+
 fn has_repo_script(root: &Path) -> bool {
-    [
-        "BuildLinux.sh",
-        "build.sh",
-        "build_linux.sh",
-        "build-linux.sh",
-        "compile.sh",
-    ]
-    .iter()
-    .any(|name| root.join(name).is_file())
+    find_build_script(root).is_some()
 }
 
 fn is_workspace(root: &Path) -> bool {

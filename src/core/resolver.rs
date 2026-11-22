@@ -70,8 +70,11 @@ impl MissingDep {
     }
 }
 
-/// Häufige CMake-Module auf die passenden Distribution-Pakete abbilden.
-/// Kleingeschriebene Modulnamen fallen auf den Namen selbst zurück.
+/// Generische Wissensbasis: CMake-Modul- und pkg-config-Namen auf die
+/// passenden Distributionspakete abbilden. Das ist ausdrücklich *keine*
+/// projekt- oder anwendungsspezifische Sonderbehandlung: Jeder Eintrag gilt
+/// für alle Projekte, die diese Bibliothek verwenden. Unbekannte Namen fallen
+/// auf den Namen selbst zurück und werden anschließend verifiziert.
 pub fn distro_package_name(name: &str, package_manager: &str) -> Option<&'static str> {
     match (package_manager, name.to_ascii_lowercase().as_str()) {
         ("pacman", "boost") | ("pacman", "boost_include_dir") => Some("boost"),
@@ -284,7 +287,7 @@ fn dnf_package_name(line: &str) -> Option<String> {
 }
 
 /// Prüft, ob ein Paketname wirklich zum Suchbegriff gehört. Reine
-/// Teilstring-Treffer sind zu unscharf (`ecm` steckt auch in `doublecmd`).
+/// Teilstring-Treffer sind zu unscharf (`ecm` steckt auch mitten in anderen Namen).
 /// Der Begriff muss am Anfang oder Ende stehen (inkl. `lib`-Präfix); Treffer
 /// mitten im Namen sind zu unscharf.
 fn package_name_matches(name: &str, term: &str) -> bool {
@@ -1884,15 +1887,6 @@ pub fn cmake_alternative_flags(output: &str) -> Vec<String> {
     flags
 }
 
-/// Alter `FindEigen3.cmake` parst `Macros.h` statt `Version.h`. Ein Retry mit
-/// expliziten Version-Flags laesst `find_package(Eigen3)` das Systempaket akzeptieren.
-pub fn has_eigen_version_mismatch(output: &str) -> bool {
-    let lower = output.to_ascii_lowercase();
-    lower.contains("eigen3 version")
-        && lower.contains("but at least version")
-        && lower.contains("is required")
-}
-
 /// Allgemeine Wörter sind keine Kommandozeilen-Werkzeuge.
 fn is_generic_tool_word(name: &str) -> bool {
     matches!(
@@ -2244,7 +2238,7 @@ mod tests {
 
     #[test]
     fn dokumentationshinweise_erzeugen_keine_tools() {
-        let out = "*  Python dependencies for building jq documentation not found. *\n";
+        let out = "*  Python dependencies for building docs not found. *\n";
         assert!(!analyze_output(out)
             .iter()
             .any(|dep| matches!(dep, MissingDep::Tool(name) if name == "documentation")));
@@ -2351,9 +2345,9 @@ mod tests {
 
     #[test]
     fn unscharfe_teilstring_treffer_werden_abgelehnt() {
-        // "ecm" steckt zufaellig in "doublecmd".
+        // "ecm" steckt zufaellig mitten in einem anderen Paketnamen.
         assert_eq!(
-            package_from_search("doublecmd-qt5\n", "ecm", "pacman"),
+            package_from_search("widget-ecm-tool\n", "ecm", "pacman"),
             None
         );
         assert_eq!(
@@ -2373,11 +2367,7 @@ mod tests {
             Some("libsoup3".to_string())
         );
         assert_eq!(
-            package_from_search(
-                "lightdm-webkit-theme-litarvan\nwebkit2gtk-4.1\n",
-                "webkit",
-                "pacman"
-            ),
+            package_from_search("theme-webkit-extra\nwebkit2gtk-4.1\n", "webkit", "pacman"),
             Some("webkit2gtk-4.1".to_string())
         );
         assert_eq!(
@@ -2920,9 +2910,6 @@ mod tests {
             "Compatibility with CMake < 3.5 has been removed."
         ));
         assert!(!is_cmake_policy_error("Could NOT find PNG"));
-        assert!(has_eigen_version_mismatch(
-            "Eigen3 version 5.0.0 found in /usr/include/eigen3, but at least version 3.3 is required"
-        ));
     }
 
     #[test]

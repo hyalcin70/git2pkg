@@ -24,7 +24,7 @@ den Paketmanager im Container.
 
 ## Anwendungsbereich & Nicht-Ziele
 
-`git2pkg-ai` ist ausschließlich für native Linux-Desktop- und CLI-Anwendungen gedacht (z. B. C/C++, Rust, Go und Python-Tools). Eingebettete/Mikrocontroller-Toolchains (z. B. Arduino, PlatformIO, ESP-IDF), IDE-Plugins (z. B. VS-Code-Erweiterungen), mobile Apps und Web-Apps sind bewusst nicht im Anwendungsbereich enthalten.
+`git2pkg-ai` ist ausschließlich für native Linux-Desktop- und CLI-Anwendungen gedacht (z. B. C/C++, Rust, Go und Python-Tools). Eingebettete/Mikrocontroller-Toolchains, IDE-Plugins, mobile Apps und Web-Apps sind bewusst nicht im Anwendungsbereich enthalten.
 
 ## Warum ich das gebaut habe
 
