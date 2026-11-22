@@ -103,6 +103,11 @@ pub struct Git2PkgApp {
     clipboard: Option<arboard::Clipboard>,
 }
 
+/// Maximale Inhaltshoehe eines Dialogs: der untere Buttons-Bereich bleibt frei.
+fn dialog_scroll_height(ctx: &egui::Context) -> f32 {
+    (ctx.screen_rect().height() * 0.65).max(160.0)
+}
+
 fn is_foreign_target(target: TargetDistro, host: &DistroFamily) -> bool {
     target != TargetDistro::Auto && target.family(host) != *host
 }
@@ -865,44 +870,48 @@ impl eframe::App for Git2PkgApp {
             .movable(true)
             .constrain(true)
             .show(ctx, |ui| {
-                if let Some(texture) = &self.app_icon {
-                    ui.vertical_centered(|ui| {
-                        ui.add(
-                            egui::Image::from_texture(texture)
-                                .max_size(egui::vec2(64.0, 64.0))
-                                .maintain_aspect_ratio(true),
-                        );
+                egui::ScrollArea::vertical()
+                    .max_height(dialog_scroll_height(ctx))
+                    .show(ui, |ui| {
+                        if let Some(texture) = &self.app_icon {
+                            ui.vertical_centered(|ui| {
+                                ui.add(
+                                    egui::Image::from_texture(texture)
+                                        .max_size(egui::vec2(64.0, 64.0))
+                                        .maintain_aspect_ratio(true),
+                                );
+                            });
+                            ui.add_space(6.0);
+                        }
+                        if let Some(texture) = &self.logo {
+                            ui.vertical_centered(|ui| {
+                                ui.add(
+                                    egui::Image::from_texture(texture)
+                                        .max_size(egui::vec2(190.0, 60.0))
+                                        .maintain_aspect_ratio(true),
+                                );
+                            });
+                            ui.add_space(6.0);
+                        }
+                        ui.heading(format!("git2pkg v{}", env!("CARGO_PKG_VERSION")));
+                        ui.add_space(4.0);
+                        ui.label(texts.about_description());
+                        ui.add_space(6.0);
+                        ui.label("License: GNU GPLv3");
+                        ui.label(format!(
+                            "{} {}",
+                            texts.learned_rules(),
+                            MappingStore::load().learned_rule_count()
+                        ));
+                        ui.add_space(6.0);
+                        if ui.link(texts.link_repository()).clicked() {
+                            let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
+                        }
+                        if ui.link(texts.link_support()).clicked() {
+                            let _ = open::that("https://ko-fi.com");
+                        }
                     });
-                    ui.add_space(6.0);
-                }
-                if let Some(texture) = &self.logo {
-                    ui.vertical_centered(|ui| {
-                        ui.add(
-                            egui::Image::from_texture(texture)
-                                .max_size(egui::vec2(190.0, 60.0))
-                                .maintain_aspect_ratio(true),
-                        );
-                    });
-                    ui.add_space(6.0);
-                }
-                ui.heading(format!("git2pkg v{}", env!("CARGO_PKG_VERSION")));
-                ui.add_space(4.0);
-                ui.label(texts.about_description());
-                ui.add_space(6.0);
-                ui.label("License: GNU GPLv3");
-                ui.label(format!(
-                    "{} {}",
-                    texts.learned_rules(),
-                    MappingStore::load().learned_rule_count()
-                ));
-                ui.add_space(6.0);
-                if ui.link(texts.link_repository()).clicked() {
-                    let _ = open::that(env!("CARGO_PKG_REPOSITORY"));
-                }
-                if ui.link(texts.link_support()).clicked() {
-                    let _ = open::that("https://ko-fi.com");
-                }
-                ui.add_space(8.0);
+                ui.separator();
                 if ui.button(texts.close()).clicked() {
                     close_clicked = true;
                 }
@@ -941,15 +950,19 @@ impl eframe::App for Git2PkgApp {
                 .movable(true)
                 .constrain(true)
                 .show(ctx, |ui| {
-                    ui.label(&body);
-                    ui.monospace(package.to_string_lossy());
-                    ui.add_space(6.0);
-                    if is_native {
-                        ui.label(&question);
-                    } else {
-                        ui.label(&cross_hint);
-                    }
-                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(dialog_scroll_height(ctx))
+                        .show(ui, |ui| {
+                            ui.label(&body);
+                            ui.monospace(package.to_string_lossy());
+                            ui.add_space(6.0);
+                            if is_native {
+                                ui.label(&question);
+                            } else {
+                                ui.label(&cross_hint);
+                            }
+                        });
+                    ui.separator();
                     ui.horizontal(|ui| {
                         if is_native {
                             if ui.button(&now).clicked() {
@@ -999,8 +1012,12 @@ impl eframe::App for Git2PkgApp {
                 .constrain(true)
                 .show(ctx, |ui| {
                     ui.set_max_width(440.0);
-                    ui.label(&body);
-                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(dialog_scroll_height(ctx))
+                        .show(ui, |ui| {
+                            ui.label(&body);
+                        });
+                    ui.separator();
                     if ui.button(&ok).clicked() {
                         close = true;
                     }
@@ -1034,14 +1051,18 @@ impl eframe::App for Git2PkgApp {
                 .movable(true)
                 .constrain(true)
                 .show(ctx, |ui| {
-                    ui.label(&reason_label);
-                    ui.monospace(&reason);
-                    ui.add_space(6.0);
-                    let next = self.texts().next_strategy(self.next_strategy_label());
-                    ui.strong(&next);
-                    ui.add_space(6.0);
-                    ui.label(&question);
-                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(dialog_scroll_height(ctx))
+                        .show(ui, |ui| {
+                            ui.label(&reason_label);
+                            ui.monospace(&reason);
+                            ui.add_space(6.0);
+                            let next = self.texts().next_strategy(self.next_strategy_label());
+                            ui.strong(&next);
+                            ui.add_space(6.0);
+                            ui.label(&question);
+                        });
+                    ui.separator();
                     ui.horizontal(|ui| {
                         if ui.button(&yes).clicked() {
                             retry = true;
@@ -1075,8 +1096,12 @@ impl eframe::App for Git2PkgApp {
                 .movable(true)
                 .constrain(true)
                 .show(ctx, |ui| {
-                    ui.label(&body);
-                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(dialog_scroll_height(ctx))
+                        .show(ui, |ui| {
+                            ui.label(&body);
+                        });
+                    ui.separator();
                     if ui.button(&all).clicked() {
                         choice = 1;
                     }
