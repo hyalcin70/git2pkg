@@ -108,6 +108,36 @@ fn dialog_scroll_height(ctx: &egui::Context) -> f32 {
     (ctx.screen_rect().height() * 0.65).max(160.0)
 }
 
+/// Einheitlicher, deckender Dialog-Rahmen mit ruhigem Innenabstand.
+fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::symmetric(16, 14))
+}
+
+/// ANSI-Steuercodes und Tabs aus Log-Auszuegen entfernen, damit egui den Text
+/// nicht in scheinbare Spalten zerlegt.
+fn single_column_log_text(raw: &str) -> String {
+    let mut without_ansi = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            while let Some(&next) = chars.peek() {
+                chars.next();
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        without_ansi.push(ch);
+    }
+    without_ansi
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn is_foreign_target(target: TargetDistro, host: &DistroFamily) -> bool {
     target != TargetDistro::Auto && target.family(host) != *host
 }
@@ -869,6 +899,7 @@ impl eframe::App for Git2PkgApp {
             .collapsible(false)
             .movable(true)
             .constrain(true)
+            .frame(dialog_frame(ctx))
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(dialog_scroll_height(ctx))
@@ -949,6 +980,7 @@ impl eframe::App for Git2PkgApp {
                 .collapsible(false)
                 .movable(true)
                 .constrain(true)
+                .frame(dialog_frame(ctx))
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical()
                         .max_height(dialog_scroll_height(ctx))
@@ -1010,6 +1042,7 @@ impl eframe::App for Git2PkgApp {
                 .collapsible(false)
                 .movable(true)
                 .constrain(true)
+                .frame(dialog_frame(ctx))
                 .show(ctx, |ui| {
                     ui.set_max_width(440.0);
                     egui::ScrollArea::vertical()
@@ -1050,12 +1083,18 @@ impl eframe::App for Git2PkgApp {
                 .collapsible(false)
                 .movable(true)
                 .constrain(true)
+                .frame(dialog_frame(ctx))
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical()
                         .max_height(dialog_scroll_height(ctx))
                         .show(ui, |ui| {
                             ui.label(&reason_label);
-                            ui.monospace(&reason);
+                            ui.set_max_width(460.0);
+                            let clean_reason = single_column_log_text(&reason);
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(&clean_reason).monospace())
+                                    .wrap(),
+                            );
                             ui.add_space(6.0);
                             let next = self.texts().next_strategy(self.next_strategy_label());
                             ui.strong(&next);
@@ -1095,6 +1134,7 @@ impl eframe::App for Git2PkgApp {
                 .collapsible(false)
                 .movable(true)
                 .constrain(true)
+                .frame(dialog_frame(ctx))
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical()
                         .max_height(dialog_scroll_height(ctx))
@@ -1874,6 +1914,17 @@ fn log_line_color(line: &str, dark: bool) -> egui::Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fehlerlog_wird_einspaltig_gerendert() {
+        let raw = "Build failed\n[ 12%] datei_a\tdatei_b\n\u{1b}[31mCMake Error\u{1b}[0m\n";
+        let clean = single_column_log_text(raw);
+        assert!(!clean.contains('\t'));
+        assert!(!clean.contains('\u{1b}'));
+        assert!(clean.contains("datei_a datei_b"));
+        assert!(clean.contains("CMake Error"));
+        assert_eq!(clean.lines().count(), 3);
+    }
 
     #[test]
     fn log_readonly_buffer_ist_nicht_editierbar() {
