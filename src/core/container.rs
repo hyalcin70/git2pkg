@@ -1615,6 +1615,22 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         }
         if let Some(dep) = unresolved {
             if deps_failed {
+                // Wenn in dieser Runde neue Pakete oder Flags dazugekommen sind,
+                // lohnt ein erneuter Versuch derselben Strategie: Der neue Stand
+                // kann genau die vorher fehlende Abhängigkeit liefern.
+                let after_state = RetryState {
+                    packages: extra_packages.clone(),
+                    cmake_flags: cmake_flags.clone(),
+                };
+                if retry_state_changed(&round_state, &after_state) && heal_round < allowed_rounds {
+                    heal_round += 1;
+                    let _ = reset_cmake_caches(&work);
+                    let _ = tx.send(BuildEvent::Log(
+                        "[retry] installed new packages - retrying the dependency build"
+                            .to_string(),
+                    ));
+                    continue 'attempt;
+                }
                 let _ = tx.send(BuildEvent::Log(
                     "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
                         .to_string(),
