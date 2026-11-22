@@ -19,3 +19,8 @@
 /debian/files
 /debian/git2pkg/
 /debian/*.substvars
+
+# makepkg
+/packaging/*.pkg.tar.zst
+/packaging/pkg/
+/packaging/src/

@@ -281,7 +281,9 @@ Version bumps happen **only when cutting a release**:
 - Update `Cargo.toml` and `Cargo.lock` (via `cargo check`).
 - Update `packaging/PKGBUILD` with an Arch-compliant `pkgver` without hyphens
   (for example `0.2.0alpha26`). This PKGBUILD builds the local checkout and
-  deliberately has no `_tag` or source archive.
+  deliberately has no `_tag` or source archive. It sets `options=('!lto')`
+  because makepkg's default `-flto=auto` produces GCC LTO objects for the
+  `ring` C code that `rust-lld` cannot link.
 - Update `debian/changelog` and the fallback version in
   `packaging/git2pkg.spec`; both native recipes build the local checkout, and
   `packaging/build-rpm.sh` derives the RPM version from `Cargo.toml`.
