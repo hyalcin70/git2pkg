@@ -51,16 +51,20 @@ The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
 `src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
 
-Persistent Git clones live in `~/.cache/git2pkg-ai/repos/<repo_hash>/` and are
-updated in place. Temporary build workspaces live in
-`~/.cache/git2pkg-ai/builds/<build_id>/` and are removed after success or by the
-exit cleanup. If root-owned Docker artifacts block host deletion, a short-lived
-container removes them; `repos/` and learned mappings are never touched.
-Learned mappings are in `~/.config/git2pkg-ai/learned_mappings.json`; only verified
-build recipes are reused. After package installs `CMakeCache.txt`/`CMakeFiles`
-are reset; missing CLI tools are resolved through the package manager file
-database; `option(...)` flags in `CMakeLists.txt` are applied to system-lib and
-shared-lib strategies.
+Persistent Git clones live in `~/.cache/git2pkg-ai/repos/repo-<repo_hash>/` and
+are updated in place; build workspaces use the separate prefix
+`~/.cache/git2pkg-ai/builds/build-<unix_millis>-<pid>/src/` and are complete
+independent copies (no symlink or shared clone). The exit dialog option
+"Delete everything" first cancels the active build and stops build containers,
+then wipes the complete `~/.cache/git2pkg-ai/` tree (including `repos/`), using a
+short-lived container if root-owned artifacts remain. Learned mappings in
+`~/.config/git2pkg-ai/learned_mappings.json` are never touched by cache cleanup;
+only verified build recipes are reused. The GUI has no learning-reset button;
+the CLI flag `--reset-learning` remains available. After package installs
+`CMakeCache.txt`/`CMakeFiles` are reset; missing CLI tools are resolved through
+the package manager file database; `option(...)` flags in `CMakeLists.txt` are
+applied to system-lib and shared-lib strategies. Generated CMake PKGBUILDs use
+`set -eo pipefail` in `build()` so configure/compile errors abort immediately.
 
 ---
 
@@ -81,7 +85,7 @@ classes instead.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.23`)
+## 3. Repository Map (as of `v0.2.0-alpha.25`)
 
 ### Entry points
 
@@ -214,7 +218,7 @@ Version bumps happen **only when cutting a release**:
 
 - Update `Cargo.toml` and `Cargo.lock` (via `cargo check`).
 - Update `packaging/PKGBUILD` with an Arch-compliant `pkgver` without hyphens
-  (for example `0.2.0alpha23`). This PKGBUILD builds the local checkout and
+  (for example `0.2.0alpha25`). This PKGBUILD builds the local checkout and
   deliberately has no `_tag` or source archive.
 - Create an annotated tag: `git tag -a v<VERSION> -m "Release v<VERSION>"`.
 - Tagging stays local for this derivative; do not push tags.
@@ -226,9 +230,9 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.23`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.25`)
 
-Current release: `v0.2.0-alpha.23`.
+Current release: `v0.2.0-alpha.25`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
   C++/CMake superbuilds (for example Bambu Studio), Meson/C projects (for

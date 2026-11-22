@@ -2,7 +2,7 @@
 # Local-only derivative: this PKGBUILD builds the checkout in the parent
 # directory instead of downloading an upstream archive.
 pkgname=git2pkg-ai
-pkgver=0.2.0alpha23
+pkgver=0.2.0alpha25
 pkgrel=1
 pkgdesc="Isolated package builder from Git repositories for Linux distributions"
 arch=('x86_64')
