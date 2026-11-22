@@ -1369,6 +1369,22 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 push_unique_string(&mut cmake_flags, flag);
             }
             heal_round += 1;
+            if heal_round > allowed_rounds {
+                let Some(next) =
+                    next_unvisited_strategy(effective_strategy, has_deps, &visited_strategies)
+                else {
+                    break;
+                };
+                strategy_attempt += 1;
+                heal_round = 1;
+                allowed_rounds = INITIAL_HEAL_ROUNDS;
+                config.skip_deps = next == BuildStrategy::SystemLibsOnly;
+                forced_strategy = Some(next);
+                let _ = tx.send(BuildEvent::Log(format!(
+                    "[strategy] {} (self-healing rounds exhausted)",
+                    next.label()
+                )));
+            }
             continue;
         }
 

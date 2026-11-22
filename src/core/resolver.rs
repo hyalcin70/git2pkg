@@ -1414,6 +1414,9 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     let shell_cmd_re = Regex::new(r"(?i)([A-Za-z0-9_.\-]+):\s*command not found").unwrap();
     let tool_quoted_re =
         Regex::new(r#"(?i)(?:tool|executable|program)\s+['\"]([A-Za-z0-9_+.\-]+)['\"]"#).unwrap();
+    // CMake-Module melden fehlende Datenpakete z. B. als
+    // "Missing wayland-protocols pkgdatadir".
+    let pkgdata_re = Regex::new(r"(?i)missing\s+([A-Za-z0-9_+.\-]+)\s+pkgdatadir").unwrap();
 
     let mut deps: Vec<MissingDep> = Vec::new();
 
@@ -1479,6 +1482,9 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
                 push_unique(&mut deps, MissingDep::Tool(name.to_string()));
             }
         }
+        for caps in pkgdata_re.captures_iter(trimmed) {
+            push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
+        }
     }
 
     deps
@@ -1521,6 +1527,14 @@ mod tests {
             analyze_output(out),
             vec![MissingDep::Header("openssl/sha.h".into())]
         );
+    }
+
+    #[test]
+    fn erkennt_fehlendes_pkgdatadir() {
+        let out = "CMake Error at CMake/modules/FindWaylandProtocols.cmake:9 (message):\n  Missing wayland-protocols pkgdatadir\n";
+        assert!(analyze_output(out)
+            .iter()
+            .any(|dep| matches!(dep, MissingDep::PkgConfig(name) if name == "wayland-protocols")));
     }
 
     #[test]
