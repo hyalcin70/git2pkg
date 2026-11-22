@@ -7,9 +7,6 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-L'interface est localisée en cinq langues ; les journaux de compilation en
-direct sont des diagnostics techniques en anglais.
-
 Une petite interface graphique Linux qui compile un dépôt Git **dans un
 conteneur jetable (Podman/Docker)** et dépose le résultat dans un dossier de
 sortie visible (`~/Downloads/git2pkg` par défaut). L'hôte n'a besoin ni de

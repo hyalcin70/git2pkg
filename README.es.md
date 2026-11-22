@@ -7,9 +7,6 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-La interfaz está localizada en cinco idiomas; los registros de compilación en
-vivo son diagnósticos técnicos en inglés.
-
 Una pequeña interfaz de escritorio Linux que compila un repositorio Git **dentro
 de un contenedor desechable (Podman/Docker)** y coloca el resultado en una
 carpeta de salida visible (`~/Downloads/git2pkg` por defecto). El sistema anfitrión

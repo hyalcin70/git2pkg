@@ -7,9 +7,6 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-Arayüz beş dilde yerelleştirilmiştir; canlı derleme günlükleri İngilizce teknik
-tanılama mesajlarıdır.
-
 GitHub, GitLab ve benzeri platformlardaki Git depolarını **tek kullanımlık bir
 Podman/Docker konteynerinde** derleyen ve sonucu görünür bir çıktı klasörüne
 (varsayılan olarak `~/Downloads/git2pkg`) koyan küçük bir Linux masaüstü

@@ -7,9 +7,6 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-The GUI is localized in five languages; live build logs are English technical
-diagnostics.
-
 A small Linux desktop GUI that builds a Git repository **inside a disposable
 Podman/Docker container** and drops the finished artifact into a visible output
 folder (`~/Downloads/git2pkg` by default). The host never needs a compiler

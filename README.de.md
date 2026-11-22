@@ -7,9 +7,6 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-Die Oberfläche ist in fünf Sprachen lokalisiert; die Live-Build-Logs sind
-englische technische Diagnosemeldungen.
-
 Eine kleine Linux-Desktop-GUI, die ein Git-Repository **in einem temporären
 Wegwerf-Container (Podman/Docker)** baut und das Ergebnis in einen sichtbaren
 Ausgabeordner legt (standardmäßig `~/Downloads/git2pkg`). Das Host-System
