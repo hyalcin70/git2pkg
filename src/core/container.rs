@@ -2003,7 +2003,7 @@ fn toolchain_packages(family: &DistroFamily, system: &BuildSystem) -> Vec<&'stat
             DistroFamily::Arch
             | DistroFamily::Debian
             | DistroFamily::Fedora
-            | DistroFamily::Suse => packages.extend(["autoconf", "automake", "libtool"]),
+            | DistroFamily::Suse => packages.extend(["autoconf", "automake", "libtool", "gettext"]),
             DistroFamily::Unknown => {}
         },
         _ => {}
@@ -2209,7 +2209,7 @@ fn project_identity(url: &str, src: &Path) -> ProjectIdentity {
 }
 
 /// Paketinstallationsschritt mit dem echten Projektnamen.
-fn project_install_step(system: &BuildSystem, name: &str) -> String {
+fn project_install_step(system: &BuildSystem, _name: &str) -> String {
     let step = match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_install_step().to_string(),
         BuildSystem::CMake => {
@@ -2217,12 +2217,18 @@ fn project_install_step(system: &BuildSystem, name: &str) -> String {
                 .to_string()
         }
         BuildSystem::Meson => "DESTDIR=\"$pkgdir\" ninja -C build install".to_string(),
-        BuildSystem::Go => format!("install -Dm755 app \"$pkgdir/usr/bin/{}\"", name),
+        BuildSystem::Go => {
+            "for binary in /work/dist/*; do [ -f \"$binary\" ] && install -Dm755 \"$binary\" \"$pkgdir/usr/bin/$(basename \"$binary\")\"; done".to_string()
+        }
         BuildSystem::Python => {
             "python3 -m pip install --no-deps --prefix=\"$pkgdir/usr\" .".to_string()
         }
-        BuildSystem::Autotools => "make DESTDIR=\"$pkgdir\" install".to_string(),
-        BuildSystem::Make => "make DESTDIR=\"$pkgdir\" PREFIX=/usr install".to_string(),
+        BuildSystem::Autotools => {
+            "if ! make DESTDIR=\"$pkgdir\" install; then echo '[pkg] make install unavailable - staging built binaries' >&2; for binary in /work/dist/*; do [ -f \"$binary\" ] && install -Dm755 \"$binary\" \"$pkgdir/usr/bin/$(basename \"$binary\")\"; done; fi".to_string()
+        }
+        BuildSystem::Make => {
+            "if ! make DESTDIR=\"$pkgdir\" PREFIX=/usr install; then echo '[pkg] make install unavailable - staging built binaries' >&2; for binary in /work/dist/*; do [ -f \"$binary\" ] && install -Dm755 \"$binary\" \"$pkgdir/usr/bin/$(basename \"$binary\")\"; done; fi".to_string()
+        }
         BuildSystem::Qmake => "make INSTALL_ROOT=\"$pkgdir\" install".to_string(),
         BuildSystem::Unknown => "true".to_string(),
     };
@@ -2242,7 +2248,9 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
         BuildSystem::Meson => {
             "meson setup build --prefix=/usr && ninja -C build && find build -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
         }
-        BuildSystem::Go => "go build -o /work/dist/app .",
+        BuildSystem::Go => {
+            r#"export GOCACHE=/work/go-cache; mkdir -p /work/dist /work/go-cache; found=0; for pkg in $(go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./... 2>/dev/null); do name=$(basename "$pkg"); go build -o "/work/dist/$name" "$pkg" && found=1; done; if [ "$found" = 0 ]; then go build -o /work/dist/app .; fi"#
+        }
         BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .",
         BuildSystem::Autotools => {
             "if [ -x ./configure ]; then ./configure --prefix=/usr; else autoreconf -fi && ./configure --prefix=/usr; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
@@ -2582,6 +2590,7 @@ fn build_script_with_flags(
         "export CARGO_TARGET_DIR=/work/cargo-target".to_string(),
         "export CARGO_HOME=/work/cargo-home".to_string(),
         "export CCACHE_DIR=/work/ccache".to_string(),
+        "export PIP_BREAK_SYSTEM_PACKAGES=1".to_string(),
         "mkdir -p /work/cargo-target /work/cargo-home /work/ccache".to_string(),
         // Gemountete Quellen gehören dem Host-Nutzer; der Container läuft als
         // root. Ohne diese Ausnahme verweigert git seine Arbeit.
@@ -3203,6 +3212,23 @@ mod tests {
         let step = binary_build_step(&BuildSystem::Qmake);
         assert!(step.contains("&& make"), "{step}");
         assert!(step.contains("&& find"), "{step}");
+    }
+
+    #[test]
+    fn go_projekt_baut_alle_main_pakete() {
+        let step = binary_build_step(&BuildSystem::Go);
+        assert!(step.contains("go list -f"), "{step}");
+        assert!(step.contains("/work/dist/$name"), "{step}");
+        let install = project_install_step(&BuildSystem::Go, "example-app");
+        assert!(install.contains("for binary in /work/dist/*"), "{install}");
+    }
+
+    #[test]
+    fn make_und_autotools_haben_binary_fallback() {
+        for system in [BuildSystem::Make, BuildSystem::Autotools] {
+            let install = project_install_step(&system, "example-app");
+            assert!(install.contains("staging built binaries"), "{install}");
+        }
     }
 
     #[test]
