@@ -171,3 +171,9 @@ Bu projenin fikri bana ait; yönünü belirledim, testlerini yaptım ve hatalar�
 
 GPL-3.0-or-later — bkz. [LICENSE](LICENSE). `assets/` içindeki Noto Sans ve
 Noto Sans Mono yazı tipi dosyaları SIL Open Font License 1.1 ile lisanslıdır.
+
+## Teşekkürler
+
+<a href="https://github.com/NousResearch/hermes-agent"><img src="assets/badges/hermes-agent.svg" alt="Hermes Agent" height="28"></a>
+
+`git2pkg` geliştirilirken yerel bir geliştirme aracı olarak yardımcı olan Nous Research ekibinin [Hermes Agent](https://github.com/NousResearch/hermes-agent) projesine özel teşekkürler (`git2pkg` uygulamasının kendisi ise herhangi bir yapay zeka bağımlılığı olmadan %100 deterministik olarak çalışır).

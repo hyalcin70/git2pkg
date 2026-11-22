@@ -93,6 +93,7 @@ classes instead.
 - `assets/app_icon.png`
 - `assets/ui/creator_logo.png`
 - `assets/ui/made_for_linux.png`
+- `assets/badges/` — third-party badge assets (currently `hermes-agent.svg`)
 - `assets/default_mappings.json`
 - `assets/NotoSans-Regular.ttf`
 - `assets/NotoSansMono-Regular.ttf`
