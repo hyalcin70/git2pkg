@@ -820,7 +820,7 @@ impl eframe::App for Git2PkgApp {
             ui.add_space(3.0);
             ui.vertical_centered(|ui| {
                 let percent = (self.build_progress * 100.0).round() as u32;
-                let label = texts.progress_label(percent, &self.step);
+                let label = texts.progress_label(percent);
                 let width = 420.0_f32.min(ui.available_width());
                 ui.add(
                     egui::ProgressBar::new(self.build_progress)

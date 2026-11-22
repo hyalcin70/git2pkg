@@ -1944,6 +1944,32 @@ fn build_script_with(
         "if [ ! -f \"${artifacts[0]}\" ]; then echo '__GIT2PKG_NO_ARTIFACT__' >&2; exit 1; fi"
             .to_string(),
     );
+    // Ein bloß vorhandenes Paket ist kein Erfolg: nach einem CMake-/Compiler-
+    // Fehler darf kein leeres Artefakt den OK-Marker ausloesen.
+    lines.push(
+        r#"artifact="${artifacts[0]}"
+case "$artifact" in
+  *.pkg.tar.zst|*.tar.zst)
+    if ! tar -tf "$artifact" 2>/dev/null | grep -Eq '(^|/)usr/(bin|lib|lib64)/'; then
+      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
+      exit 1
+    fi
+    ;;
+  *.deb)
+    if ! dpkg-deb -c "$artifact" 2>/dev/null | grep -Eq 'usr/(bin|lib|lib64)/'; then
+      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
+      exit 1
+    fi
+    ;;
+  *.rpm)
+    if ! rpm -qlp "$artifact" 2>/dev/null | grep -Eq 'usr/(bin|lib|lib64)/'; then
+      echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
+      exit 1
+    fi
+    ;;
+esac"#
+            .to_string(),
+    );
     // Root-eigene Bauordner muessen im Container entfernt werden; /work/dist
     // bleibt bis zum Kopieren der Artefakte durch den Host erhalten.
     lines.push(
@@ -2791,6 +2817,14 @@ mod tests {
                 .expect("artefaktcheck");
             let ok = script.find(OK_MARKER).expect("ok-marker");
             assert!(check < ok, "{:?}: check muss vor OK stehen", family);
+            let empty = script
+                .find("__GIT2PKG_EMPTY_PACKAGE__")
+                .expect("leerpaketcheck");
+            assert!(
+                empty < ok,
+                "{:?}: leerpaketcheck muss vor OK stehen",
+                family
+            );
         }
     }
 
