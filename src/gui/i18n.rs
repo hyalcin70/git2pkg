@@ -213,6 +213,15 @@ impl Texts {
         )
         .replace("{}", engine)
     }
+    pub fn engine_universe_hint(&self) -> &'static str {
+        self.get(
+            "If the package is missing: sudo add-apt-repository universe",
+            "Falls das Paket fehlt: sudo add-apt-repository universe",
+            "Paket bulunamazsa: sudo add-apt-repository universe",
+            "Si falta el paquete: sudo add-apt-repository universe",
+            "Si le paquet manque : sudo add-apt-repository universe",
+        )
+    }
     pub fn copy(&self) -> &'static str {
         self.get("Copy", "Kopieren", "Kopyala", "Copiar", "Copier")
     }
@@ -1324,6 +1333,10 @@ mod tests {
             let message = texts.engine_selected_missing_text("Docker");
             assert!(title.contains("Podman"), "{language:?}: {title}");
             assert!(message.contains("Docker"), "{language:?}: {message}");
+            assert!(
+                texts.engine_universe_hint().contains("add-apt-repository"),
+                "{language:?}"
+            );
         }
     }
 

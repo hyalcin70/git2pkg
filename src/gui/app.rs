@@ -1687,7 +1687,7 @@ impl eframe::App for Git2PkgApp {
                 } else {
                     self.engine.binary()
                 };
-                let install_command = match self.distro.family {
+                let mut install_command = match self.distro.family {
                     DistroFamily::Arch | DistroFamily::Unknown => {
                         format!("sudo pacman -S {}", package)
                     }
@@ -1695,6 +1695,11 @@ impl eframe::App for Git2PkgApp {
                     DistroFamily::Fedora => format!("sudo dnf install {}", package),
                     DistroFamily::Suse => format!("sudo zypper install {}", package),
                 };
+                if !auto && self.engine == ContainerEngine::Docker {
+                    install_command.push_str(" && sudo systemctl enable --now docker");
+                }
+                let ubuntu_like =
+                    self.distro.family == DistroFamily::Debian && self.distro.id != "debian";
                 let fill = if self.theme_mode.is_dark() {
                     egui::Color32::from_rgb(70, 35, 30)
                 } else {
@@ -1717,6 +1722,9 @@ impl eframe::App for Git2PkgApp {
                                 ctx.copy_text(install_command.clone());
                             }
                         });
+                        if package == "podman" && ubuntu_like {
+                            ui.label(texts.engine_universe_hint());
+                        }
                     });
             }
 
