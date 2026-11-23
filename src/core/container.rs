@@ -873,6 +873,9 @@ pub struct BuildConfig {
     pub skip_deps: bool,
     /// Zusätzliche Include-Pfade, die aus fehlenden Headern/pkg-config ermittelt wurden.
     pub include_dirs: Vec<String>,
+    /// Vorhandener Arbeitsbereich eines fehlgeschlagenen GUI-Versuchs.
+    /// Wird für einen Strategie-Retry wiederverwendet, statt erneut zu klonen.
+    pub workspace: Option<PathBuf>,
     /// Vom GUI-Thread gesetzt, um einen laufenden Build sofort zu stoppen.
     pub cancel_flag: Arc<AtomicBool>,
     /// ID des aktuellen Wegwerf-Containers für den sofortigen Stopp.
@@ -886,6 +889,7 @@ pub enum BuildEvent {
     Finished(BuildOutcome),
     Failed(String),
     ContainerStarted(String),
+    Workspace(PathBuf),
     Cancelled,
 }
 
@@ -1540,13 +1544,26 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut skipped_incomplete: HashSet<String> = HashSet::new();
 
     step(tx, texts.step_workdir());
-    let work = temp_workdir(&config.url)?;
+    let reused = reusable_workspace(config.workspace.as_deref());
+    let work = match &reused {
+        Some(path) => {
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[cache] reusing build workspace: {}",
+                path.display()
+            )));
+            path.clone()
+        }
+        None => temp_workdir(&config.url)?,
+    };
     let _ = fs::remove_file(work.join("FAILED"));
     // Ausgabeordner sofort anlegen – auch wenn der Clone später fehlschlägt.
     fs::create_dir_all(&config.output_dir).map_err(|e| format!("output dir: {}", e))?;
 
     let src = work.join("src");
-    prepare_source_workspace(&config.url, &src, tx, &texts)?;
+    if reused.is_none() {
+        prepare_source_workspace(&config.url, &src, tx, &texts)?;
+    }
+    let _ = tx.send(BuildEvent::Workspace(work.clone()));
     let family = family_key(&config.target_distro.info(&config.distro).family);
 
     let mut repo_script = config
@@ -3178,6 +3195,12 @@ pub fn cached_repo_has_local_dependencies(url: &str) -> bool {
     has_local_dependencies(&src)
 }
 
+/// Ein vorhandener Workspace ist nur gültig, wenn sein Quellbaum noch existiert.
+fn reusable_workspace(path: Option<&Path>) -> Option<PathBuf> {
+    path.filter(|path| path.join("src").is_dir())
+        .map(Path::to_path_buf)
+}
+
 /// Eindeutiges, vom Repo-Cache getrenntes Arbeitsverzeichnis pro Build.
 fn temp_workdir(_url: &str) -> Result<PathBuf, String> {
     let millis = SystemTime::now()
@@ -3314,6 +3337,7 @@ mod tests {
             rustup_fix: false,
             skip_deps: false,
             include_dirs: Vec::new(),
+            workspace: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             container_id: Arc::new(Mutex::new(None)),
         }
@@ -3752,6 +3776,30 @@ mod tests {
             !script.contains("export CMAKE_PREFIX_PATH=/work/deps-install"),
             "{script}"
         );
+    }
+
+    #[test]
+    fn vorhandener_workspace_wird_wiederverwendet() {
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-workspace-reuse-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let valid = root.join("valid");
+        fs::create_dir_all(valid.join("src")).unwrap();
+        let empty = root.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+
+        assert_eq!(
+            reusable_workspace(Some(valid.as_path())),
+            Some(valid.clone())
+        );
+        assert!(reusable_workspace(Some(empty.as_path())).is_none());
+        assert!(reusable_workspace(None).is_none());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

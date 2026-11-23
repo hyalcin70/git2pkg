@@ -485,6 +485,15 @@ impl Texts {
             "Journal enregistré : {}",
         )
     }
+    pub fn log_autosaved(&self) -> &'static str {
+        self.get(
+            "Previous build log saved: {}",
+            "Vorheriges Build-Log gespeichert: {}",
+            "Önceki derleme günlüğü kaydedildi: {}",
+            "Registro de compilación anterior guardado: {}",
+            "Journal de compilation précédent enregistré : {}",
+        )
+    }
     pub fn log_save_failed(&self) -> &'static str {
         self.get(
             "Could not save log: {}",

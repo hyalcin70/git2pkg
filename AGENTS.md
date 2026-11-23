@@ -90,7 +90,9 @@ add project-specific include paths or macro definitions by name.
 
 The container build orchestration, retry strategies, cache handling and
 cleanup live in `src/core/container.rs`. Packaging backends are modular under
-`src/core/packaging/`. The GUI lives in `src/gui/app.rs`.
+`src/core/packaging/`. The GUI lives in `src/gui/app.rs`. GUI strategy retries reuse the
+existing build workspace (`BuildConfig::workspace`) instead of cloning again and
+auto-save the previous failed log before clearing the live log.
 
 For local Arch builds use `makepkg -sc`: `-c` removes the `src/` and `pkg/`
 work directories after a successful build, so only the finished package

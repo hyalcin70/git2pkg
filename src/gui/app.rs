@@ -90,6 +90,8 @@ pub struct Git2PkgApp {
     outcome: Option<BuildOutcome>,
     error: Option<String>,
     last_failed_url: Option<String>,
+    last_workspace: Option<PathBuf>,
+    last_log_dir: Option<PathBuf>,
     next_strategy: BuildStrategy,
     confirm_install: bool,
     hint: Option<String>,
@@ -116,6 +118,27 @@ fn dialog_scroll_height(ctx: &egui::Context) -> f32 {
 /// Vorgeschlagener Dateiname fuer das aktuelle Build-Log.
 fn suggested_log_filename(attempt: u32) -> String {
     format!("{}-build-{}.log", env!("CARGO_PKG_NAME"), attempt.max(1))
+}
+
+/// Kollisionsfreier Logpfad: vorhandene Logs werden nie überschrieben.
+fn unique_log_path(dir: &Path, attempt: u32) -> PathBuf {
+    let base = suggested_log_filename(attempt);
+    let stem = base.strip_suffix(".log").unwrap_or(&base);
+    let mut path = dir.join(&base);
+    let mut index = 1;
+    while path.exists() {
+        path = dir.join(format!("{}-{}.log", stem, index));
+        index += 1;
+    }
+    path
+}
+
+fn save_log_to(dir: &Path, attempt: u32, log: &str) -> Result<PathBuf, String> {
+    fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    let path = unique_log_path(dir, attempt);
+    fs::write(&path, log.as_bytes())
+        .map_err(|error| error.to_string())
+        .map(|_| path)
 }
 
 fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
@@ -263,6 +286,8 @@ impl Git2PkgApp {
             outcome: None,
             error: None,
             last_failed_url: None,
+            last_workspace: None,
+            last_log_dir: settings.last_log_dir.clone(),
             next_strategy: BuildStrategy::Default,
             confirm_install: false,
             hint: None,
@@ -368,6 +393,7 @@ impl Git2PkgApp {
         GuiSettings {
             output_dir: Some(self.output_dir.clone()),
             theme: Some(self.theme_mode),
+            last_log_dir: self.last_log_dir.clone(),
         }
         .save();
     }
@@ -386,6 +412,7 @@ impl Git2PkgApp {
 
     fn start_build(&mut self) {
         self.build_attempt = 1;
+        self.last_workspace = None;
         let url = self.url.trim().to_string();
         self.start_build_with(url, BuildStrategy::Default);
     }
@@ -401,8 +428,40 @@ impl Git2PkgApp {
             return;
         };
         let strategy = self.next_strategy;
+        let saved = self.save_current_log();
         self.build_attempt = self.build_attempt.saturating_add(1);
         self.start_build_with(url, strategy);
+        match saved {
+            Some(Ok(path)) => {
+                self.hint = Some(
+                    self.texts()
+                        .log_autosaved()
+                        .replace("{}", &path.display().to_string()),
+                );
+            }
+            Some(Err(error)) => {
+                self.error = Some(self.texts().log_save_failed().replace("{}", &error));
+            }
+            None => {}
+        }
+    }
+
+    /// Speichert das aktuelle Log vor einem Retry. Der zuletzt genutzte
+    /// Log-Ordner wird beibehalten; ohne Vorgabe dient der Ausgabeordner.
+    fn save_current_log(&mut self) -> Option<Result<PathBuf, String>> {
+        if self.log.trim().is_empty() {
+            return None;
+        }
+        let dir = self
+            .last_log_dir
+            .clone()
+            .unwrap_or_else(|| self.output_dir.clone());
+        let result = save_log_to(&dir, self.build_attempt, &self.log);
+        if result.is_ok() {
+            self.last_log_dir = Some(dir);
+            self.persist_settings();
+        }
+        Some(result)
     }
 
     fn start_build_with(&mut self, url: String, strategy: BuildStrategy) {
@@ -461,6 +520,7 @@ impl Git2PkgApp {
             rustup_fix: false,
             skip_deps: false,
             include_dirs: Vec::new(),
+            workspace: self.last_workspace.clone(),
             cancel_flag: self.cancel_flag.clone(),
             container_id: self.container_id.clone(),
         };
@@ -520,6 +580,10 @@ impl Git2PkgApp {
                     }
                     Ok(BuildEvent::ContainerStarted(id)) => {
                         *self.container_id.lock().unwrap() = Some(id);
+                        changed = true;
+                    }
+                    Ok(BuildEvent::Workspace(path)) => {
+                        self.last_workspace = Some(path);
                         changed = true;
                     }
                     Ok(BuildEvent::Cancelled) => {
@@ -1644,13 +1708,17 @@ impl eframe::App for Git2PkgApp {
                     .clicked()
                 {
                     let log_text = self.log.clone();
-                    if let Some(path) = rfd::FileDialog::new()
+                    let mut dialog = rfd::FileDialog::new()
                         .set_file_name(suggested_log_filename(self.build_attempt))
-                        .add_filter("Log files", &["log", "txt"])
-                        .save_file()
-                    {
+                        .add_filter("Log files", &["log", "txt"]);
+                    if let Some(dir) = &self.last_log_dir {
+                        dialog = dialog.set_directory(dir);
+                    }
+                    if let Some(path) = dialog.save_file() {
                         match fs::write(&path, log_text.as_bytes()) {
                             Ok(()) => {
+                                self.last_log_dir = path.parent().map(Path::to_path_buf);
+                                self.persist_settings();
                                 self.hint = Some(
                                     texts.log_saved().replace("{}", &path.display().to_string()),
                                 );
@@ -1892,6 +1960,25 @@ mod tests {
         assert_eq!(suggested_log_filename(1), "git2pkg-build-1.log");
         assert_eq!(suggested_log_filename(3), "git2pkg-build-3.log");
         assert_eq!(suggested_log_filename(0), "git2pkg-build-1.log");
+    }
+
+    #[test]
+    fn fehlgeschlagenes_log_wird_kollisionsfrei_gespeichert() {
+        let dir = std::env::temp_dir().join(format!(
+            "git2pkg-log-save-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let first = save_log_to(&dir, 1, "erster Versuch").unwrap();
+        let second = save_log_to(&dir, 1, "zweiter Versuch").unwrap();
+        assert!(first.ends_with("git2pkg-build-1.log"));
+        assert!(second.ends_with("git2pkg-build-1-1.log"));
+        assert_eq!(fs::read_to_string(&first).unwrap(), "erster Versuch");
+        assert_eq!(fs::read_to_string(&second).unwrap(), "zweiter Versuch");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

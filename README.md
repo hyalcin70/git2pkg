@@ -66,6 +66,8 @@ simple GUI.
   Autotools (`configure.ac`), qmake (`.pro`), `go.mod`, `pyproject.toml`,
   `Makefile`).
 - Live, scrollable build log streamed from the container, with a copy button.
+- Retrying with another strategy reuses the existing build workspace (no second
+  clone) and automatically saves the previous failed log.
 - Missing-dependency resolution: the compiler output is scanned for missing
   headers, pkg-config packages, CMake modules, tools and linker libraries; the
   matching package is installed **inside the throwaway container** and then

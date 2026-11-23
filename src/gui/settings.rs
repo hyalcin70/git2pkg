@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 pub struct GuiSettings {
     pub output_dir: Option<PathBuf>,
     pub theme: Option<ThemeMode>,
+    /// Zuletzt genutzter Ordner für Build-Logs (manuell oder automatisch).
+    pub last_log_dir: Option<PathBuf>,
 }
 
 impl GuiSettings {
@@ -66,6 +68,7 @@ mod tests {
         let settings = GuiSettings {
             output_dir: Some(PathBuf::from("/tmp/example-output")),
             theme: Some(ThemeMode::Dark),
+            last_log_dir: Some(PathBuf::from("/tmp/example-logs")),
         };
         assert!(settings.save_to(&path));
         assert_eq!(GuiSettings::load_from(&path), settings);

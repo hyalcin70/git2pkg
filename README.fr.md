@@ -75,6 +75,9 @@ simple interface graphique.
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
 - Journal de compilation en direct, défilable, avec bouton de copie.
+- Une nouvelle tentative avec une autre stratégie réutilise l'espace de travail
+  existant (pas de second clone) et enregistre automatiquement le journal
+  d'échec précédent.
 - Résolution des dépendances manquantes : la sortie du compilateur est analysée
   pour les en-têtes, paquets pkg-config, modules CMake, outils et bibliothèques
   de liaison absents ; le paquet

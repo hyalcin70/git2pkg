@@ -70,6 +70,8 @@ kullanılabiliyor.
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
 - Konteynerden canlı, kaydırılabilir derleme günlüğü ve kopyalama düğmesi.
+- Başka bir stratejiyle yeniden denemek mevcut derleme çalışma alanını yeniden
+  kullanır (ikinci klon yok) ve önceki başarısız günlüğü otomatik kaydeder.
 - Eksik bağımlılık çözümü: derleyici çıktısı eksik başlıklar, pkg-config
   paketleri, CMake modülleri, araçlar ve bağlayıcı kitaplıkları için taranır;
   uygun paket **geçici konteynerin içine** kurulur ve gerçekten sağlayıp

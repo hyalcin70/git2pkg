@@ -69,6 +69,9 @@ per GUI nutzbar.
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
 - Live-Log aus dem Container, scrollbar, mit „Log kopieren"-Button.
+- Ein Retry mit einer anderen Strategie nutzt den vorhandenen Build-Workspace
+  weiter (kein zweiter Clone) und speichert das vorherige fehlgeschlagene Log
+  automatisch.
 - Auflösung fehlender Abhängigkeiten: Die Compiler-Ausgabe wird nach fehlenden
   Headern, pkg-config-Paketen, CMake-Modulen, Werkzeugen und Linker-Bibliotheken
   durchsucht; das passende Paket wird **im Wegwerf-Container** installiert und

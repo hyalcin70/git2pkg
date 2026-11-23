@@ -71,6 +71,8 @@ utilizable desde una interfaz gráfica sencilla.
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
 - Registro de compilación en vivo y desplazable, con botón de copia.
+- Al reintentar con otra estrategia se reutiliza el espacio de trabajo existente
+  (sin un segundo clon) y se guarda automáticamente el registro fallido anterior.
 - Resolución de dependencias: la salida del compilador se analiza en busca de
   cabeceras, paquetes pkg-config, módulos CMake, herramientas y bibliotecas de
   enlace faltantes; el paquete

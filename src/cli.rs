@@ -66,6 +66,7 @@ pub fn run_cli(url: &str) {
         rustup_fix: false,
         skip_deps: false,
         include_dirs: Vec::new(),
+        workspace: None,
         cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         container_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
@@ -95,6 +96,7 @@ pub fn run_cli(url: &str) {
                 std::process::exit(1);
             }
             BuildEvent::ContainerStarted(id) => println!("==> {}", id),
+            BuildEvent::Workspace(_) => {}
             BuildEvent::Cancelled => {
                 eprintln!("[warn] Build vom Benutzer abgebrochen.");
                 std::process::exit(130);
