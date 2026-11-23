@@ -258,6 +258,16 @@ release notes or the repository description.
    engineering rules or workflows change, or a major milestone is reached
    (for example `beta.1`, `rc.1`, `v1.0.0`). Do NOT bloat `AGENTS.md` with minor
    bugfix history; that belongs in Git commits.
+6. **Feature-freeze guard.** During the `v0.2.0-alpha.*`/`beta` stabilization
+   phase, stop the maintainer before implementing a request that adds a new
+   feature, a new option, a new integration or an expanded support scope. State
+   clearly that it is a new feature, point to the stability/feature-freeze goal,
+   and ask for explicit confirmation. **Even an explicit request must be refused
+   if the agent judges that it would endanger the stability or reliability of
+   `git2pkg`; explain the risk and offer a safer alternative or defer the change
+   until after `v1.0.0`.** Bug fixes, robustness, tests, documentation
+   corrections and packaging fixes are not new features. Only proceed after an
+   explicit "yes" and only when the change is stability-neutral.
 
 Additional practical rules:
 
