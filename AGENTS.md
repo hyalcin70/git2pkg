@@ -153,6 +153,11 @@ examples. The dependency table in `assets/default_mappings.json` and
 pkg-config identifiers mapped to distro packages) and is explicitly allowed;
 it applies to every project and never special-cases one.
 
+Positioning is deliberately narrow: never claim that `git2pkg` builds "any" or
+"all" projects. Keep the support matrix in the five READMEs accurate and speak
+of "supported projects", not universal support. Do not add feature promises to
+release notes or the repository description.
+
 ---
 
 ## 3. Repository Map (as of `v0.2.0-alpha.27`)

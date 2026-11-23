@@ -7,10 +7,11 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-Eine kleine Linux-Desktop-GUI, die ein Git-Repository **in einem temporären
-Wegwerf-Container (Podman/Docker)** baut und das Ergebnis in einen sichtbaren
-Ausgabeordner legt (standardmäßig `~/Downloads/git2pkg`). Das Host-System
-braucht weder Compiler-Toolchain noch Build-Bibliotheken.
+Eine kleine Linux-Desktop-GUI, die **unterstützte native Linux-Projekte** aus
+Git-Repositories **in einem temporären Wegwerf-Container (Podman/Docker)** baut
+und das Ergebnis in einen sichtbaren Ausgabeordner legt (standardmäßig
+`~/Downloads/git2pkg`). Das Host-System braucht weder Compiler-Toolchain noch
+Build-Bibliotheken.
 
 `git2pkg` arbeitet zu 100 % lokal, deterministisch und regelbasiert. **Es enthält
 keine KI, kein LLM und keine externen API-Aufrufe.** Build-Entscheidungen
@@ -20,19 +21,34 @@ den Paketmanager im Container.
 > [!WARNING]
 > **Alpha-Status:** `git2pkg` befindet sich in aktiver Entwicklung. Mit Änderungen an Schnittstellen und unfertigen Funktionen ist zu rechnen. Bitte in Wegwerf-Containern testen, Backups behalten und Fehler mit dem vollständigen Log melden.
 
-## Anwendungsbereich & Nicht-Ziele
+## Unterstützter Anwendungsbereich
 
-`git2pkg` ist ausschließlich für native Linux-Desktop- und CLI-Anwendungen gedacht (z. B. C/C++, Rust, Go und Python-Tools). Eingebettete/Mikrocontroller-Toolchains, IDE-Plugins, mobile Apps und Web-Apps sind bewusst nicht im Anwendungsbereich enthalten.
+`git2pkg` ist für native Linux-Desktop- und CLI-Projekte gebaut. Es ist **kein
+universeller Builder**: Die unterstützten Build-Systeme, Zielformate und
+Host-Distributionen stehen unten. Was außerhalb dieser Matrix liegt, kann
+funktionieren, gehört aber nicht zum getesteten Supportumfang.
+
+| Bereich | Unterstützt |
+|---|---|
+| Host | x86_64-Linux mit Podman oder Docker |
+| Ziele | Arch/CachyOS `.pkg.tar.zst`, Debian/Ubuntu/Mint `.deb`, Fedora/RHEL und openSUSE `.rpm`, einzelne Binary |
+| Build-Systeme | CMake, Meson, Autotools, Cargo, Go, Python, Make, qmake |
+| Abhängigkeitssuche | Distributionspakete im Ziel-Container, nach der Installation verifiziert |
+| Nicht unterstützt | Embedded-/Mikrocontroller-Toolchains, mobile Apps, Web-Apps, IDE-Plugins, Kernelmodule, Cross-Architektur-Builds, proprietäre SDKs, die nicht im Container installierbar sind, garantierte Einhaltung von Distributions-Packaging-Richtlinien |
+
+`git2pkg` ist kein Ersatz für Distributions-Packaging, AUR, Flatpak oder ein
+Sicherheitsaudit. Es baut, was es zuverlässig bauen kann, meldet den Rest klar,
+und das fertige Paket sollte auf der Ziel-Distribution getestet werden.
 
 ## Warum ich das gebaut habe
 
 Ich entdecke gerne neue Open-Source-Tools auf GitHub, GitLab und anderen
 Plattformen – wollte mein Hauptsystem aber nicht mit Dutzenden Build-Bibliotheken
 und Header-Dateien zumüllen und mich auch nicht blind auf Drittanbieter-Repos
-wie dem AUR verlassen. Deshalb habe ich `git2pkg` gebaut: Alles wird in einem
-temporären Wegwerf-Container kompiliert, das Host-System bleibt zu 100 % sauber,
-und am Ende entsteht ein natives Paket (`.pkg.tar.zst`, `.deb`, `.rpm`) oder eine
-einzelne Binary – per GUI für jeden nutzbar.
+wie dem AUR verlassen. Deshalb habe ich `git2pkg` gebaut: Der Build läuft in einem temporären
+Wegwerf-Container, das Host-System bleibt zu 100 % sauber, und am Ende entsteht
+ein natives Paket (`.pkg.tar.zst`, `.deb`, `.rpm`) oder eine einzelne Binary –
+per GUI nutzbar.
 
 ## Funktionen
 

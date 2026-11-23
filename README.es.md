@@ -7,10 +7,11 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-Una pequeña interfaz de escritorio Linux que compila un repositorio Git **dentro
-de un contenedor desechable (Podman/Docker)** y coloca el resultado en una
-carpeta de salida visible (`~/Downloads/git2pkg` por defecto). El sistema anfitrión
-nunca necesita una cadena de compilación ni bibliotecas de build.
+Una pequeña interfaz de escritorio Linux que compila **proyectos nativos Linux
+compatibles** desde repositorios Git **dentro de un contenedor desechable
+(Podman/Docker)** y coloca el resultado en una carpeta de salida visible
+(`~/Downloads/git2pkg` por defecto). El sistema anfitrión nunca necesita una
+cadena de compilación ni bibliotecas de compilación.
 
 `git2pkg` funciona al 100 % en local, de forma determinista y basada en reglas.
 **No contiene IA, LLM ni llamadas a APIs externas.** Las decisiones de compilación
@@ -20,19 +21,36 @@ del compilador y el gestor de paquetes del contenedor.
 > [!WARNING]
 > **Estado alfa:** `git2pkg` está en desarrollo activo. Es previsible que haya cambios incompatibles y funciones incompletas. Pruebe en contenedores desechables, conserve copias de seguridad e informe de los fallos con el registro completo.
 
-## Alcance y objetivos excluidos
+## Alcance compatible
 
-`git2pkg` está diseñado exclusivamente para aplicaciones nativas de escritorio y CLI en Linux (p. ej., herramientas en C/C++, Rust, Go y Python). Las cadenas de herramientas embebidas/microcontroladores, los complementos de IDE, las aplicaciones móviles y las aplicaciones web quedan deliberadamente fuera del alcance.
+`git2pkg` está pensado para proyectos nativos de escritorio y CLI en Linux. **No
+es un constructor universal**: los sistemas de compilación, formatos de destino
+y distribuciones anfitrionas compatibles se enumeran abajo. Lo que quede fuera
+de esta matriz puede funcionar, pero no forma parte del alcance de soporte
+probado.
+
+| Área | Compatible |
+|---|---|
+| Anfitrión | Linux x86_64 con Podman o Docker |
+| Destinos | Arch/CachyOS `.pkg.tar.zst`, Debian/Ubuntu/Mint `.deb`, Fedora/RHEL y openSUSE `.rpm`, binario único |
+| Sistemas de compilación | CMake, Meson, Autotools, Cargo, Go, Python, Make, qmake |
+| Búsqueda de dependencias | Paquetes de la distribución dentro del contenedor de destino, verificados tras la instalación |
+| No compatible | Cadenas de herramientas embebidas/microcontroladores, apps móviles, apps web, complementos de IDE, módulos del kernel, compilaciones para otra arquitectura, SDK propietarios que no se puedan instalar en el contenedor, cumplimiento garantizado de las políticas de empaquetado de la distribución |
+
+`git2pkg` no sustituye al empaquetado de la distribución, AUR, Flatpak ni una
+auditoría de seguridad. Compila lo que puede compilar de forma fiable, informa
+claramente del resto y el paquete resultante debe probarse en la distribución
+de destino.
 
 ## Por qué lo construí
 
 Me encanta descubrir nuevas herramientas de código abierto en GitHub, GitLab y
 otros sitios, pero no quería llenar mi sistema principal con decenas de
 bibliotecas de compilación y cabeceras de desarrollo, ni depender a ciegas de
-repositorios de terceros como AUR. Por eso construí `git2pkg`: todo se compila
-en un contenedor temporal desechable, el sistema anfitrión permanece completamente
-limpio y al final se obtiene un paquete nativo (`.pkg.tar.zst`, `.deb`, `.rpm`)
-o un único binario, utilizable por cualquiera desde una interfaz gráfica sencilla.
+repositorios de terceros como AUR. Por eso construí `git2pkg`: la compilación se ejecuta en un contenedor temporal
+desechable, el sistema anfitrión permanece completamente limpio y al final se
+obtiene un paquete nativo (`.pkg.tar.zst`, `.deb`, `.rpm`) o un único binario,
+utilizable desde una interfaz gráfica sencilla.
 
 ## Características
 

@@ -7,11 +7,11 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-GitHub, GitLab ve benzeri platformlardaki Git depolarını **tek kullanımlık bir
-Podman/Docker konteynerinde** derleyen ve sonucu görünür bir çıktı klasörüne
-(varsayılan olarak `~/Downloads/git2pkg`) koyan küçük bir Linux masaüstü
-arayüzü. Ana sistemin derleyici araç zincirine veya derleme kütüphanelerine
-ihtiyacı yoktur.
+GitHub, GitLab ve benzeri platformlardaki Git depolarından **desteklenen yerel
+Linux projelerini tek kullanımlık bir Podman/Docker konteynerinde** derleyen ve
+sonucu görünür bir çıktı klasörüne (varsayılan olarak `~/Downloads/git2pkg`)
+koyan küçük bir Linux masaüstü arayüzü. Ana sistemin derleyici araç zincirine
+veya derleme kütüphanelerine ihtiyacı yoktur.
 
 `git2pkg` tamamen yerel, deterministik ve kural tabanlıdır. **İçinde yapay
 zekâ, LLM veya harici API çağrısı yoktur.** Derleme kararları dosya tespiti,
@@ -21,19 +21,34 @@ ile alınır.
 > [!WARNING]
 > **Alfa durumu:** `git2pkg` aktif geliştirme aşamasındadır. Uyumsuz değişiklikler ve tamamlanmamış özellikler beklenmelidir. Lütfen tek kullanımlık konteynerlerde test edin, yedeklerinizi saklayın ve hataları tam günlükle bildirin.
 
-## Kapsam ve Kapsam Dışı Alanlar
+## Desteklenen kapsam
 
-`git2pkg` yalnızca yerel Linux masaüstü ve CLI uygulamaları için geliştirilmiştir (ör. C/C++, Rust, Go ve Python araçları). Gömülü/mikrodenetleyici araç zincirleri, IDE eklentileri, mobil uygulamalar ve web uygulamaları bilinçli olarak kapsam dışıdır.
+`git2pkg` yerel Linux masaüstü ve CLI projeleri için tasarlanmıştır. **Evrensel
+bir derleyici değildir**: desteklenen derleme sistemleri, hedef biçimleri ve ana
+dağıtımlar aşağıda listelenmiştir. Bu matrisin dışında kalanlar çalışabilir
+ancak test edilen destek kapsamına girmez.
+
+| Alan | Desteklenen |
+|---|---|
+| Ana sistem | Podman veya Docker bulunan x86_64 Linux |
+| Hedefler | Arch/CachyOS `.pkg.tar.zst`, Debian/Ubuntu/Mint `.deb`, Fedora/RHEL ve openSUSE `.rpm`, tek ikili dosya |
+| Derleme sistemleri | CMake, Meson, Autotools, Cargo, Go, Python, Make, qmake |
+| Bağımlılık arama | Hedef konteynerdeki dağıtım paketleri, kurulumdan sonra doğrulanır |
+| Desteklenmeyen | Gömülü/mikrodenetleyici araç zincirleri, mobil uygulamalar, web uygulamaları, IDE eklentileri, çekirdek modülleri, farklı mimari derlemeleri, konteynere kurulamayan tescilli SDK'lar, dağıtım paketleme politikalarına garantili uyum |
+
+`git2pkg`, dağıtım paketlemesinin, AUR'un, Flatpak'ın veya bir güvenlik
+denetiminin yerini almaz. Güvenilir şekilde derleyebildiğini derler, gerisini
+açıkça bildirir ve ortaya çıkan paket hedef dağıtımda test edilmelidir.
 
 ## Neden bunu geliştirdim
 
 GitHub, GitLab ve benzeri yerlerde yeni açık kaynak araçları keşfetmeyi
 seviyorum; ama ana sistemimi onlarca derleme kütüphanesi ve başlık dosyasıyla
 doldurmak ya da AUR gibi üçüncü taraf depolara körü körüne bağımlı olmak
-istemedim. Bu yüzden `git2pkg`'i geliştirdim: Her şey geçici bir konteynerde
-derleniyor, ana sistem tamamen temiz kalıyor ve sonunda yerel bir paket
-(`.pkg.tar.zst`, `.deb`, `.rpm`) ya da tek bir ikili dosya çıkıyor — basit bir
-arayüzle herkes kullanabiliyor.
+istemedim. Bu yüzden `git2pkg`'i geliştirdim: Derleme geçici bir konteynerde çalışıyor,
+ana sistem tamamen temiz kalıyor ve sonunda yerel bir paket (`.pkg.tar.zst`,
+`.deb`, `.rpm`) ya da tek bir ikili dosya çıkıyor — basit bir arayüzle
+kullanılabiliyor.
 
 ## Özellikler
 

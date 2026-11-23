@@ -7,10 +7,11 @@
 [![CI](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml/badge.svg)](https://github.com/hyalcin70/git2pkg/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/hyalcin70/git2pkg?include_prereleases&label=release)](https://github.com/hyalcin70/git2pkg/releases)
 
-Une petite interface graphique Linux qui compile un dépôt Git **dans un
-conteneur jetable (Podman/Docker)** et dépose le résultat dans un dossier de
-sortie visible (`~/Downloads/git2pkg` par défaut). L'hôte n'a besoin ni de
-chaîne de compilation ni de bibliothèques de build.
+Une petite interface graphique Linux qui compile **des projets natifs Linux
+pris en charge** depuis des dépôts Git **dans un conteneur jetable
+(Podman/Docker)** et dépose le résultat dans un dossier de sortie visible
+(`~/Downloads/git2pkg` par défaut). L'hôte n'a besoin ni de chaîne de
+compilation ni de bibliothèques de compilation.
 
 `git2pkg` fonctionne à 100 % en local, de manière déterministe et basée sur des
 règles. **Il ne contient aucune IA, aucun LLM et aucun appel à une API externe.**
@@ -21,9 +22,26 @@ conteneur.
 > [!WARNING]
 > **Statut alpha :** `git2pkg` est en cours de développement actif. Des changements incompatibles et des fonctionnalités incomplètes sont à prévoir. Testez dans des conteneurs jetables, conservez des sauvegardes et signalez les échecs avec le journal complet.
 
-## Périmètre et exclusions
+## Périmètre pris en charge
 
-`git2pkg` est conçu exclusivement pour les applications natives Linux de bureau et en ligne de commande (p. ex. outils C/C++, Rust, Go et Python). Les chaînes d'outils embarquées/microcontrôleurs, les plugins d'IDE, les applications mobiles et les applications web sont volontairement exclus du périmètre.
+`git2pkg` est conçu pour les projets natifs Linux de bureau et en ligne de
+commande. Ce n'est **pas un constructeur universel** : les systèmes de
+compilation, formats cibles et distributions hôtes pris en charge sont listés
+ci-dessous. Ce qui sort de cette matrice peut fonctionner, mais ne fait pas
+partie du périmètre de support testé.
+
+| Domaine | Pris en charge |
+|---|---|
+| Hôte | Linux x86_64 avec Podman ou Docker |
+| Cibles | Arch/CachyOS `.pkg.tar.zst`, Debian/Ubuntu/Mint `.deb`, Fedora/RHEL et openSUSE `.rpm`, binaire autonome |
+| Systèmes de compilation | CMake, Meson, Autotools, Cargo, Go, Python, Make, qmake |
+| Recherche des dépendances | Paquets de la distribution dans le conteneur cible, vérifiés après installation |
+| Non pris en charge | Chaînes d'outils embarquées/microcontrôleurs, applications mobiles, applications web, plugins d'IDE, modules du noyau, compilations pour une autre architecture, SDK propriétaires non installables dans le conteneur, conformité garantie aux politiques d'empaquetage de la distribution |
+
+`git2pkg` ne remplace ni l'empaquetage de la distribution, ni AUR, ni Flatpak, ni
+un audit de sécurité. Il compile ce qu'il peut compiler de manière fiable,
+signale clairement le reste, et le paquet produit doit être testé sur la
+distribution cible.
 
 ## Pourquoi je l'ai créé
 
@@ -31,9 +49,9 @@ J'adore découvrir de nouveaux outils open source sur GitHub, GitLab et ailleurs
 mais je ne voulais pas encombrer mon système principal avec des dizaines de
 bibliothèques de compilation et d'en-têtes de développement, ni dépendre
 aveuglément de dépôts tiers comme l'AUR. C'est pourquoi j'ai créé `git2pkg` :
-tout est compilé dans un conteneur temporaire jetable, le système hôte reste
-entièrement propre, et l'on obtient au final un paquet natif (`.pkg.tar.zst`,
-`.deb`, `.rpm`) ou un binaire unique — utilisable par tout le monde via une
+la compilation s'exécute dans un conteneur temporaire jetable, le système hôte
+reste entièrement propre, et l'on obtient au final un paquet natif
+(`.pkg.tar.zst`, `.deb`, `.rpm`) ou un binaire unique — utilisable via une
 simple interface graphique.
 
 ## Fonctionnalités
