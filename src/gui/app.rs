@@ -3,8 +3,8 @@
 
 use crate::core::container::{
     cached_repo_has_local_dependencies, cleanup_all_builds_with, cleanup_all_cache_with,
-    container_engine_available, default_output_dir, detect_engine, run_build, BuildConfig,
-    BuildEvent, BuildOutcome, BuildStrategy, ContainerEngine, TargetFormat,
+    container_engine_available, container_engine_installed, default_output_dir, detect_engine,
+    run_build, BuildConfig, BuildEvent, BuildOutcome, BuildStrategy, ContainerEngine, TargetFormat,
 };
 use crate::core::distro::{detect_distro, DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::MappingStore;
@@ -875,6 +875,8 @@ impl eframe::App for Git2PkgApp {
                                     .clicked()
                                 {
                                     self.engine = self.engine_mode.resolve();
+                                    self.engine_available =
+                                        container_engine_installed(&self.engine);
                                 }
                             }
                         });
@@ -1664,12 +1666,34 @@ impl eframe::App for Git2PkgApp {
             });
 
             if !self.engine_available {
+                let auto = self.engine_mode == EngineMode::Auto;
+                let engine_name = self.engine.label();
+                let title = if auto {
+                    texts.engine_missing_title().to_string()
+                } else {
+                    texts.engine_selected_missing_title(engine_name)
+                };
+                let message = if auto {
+                    texts.engine_missing_text().to_string()
+                } else {
+                    texts.engine_selected_missing_text(engine_name)
+                };
+                let package = if auto {
+                    "podman"
+                } else if self.engine == ContainerEngine::Docker
+                    && self.distro.family == DistroFamily::Debian
+                {
+                    "docker.io"
+                } else {
+                    self.engine.binary()
+                };
                 let install_command = match self.distro.family {
-                    DistroFamily::Arch => "sudo pacman -S podman",
-                    DistroFamily::Debian => "sudo apt install podman",
-                    DistroFamily::Fedora => "sudo dnf install podman",
-                    DistroFamily::Suse => "sudo zypper install podman",
-                    DistroFamily::Unknown => "sudo pacman -S podman",
+                    DistroFamily::Arch | DistroFamily::Unknown => {
+                        format!("sudo pacman -S {}", package)
+                    }
+                    DistroFamily::Debian => format!("sudo apt install {}", package),
+                    DistroFamily::Fedora => format!("sudo dnf install {}", package),
+                    DistroFamily::Suse => format!("sudo zypper install {}", package),
                 };
                 let fill = if self.theme_mode.is_dark() {
                     egui::Color32::from_rgb(70, 35, 30)
@@ -1685,12 +1709,12 @@ impl eframe::App for Git2PkgApp {
                     .corner_radius(egui::CornerRadius::same(8))
                     .inner_margin(egui::Margin::same(12))
                     .show(ui, |ui| {
-                        ui.strong(texts.engine_missing_title());
-                        ui.label(texts.engine_missing_text());
+                        ui.strong(title.as_str());
+                        ui.label(message.as_str());
                         ui.horizontal(|ui| {
-                            ui.monospace(install_command);
+                            ui.monospace(install_command.as_str());
                             if ui.button(texts.copy()).clicked() {
-                                ctx.copy_text(install_command.to_string());
+                                ctx.copy_text(install_command.clone());
                             }
                         });
                     });

@@ -193,6 +193,26 @@ impl Texts {
             "Podman ou Docker est nécessaire pour compiler. Installez l'un des deux puis redémarrez git2pkg.",
         )
     }
+    pub fn engine_selected_missing_title(&self, engine: &str) -> String {
+        self.get(
+            "{} is not installed",
+            "{} ist nicht installiert",
+            "{} kurulu değil",
+            "{} no está instalado",
+            "{} n'est pas installé",
+        )
+        .replace("{}", engine)
+    }
+    pub fn engine_selected_missing_text(&self, engine: &str) -> String {
+        self.get(
+            "Select another engine or install {} and restart git2pkg.",
+            "Wähle eine andere Engine oder installiere {} und starte git2pkg neu.",
+            "Başka bir motor seçin veya {} kurup git2pkg'yi yeniden başlatın.",
+            "Selecciona otro motor o instala {} y reinicia git2pkg.",
+            "Choisissez un autre moteur ou installez {} puis redémarrez git2pkg.",
+        )
+        .replace("{}", engine)
+    }
     pub fn copy(&self) -> &'static str {
         self.get("Copy", "Kopieren", "Kopyala", "Copiar", "Copier")
     }
@@ -1294,6 +1314,17 @@ mod tests {
         assert!(text.contains("Strategie 2/4"), "{}", text);
         assert!(text.contains("System-Bibliotheken"), "{}", text);
         assert!(text.contains("Runde 1/10"), "{}", text);
+    }
+
+    #[test]
+    fn engine_missing_ist_in_allen_sprachen_vorhanden() {
+        for language in Language::ALL {
+            let texts = Texts::new(language);
+            let title = texts.engine_selected_missing_title("Podman");
+            let message = texts.engine_selected_missing_text("Docker");
+            assert!(title.contains("Podman"), "{language:?}: {title}");
+            assert!(message.contains("Docker"), "{language:?}: {message}");
+        }
     }
 
     #[test]

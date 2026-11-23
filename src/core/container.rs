@@ -841,6 +841,11 @@ pub fn container_engine_available() -> bool {
     engine_is_available("podman") || engine_is_available("docker")
 }
 
+/// True, wenn genau die ausgewählte Container-Engine installiert und aufrufbar ist.
+pub fn container_engine_installed(engine: &ContainerEngine) -> bool {
+    engine_is_available(engine.binary())
+}
+
 pub fn detect_engine() -> ContainerEngine {
     for (name, engine) in [
         ("podman", ContainerEngine::Podman),
