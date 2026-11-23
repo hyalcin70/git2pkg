@@ -1,3 +1,13 @@
+git2pkg (0.2.0~alpha.33) unstable; urgency=medium
+
+  * Select Cargo application binaries from project packaging manifests and
+    Cargo metadata.
+  * Read description, license and URL from project manifests and stage
+    documentation/license files.
+  * Compress Arch packages with zstd level 19.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Mon, 23 Nov 2026 20:25:00 +0100
+
 git2pkg (0.2.0~alpha.32) unstable; urgency=medium
 
   * Prefer project-named Cargo binaries when staging a package.

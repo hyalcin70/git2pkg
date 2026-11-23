@@ -53,6 +53,9 @@ impl PackageArch {
 pub struct PackageContext<'a> {
     pub name: &'a str,
     pub version: &'a str,
+    pub description: &'a str,
+    pub license: &'a str,
+    pub url: &'a str,
     pub family: &'a DistroFamily,
     pub strategy: BuildStrategy,
     pub has_pkgbuild: bool,
@@ -65,6 +68,17 @@ pub struct PackageContext<'a> {
 /// Debug-Symbole aus installierten Binaries entfernen, wenn `strip` vorhanden ist.
 pub fn strip_binaries_step() -> &'static str {
     "strip --strip-unneeded \"$pkgdir\"/usr/bin/* 2>/dev/null || true"
+}
+
+/// Sanitized metadata for package manifests. Removes characters that would be
+/// interpreted by shells, RPM macros or heredocs.
+pub fn metadata_line(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| !matches!(ch, '\n' | '\r' | '\'' | '"' | '`' | '$' | '\\' | '%'))
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 pub fn line_echo(text: &str) -> String {
@@ -88,26 +102,83 @@ for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist
 done"#
 }
 
-/// Cargo-Staging: bevorzugt Binaries, die zum Projektnamen passen
-/// (`projekt` oder `projekt-*`). Gibt es keinen Treffer, werden wie bisher
-/// alle gebauten Binaries übernommen, damit anders benannte Projekte nicht
-/// leer ausgehen.
+/// Cargo-Staging: wählt zuerst die Binaries des Pakets, dessen Name zum
+/// Projekt passt (über `cargo metadata`). Danach greift der Projekt-Präfix,
+/// zuletzt der bisherige Fallback auf alle gebauten Binaries.
 pub fn cargo_install_step(project_name: &str) -> String {
     let project = project_name.replace('\'', "'\\''");
     format!(
         r#"mkdir -p "$pkgdir/usr/bin"
 project='{project}'
-matched=0
-for directory in "${{CARGO_TARGET_DIR:-target}}/release" target/release /work/dist; do
-  [ -d "$directory" ] || continue
-  while IFS= read -r -d '' binary; do
-    base=$(basename "$binary")
-    case "$base" in
-      "$project"|"$project"-*) install -Dm755 "$binary" "$pkgdir/usr/bin/"; matched=1 ;;
-    esac
-  done < <(find "$directory" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -print0 2>/dev/null)
+selected=0
+manifest_bins=""
+for manifest in packaging/linux/nfpm.yaml nfpm.yaml packaging/nfpm.yaml; do
+  [ -f "$manifest" ] || continue
+  manifest_bins=$(python3 -c '
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+seen = []
+for line in text.splitlines():
+    match = re.search(r"src:\s*.*?/usr/bin/([A-Za-z0-9._+-]+)", line)
+    if match and match.group(1) not in seen:
+        seen.append(match.group(1))
+        print(match.group(1))
+' "$manifest" 2>/dev/null)
+  [ -n "$manifest_bins" ] && break
 done
-if [ "$matched" -eq 0 ]; then
+if [ -n "$manifest_bins" ]; then
+  echo "[pkg] packaging manifest binaries: $(echo $manifest_bins)"
+  for name in $manifest_bins; do
+    for directory in "${{CARGO_TARGET_DIR:-target}}/release" target/release /work/dist; do
+      if [ -x "$directory/$name" ]; then
+        install -Dm755 "$directory/$name" "$pkgdir/usr/bin/"
+        selected=1
+        break
+      fi
+    done
+  done
+fi
+if [ "$selected" -eq 0 ] && command -v python3 >/dev/null 2>&1; then
+  bins=$(cargo metadata --no-deps --format-version 1 2>/dev/null | python3 -c '
+import json, sys
+name = sys.argv[1].lower()
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for pkg in data.get("packages", []):
+    if pkg.get("name", "").lower() == name:
+        for target in pkg.get("targets", []):
+            if "bin" in target.get("kind", []):
+                print(target.get("name", ""))
+' "$project" 2>/dev/null)
+  if [ -n "$bins" ]; then
+    echo "[pkg] Cargo package '$project' binaries: $(echo $bins)"
+    for name in $bins; do
+      for directory in "${{CARGO_TARGET_DIR:-target}}/release" target/release /work/dist; do
+        if [ -x "$directory/$name" ]; then
+          install -Dm755 "$directory/$name" "$pkgdir/usr/bin/"
+          selected=1
+          break
+        fi
+      done
+    done
+  fi
+fi
+if [ "$selected" -eq 0 ]; then
+  matched=0
+  for directory in "${{CARGO_TARGET_DIR:-target}}/release" target/release /work/dist; do
+    [ -d "$directory" ] || continue
+    while IFS= read -r -d '' binary; do
+      base=$(basename "$binary")
+      case "$base" in
+        "$project"|"$project"-*) install -Dm755 "$binary" "$pkgdir/usr/bin/"; matched=1 ;;
+      esac
+    done < <(find "$directory" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -print0 2>/dev/null)
+  done
+  [ "$matched" -eq 1 ] && selected=1
+fi
+if [ "$selected" -eq 0 ]; then
   for directory in "${{CARGO_TARGET_DIR:-target}}/release" target/release /work/dist; do
     [ -d "$directory" ] || continue
     while IFS= read -r -d '' binary; do
@@ -159,9 +230,14 @@ mod tests {
         assert!(install.contains("build-script-*"));
         assert!(install.contains("exit 1"));
         assert!(install.contains("project='repo'"));
+        assert!(install.contains("packaging/linux/nfpm.yaml"));
+        assert!(install.contains("packaging manifest binaries"));
+        assert!(install.contains("cargo metadata --no-deps"));
+        assert!(install.contains("python3 -c"));
         assert!(install.contains(r#""$project"|"$project"-*"#));
-        assert!(install.contains("matched=0"));
-        assert!(install.contains("if [ \"$matched\" -eq 0 ]"));
+        assert!(install.contains("selected=0"));
+        assert!(install.contains("if [ \"$selected\" -eq 0 ]"));
+        assert!(install.contains("[ \"$matched\" -eq 1 ]"));
         assert!(strip_binaries_step().contains("--strip-unneeded"));
     }
 
@@ -185,6 +261,9 @@ mod tests {
                 build_step: "true",
                 install_step: install,
                 asset_step: asset,
+                description: "Test package",
+                license: "MIT",
+                url: "https://example.invalid",
             };
             let script = generate(&ctx).join("\n");
             assert!(!script.trim().is_empty());

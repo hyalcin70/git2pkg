@@ -169,7 +169,7 @@ for them.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.32`)
+## 3. Repository Map (as of `v0.2.0-alpha.33`)
 
 ### Entry points
 
@@ -283,9 +283,16 @@ Additional practical rules:
   explicitly.
 - Create physical backups under `/home/hakan/Privat/projects/` when a backup
   folder is requested; never delete old backups.
-- Cargo staging prefers binaries named `<project>` or `<project>-*`; only when
-  none match does it fall back to all built binaries. Never package unrelated
-  workspace tools when a project-named binary exists.
+- Cargo staging prefers the binary list from a project packaging manifest
+  (`packaging/linux/nfpm.yaml`, `nfpm.yaml`), then the Cargo package matching
+  the project name, then a project-name prefix; only when none match does it
+  fall back to all built binaries. Never package unrelated workspace tools when
+  a project-named or manifest-listed binary exists.
+- Package metadata (description, license, URL) is read from the project
+  manifests (`Cargo.toml`, `pyproject.toml`, CMake, nfpm) and desktop files;
+  `README*`, `LICENSE*`, `NOTICE*` and `THIRD-PARTY*` are staged. Never use the
+  builder's own GPL license as a project fallback.
+- Arch packages use zstd level 19 to stay close to native package sizes.
 - Package content verification: a package that contains
   `usr/share/applications/*.desktop` must also contain the executable named by
   the desktop file's `Exec=` key. A package that fails this check is rejected,
@@ -345,11 +352,11 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.32`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.33`)
 
-Current release: `v0.2.0-alpha.32`.
+Current release: `v0.2.0-alpha.33`.
 
-- **`v0.2.0-alpha.21` → `v0.2.0-alpha.32`**: hardening tests on CachyOS —
+- **`v0.2.0-alpha.21` → `v0.2.0-alpha.33`**: hardening tests on CachyOS —
   C++/CMake superbuilds, Meson/C projects and Go projects. Fix real failures
   generically; never hardcode application or project names into the code.
 - **`v0.2.0-beta.1`**: feature freeze and a fresh VM test round —

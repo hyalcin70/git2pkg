@@ -2509,11 +2509,14 @@ fn install_packages_command(family: &DistroFamily, packages: &[String]) -> Strin
     }
 }
 
-/// Name und Version des gebauten Projekts, aus URL und Quellcode ermittelt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Name, Version und redaktionelle Metadaten des gebauten Projekts.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProjectIdentity {
     pub name: String,
     pub version: String,
+    pub description: String,
+    pub license: String,
+    pub url: String,
 }
 
 fn package_slug(raw: &str) -> String {
@@ -2615,8 +2618,132 @@ fn git_version(src: &Path) -> Option<String> {
     None
 }
 
-fn project_identity(url: &str, src: &Path) -> ProjectIdentity {
-    let name = repo_name_from_url(url)
+fn toml_string_field(text: &str, key: &str) -> Option<String> {
+    let pattern = format!(r#"(?m)^\s*{}\s*=\s*"([^"]*)""#, regex::escape(key));
+    Regex::new(&pattern)
+        .ok()?
+        .captures(text)
+        .map(|caps| metadata_text(&caps[1]))
+        .filter(|value| !value.is_empty())
+}
+
+fn yaml_string_field(text: &str, key: &str) -> Option<String> {
+    let pattern = format!(r#"(?m)^\s*{}\s*:\s*([^|>#\n][^\n#]*)$"#, regex::escape(key));
+    Regex::new(&pattern)
+        .ok()?
+        .captures(text)
+        .map(|caps| metadata_text(caps[1].trim().trim_matches('"')))
+        .filter(|value| !value.is_empty())
+}
+
+fn yaml_description(text: &str) -> Option<String> {
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("description:") {
+            let rest = rest.trim();
+            if !rest.is_empty() && !matches!(rest, "|" | "|-" | ">" | ">-") {
+                let value = metadata_text(rest.trim_matches('"'));
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+            for next in lines.by_ref() {
+                let value = metadata_text(next);
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn metadata_text(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn desktop_comment(src: &Path) -> Option<String> {
+    fn walk(dir: &Path, depth: usize) -> Option<String> {
+        if depth > 4 {
+            return None;
+        }
+        let entries = fs::read_dir(dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy())
+                    .unwrap_or_default();
+                if matches!(
+                    name.as_ref(),
+                    ".git" | "target" | "build" | "dist" | "deps-build" | "node_modules"
+                ) {
+                    continue;
+                }
+                if let Some(comment) = walk(&path, depth + 1) {
+                    return Some(comment);
+                }
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("desktop") {
+                if let Ok(text) = fs::read_to_string(&path) {
+                    for line in text.lines() {
+                        if let Some(value) = line.strip_prefix("Comment=") {
+                            let value = metadata_text(value);
+                            if !value.is_empty() {
+                                return Some(value);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    walk(src, 0)
+}
+
+fn git_remote_url(src: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(src)
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn nfpm_metadata(src: &Path) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    for relative in [
+        "packaging/linux/nfpm.yaml",
+        "nfpm.yaml",
+        "packaging/nfpm.yaml",
+    ] {
+        if let Ok(text) = fs::read_to_string(src.join(relative)) {
+            return Some((
+                yaml_description(&text).or_else(|| yaml_string_field(&text, "description")),
+                yaml_string_field(&text, "license"),
+                yaml_string_field(&text, "homepage"),
+            ));
+        }
+    }
+    None
+}
+
+fn http_url(value: Option<String>) -> Option<String> {
+    value.filter(|url| url.starts_with("https://") || url.starts_with("http://"))
+}
+
+fn project_identity(source_url: &str, src: &Path) -> ProjectIdentity {
+    let name = repo_name_from_url(source_url)
         .map(|raw| package_slug(&raw))
         .unwrap_or_else(|| "app".to_string());
     let version = if src.as_os_str().is_empty() {
@@ -2644,7 +2771,87 @@ fn project_identity(url: &str, src: &Path) -> ProjectIdentity {
     }
     .map(|raw| version_slug(&raw))
     .unwrap_or_else(|| "0.1.0".to_string());
-    ProjectIdentity { name, version }
+
+    let cargo = if src.as_os_str().is_empty() {
+        None
+    } else {
+        fs::read_to_string(src.join("Cargo.toml")).ok()
+    };
+    let pyproject = if src.as_os_str().is_empty() {
+        None
+    } else {
+        fs::read_to_string(src.join("pyproject.toml")).ok()
+    };
+    let (nfpm_description, nfpm_license, nfpm_url) = if src.as_os_str().is_empty() {
+        (None, None, None)
+    } else {
+        nfpm_metadata(src).unwrap_or((None, None, None))
+    };
+    let description = nfpm_description
+        .or_else(|| {
+            cargo
+                .as_deref()
+                .and_then(|text| toml_string_field(text, "description"))
+        })
+        .or_else(|| {
+            pyproject
+                .as_deref()
+                .and_then(|text| toml_string_field(text, "description"))
+        })
+        .or_else(|| {
+            if src.as_os_str().is_empty() {
+                None
+            } else {
+                desktop_comment(src)
+            }
+        })
+        .unwrap_or_else(|| "Built by git2pkg".to_string());
+    let license = nfpm_license
+        .or_else(|| {
+            cargo
+                .as_deref()
+                .and_then(|text| toml_string_field(text, "license"))
+        })
+        .or_else(|| {
+            pyproject
+                .as_deref()
+                .and_then(|text| toml_string_field(text, "license"))
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let url = http_url(nfpm_url)
+        .or_else(|| {
+            cargo
+                .as_deref()
+                .and_then(|text| toml_string_field(text, "repository"))
+        })
+        .or_else(|| {
+            cargo
+                .as_deref()
+                .and_then(|text| toml_string_field(text, "homepage"))
+        })
+        .or_else(|| {
+            if src.as_os_str().is_empty() {
+                None
+            } else {
+                http_url(git_remote_url(src))
+            }
+        })
+        .or_else(|| {
+            if source_url.starts_with("https://") || source_url.starts_with("http://") {
+                Some(source_url.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "https://github.com/hyalcin70/git2pkg".to_string());
+
+    ProjectIdentity {
+        name,
+        version,
+        description,
+        license,
+        url,
+    }
 }
 
 /// Paketinstallationsschritt mit dem echten Projektnamen.
@@ -2924,6 +3131,15 @@ DESKTOP_EOF
   chmod 0644 "$target" 2>/dev/null || true
   install_icons "$PKG_NAME" "$PKG_NAME"
 fi
+mkdir -p "$pkgdir/usr/share/doc/$PKG_NAME" "$pkgdir/usr/share/licenses/$PKG_NAME"
+for f in LICENSE LICENSE-* LICENSE.* NOTICE NOTICE-* README README.* THIRD-PARTY*; do
+  [ -f "$f" ] || continue
+  base=$(basename "$f")
+  install -Dm644 "$f" "$pkgdir/usr/share/doc/$PKG_NAME/$base"
+  case "$base" in
+    LICENSE*|NOTICE*|THIRD-PARTY*) install -Dm644 "$f" "$pkgdir/usr/share/licenses/$PKG_NAME/$base" ;;
+  esac
+done
 "#;
 
 fn shell_quote(value: &str) -> String {
@@ -3128,6 +3344,9 @@ fn build_script_with_flags(
     let pkg_ctx = crate::core::packaging::PackageContext {
         name: &identity.name,
         version: &identity.version,
+        description: &identity.description,
+        license: &identity.license,
+        url: &identity.url,
         family: &target.family,
         strategy,
         has_pkgbuild,
@@ -3404,6 +3623,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "repo".to_string(),
             version: "1.0.0".to_string(),
+            ..Default::default()
         };
         for family in [
             DistroFamily::Arch,
@@ -3490,6 +3710,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "sample-tool".to_string(),
             version: "1.0.0".to_string(),
+            ..Default::default()
         };
         for family in [
             DistroFamily::Debian,
@@ -3595,6 +3816,45 @@ mod tests {
             0o644
         );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn projekt_metadaten_werden_aus_manifesten_gelesen() {
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-metadata-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("packaging/linux")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace.package]\nversion = \"1.2.3\"\nlicense = \"MIT OR Apache-2.0\"\nrepository = \"https://example.com/repo\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("packaging/linux/nfpm.yaml"),
+            "name: example\nhomepage: https://example.com/app\nlicense: Apache-2.0\ndescription: |-\n  A sample app\n",
+        )
+        .unwrap();
+
+        let identity = project_identity("https://example.com/example", &root);
+        assert_eq!(identity.name, "example");
+        assert_eq!(identity.version, "1.2.3");
+        assert_eq!(identity.license, "Apache-2.0");
+        assert_eq!(identity.url, "https://example.com/app");
+        assert_eq!(identity.description, "A sample app");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn asset_staging_legt_docs_und_lizenzen_ab() {
+        let script = asset_staging_step("example-app");
+        assert!(script.contains("usr/share/licenses/$PKG_NAME"));
+        assert!(script.contains("THIRD-PARTY*"));
+        assert!(script.contains("README.*"));
     }
 
     #[test]
@@ -4028,6 +4288,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "repo".to_string(),
             version: "0.1.0".to_string(),
+            ..Default::default()
         };
         let (tx, _rx) = std::sync::mpsc::channel();
         let outcome = package_result(&config, &work, &identity, "log-zeile", &tx).unwrap();
@@ -4067,6 +4328,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "repo".to_string(),
             version: "1.0.0.13".to_string(),
+            ..Default::default()
         };
         let arch_config = config(DistroFamily::Arch, TargetFormat::NativePackage);
         let arch = build_script_with(
@@ -4378,6 +4640,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "repo".to_string(),
             version: "0.1.0".to_string(),
+            ..Default::default()
         };
 
         let deb_cfg = config(DistroFamily::Debian, TargetFormat::NativePackage);
@@ -4416,6 +4679,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "repo".to_string(),
             version: "0.1.0".to_string(),
+            ..Default::default()
         };
         let with_repo = build_script_with(
             &cfg,
@@ -4680,6 +4944,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "repo".to_string(),
             version: "0.1.0".to_string(),
+            ..Default::default()
         };
         let retry = build_script_with(
             &cfg,
@@ -4806,6 +5071,7 @@ mod tests {
         let identity = ProjectIdentity {
             name: "example-app".to_string(),
             version: "1.0.0".to_string(),
+            ..Default::default()
         };
         let script = build_script_with(
             &config(DistroFamily::Arch, TargetFormat::NativePackage),

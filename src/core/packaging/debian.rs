@@ -1,6 +1,6 @@
 //! Debian/Ubuntu/Mint: `.deb` mit echter `Depends`-Ermittlung.
 
-use super::{line_echo, PackageContext};
+use super::{line_echo, metadata_line, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![line_echo("[pkg] building Debian package")];
@@ -14,10 +14,12 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     )));
     lines.push("mkdir -p /work/deb/DEBIAN /work/debian".to_string());
     lines.push(format!(
-        "cat > /work/debian/control <<CONTROL_EOF\nSource: {name}\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg <noreply@example.invalid>\nDescription: Package built by git2pkg\nCONTROL_EOF",
+        "cat > /work/debian/control <<CONTROL_EOF\nSource: {name}\nPackage: {name}\nVersion: {version}\nSection: utils\nPriority: optional\nArchitecture: {arch}\nMaintainer: git2pkg <noreply@example.invalid>\nHomepage: {url}\nDescription: {description}\nCONTROL_EOF",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.deb(),
+        url = metadata_line(ctx.url),
+        description = metadata_line(ctx.description),
     ));
     lines.push(
         r#"depends=""
@@ -30,10 +32,12 @@ for binary in $(find /work/out/usr/bin /work/out/usr/lib /work/out/usr/lib/* -ty
 done"#.to_string(),
     );
     lines.push(format!(
-        "{{ echo 'Package: {name}'; echo 'Version: {version}'; echo 'Section: utils'; echo 'Priority: optional'; echo 'Architecture: {arch}'; if [ -n \"$depends\" ]; then echo \"Depends: $depends\"; fi; echo 'Maintainer: git2pkg <noreply@example.invalid>'; echo 'Description: Package built by git2pkg'; }} > /work/deb/DEBIAN/control",
+        "{{ echo 'Package: {name}'; echo 'Version: {version}'; echo 'Section: utils'; echo 'Priority: optional'; echo 'Architecture: {arch}'; if [ -n \"$depends\" ]; then echo \"Depends: $depends\"; fi; echo 'Maintainer: git2pkg <noreply@example.invalid>'; echo 'Homepage: {url}'; echo 'Description: {description}'; }} > /work/deb/DEBIAN/control",
         name = ctx.name,
         version = ctx.version,
         arch = ctx.arch.deb(),
+        url = metadata_line(ctx.url),
+        description = metadata_line(ctx.description),
     ));
     lines.push("mkdir -p /work/deb/usr/bin /work/deb/usr/lib /work/deb/usr/share".to_string());
     lines.push("cp -a /work/out/. /work/deb/".to_string());
@@ -71,6 +75,9 @@ mod tests {
             build_step: "true",
             install_step: "true",
             asset_step: "true",
+            description: "Test package",
+            license: "MIT",
+            url: "https://example.invalid",
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("Source: repo"));
@@ -95,6 +102,9 @@ mod tests {
             build_step: "true",
             install_step: &install,
             asset_step: "true",
+            description: "Test package",
+            license: "MIT",
+            url: "https://example.invalid",
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));

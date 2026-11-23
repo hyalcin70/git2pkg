@@ -1,6 +1,6 @@
 //! Arch/CachyOS: `.pkg.tar.zst` über `makepkg`.
 
-use super::{line_echo, PackageContext};
+use super::{line_echo, metadata_line, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![
@@ -59,20 +59,23 @@ cat > /work/out/.PKGINFO <<PKGINFO_EOF
 pkgname = {name}
 pkgbase = {name}
 pkgver = {version}-1
-pkgdesc = Built by git2pkg
-url = https://example.invalid
+pkgdesc = {description}
+url = {url}
 builddate = $(date +%s)
 packager = git2pkg <noreply@example.invalid>
 size = $installed_size
 arch = {arch}
-license = GPL-3.0-or-later
+license = {license}
 PKGINFO_EOF
 for dep in $dep_line; do echo "depend = $dep" >> /work/out/.PKGINFO; done
 (cd /work/out && bsdtar -czf .MTREE --format=mtree --options="!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link" .PKGINFO usr)
-(cd /work/out && bsdtar --zstd -cf "/work/dist/{name}-{version}-1-{arch}.pkg.tar.zst" .PKGINFO .MTREE usr)
+(cd /work/out && bsdtar --zstd --options zstd:compression-level=19 -cf "/work/dist/{name}-{version}-1-{arch}.pkg.tar.zst" .PKGINFO .MTREE usr)
 rm -f /work/out/.PKGINFO /work/out/.MTREE"#,
         name = ctx.name,
         version = version,
+        description = metadata_line(ctx.description),
+        license = metadata_line(ctx.license),
+        url = metadata_line(ctx.url),
         arch = ctx.arch.arch(),
     ));
     lines
@@ -98,6 +101,9 @@ mod tests {
             build_step: "true",
             install_step: "true",
             asset_step: "true",
+            description: "Test package",
+            license: "MIT",
+            url: "https://example.invalid",
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("export CARGO_TARGET_DIR=/work/cargo-target"));
@@ -124,6 +130,9 @@ mod tests {
             build_step: "true",
             install_step: "true",
             asset_step: "true",
+            description: "Test package",
+            license: "MIT",
+            url: "https://example.invalid",
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("pacman -Qoq"));
@@ -131,6 +140,7 @@ mod tests {
         assert!(script.contains(".PKGINFO"));
         assert!(script.contains("depend = $dep"));
         assert!(script.contains("bsdtar --zstd"));
+        assert!(script.contains("zstd:compression-level=19"));
         assert!(script.contains("pkgver = 1.0.0_beta.1-1"));
         assert!(!script.contains("makepkg -s --noconfirm"));
     }
@@ -148,6 +158,9 @@ mod tests {
             build_step: "cmake -S . -B build && cmake --build build",
             install_step: "true",
             asset_step: "true",
+            description: "Test package",
+            license: "MIT",
+            url: "https://example.invalid",
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("if ! ( cd /work/src && cmake -S . -B build"));
@@ -168,6 +181,9 @@ mod tests {
             build_step: "true",
             install_step: &install,
             asset_step: "true",
+            description: "Test package",
+            license: "MIT",
+            url: "https://example.invalid",
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));
