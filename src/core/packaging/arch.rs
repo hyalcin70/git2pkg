@@ -157,6 +157,7 @@ mod tests {
     #[test]
     fn cargo_package_schritt_installiert_binaries_aus_beiden_ordnern() {
         let family = DistroFamily::Arch;
+        let install = crate::core::packaging::cargo_install_step("repo");
         let ctx = PackageContext {
             name: "repo",
             version: "1.0.0",
@@ -165,7 +166,7 @@ mod tests {
             has_pkgbuild: false,
             arch: PackageArch::Amd64,
             build_step: "true",
-            install_step: crate::core::packaging::cargo_install_step(),
+            install_step: &install,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");

@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -39,11 +41,34 @@ jobs:
           tar -czf git2pkg-linux-x86_64.tar.gz -C dist git2pkg
           sha256sum git2pkg-linux-x86_64.tar.gz > git2pkg-linux-x86_64.tar.gz.sha256
 
+      - name: Prepare release notes
+        run: |
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$notes" ]; then
+            prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+            {
+              echo "## Highlights"
+              echo
+              echo "See the commits for this release."
+              echo
+              echo "## Changes"
+              echo
+              if [ -n "$prev" ]; then
+                git log --oneline "${prev}..${GITHUB_REF_NAME}" | sed 's/^/- /'
+                echo
+                echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_REF_NAME}"
+              else
+                git log --oneline -20 "${GITHUB_REF_NAME}" | sed 's/^/- /'
+              fi
+            } > "$notes"
+          fi
+          echo "RELEASE_NOTES=$notes" >> "$GITHUB_ENV"
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             git2pkg-linux-x86_64.tar.gz
             git2pkg-linux-x86_64.tar.gz.sha256
+          body_path: ${{ env.RELEASE_NOTES }}
           prerelease: ${{ contains(github.ref_name, '-alpha.') || contains(github.ref_name, '-beta.') || contains(github.ref_name, '-rc.') }}
-          generate_release_notes: true

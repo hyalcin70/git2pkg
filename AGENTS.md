@@ -169,7 +169,7 @@ for them.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.31`)
+## 3. Repository Map (as of `v0.2.0-alpha.32`)
 
 ### Entry points
 
@@ -283,6 +283,9 @@ Additional practical rules:
   explicitly.
 - Create physical backups under `/home/hakan/Privat/projects/` when a backup
   folder is requested; never delete old backups.
+- Cargo staging prefers binaries named `<project>` or `<project>-*`; only when
+  none match does it fall back to all built binaries. Never package unrelated
+  workspace tools when a project-named binary exists.
 - Package content verification: a package that contains
   `usr/share/applications/*.desktop` must also contain the executable named by
   the desktop file's `Exec=` key. A package that fails this check is rejected,
@@ -330,6 +333,9 @@ Version bumps happen **only when cutting a release**:
   `packaging/git2pkg.spec`; both native recipes build the local checkout, and
   `packaging/build-rpm.sh` derives the RPM version from `Cargo.toml`.
 - Create an annotated tag: `git tag -a v<VERSION> -m "Release v<VERSION>"`.
+- Add curated release notes under `.github/release-notes/<tag>.md` with
+  `Highlights` and `Changes`; the release workflow uses that file and falls
+  back to a generated commit list when it is missing.
 - Do not push tags unless the maintainer asks explicitly.
 
 `--reset-learning` deletes `learned_mappings.json` without touching the Git
@@ -339,11 +345,11 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.31`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.32`)
 
-Current release: `v0.2.0-alpha.31`.
+Current release: `v0.2.0-alpha.32`.
 
-- **`v0.2.0-alpha.21` → `v0.2.0-alpha.31`**: hardening tests on CachyOS —
+- **`v0.2.0-alpha.21` → `v0.2.0-alpha.32`**: hardening tests on CachyOS —
   C++/CMake superbuilds, Meson/C projects and Go projects. Fix real failures
   generically; never hardcode application or project names into the code.
 - **`v0.2.0-beta.1`**: feature freeze and a fresh VM test round —

@@ -88,20 +88,38 @@ for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist
 done"#
 }
 
-/// Cargo-Staging: Binaries aus `${CARGO_TARGET_DIR:-target}/release`,
-/// `target/release/` UND `/work/dist/` übernehmen.
-pub fn cargo_install_step() -> &'static str {
-    r#"mkdir -p "$pkgdir/usr/bin"
-for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist; do
+/// Cargo-Staging: bevorzugt Binaries, die zum Projektnamen passen
+/// (`projekt` oder `projekt-*`). Gibt es keinen Treffer, werden wie bisher
+/// alle gebauten Binaries übernommen, damit anders benannte Projekte nicht
+/// leer ausgehen.
+pub fn cargo_install_step(project_name: &str) -> String {
+    let project = project_name.replace('\'', "'\\''");
+    format!(
+        r#"mkdir -p "$pkgdir/usr/bin"
+project='{project}'
+matched=0
+for directory in "${{CARGO_TARGET_DIR:-target}}/release" target/release /work/dist; do
   [ -d "$directory" ] || continue
   while IFS= read -r -d '' binary; do
-    install -Dm755 "$binary" "$pkgdir/usr/bin/"
+    base=$(basename "$binary")
+    case "$base" in
+      "$project"|"$project"-*) install -Dm755 "$binary" "$pkgdir/usr/bin/"; matched=1 ;;
+    esac
   done < <(find "$directory" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -print0 2>/dev/null)
 done
+if [ "$matched" -eq 0 ]; then
+  for directory in "${{CARGO_TARGET_DIR:-target}}/release" target/release /work/dist; do
+    [ -d "$directory" ] || continue
+    while IFS= read -r -d '' binary; do
+      install -Dm755 "$binary" "$pkgdir/usr/bin/"
+    done < <(find "$directory" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -print0 2>/dev/null)
+  done
+fi
 if [ -z "$(find "$pkgdir/usr/bin" -maxdepth 1 -type f -print -quit 2>/dev/null)" ]; then
   echo "[pkg] no executable Cargo binaries found" >&2
   exit 1
 fi"#
+    )
 }
 
 /// Erzeugt die Shell-Zeilen zum Schnüren des passenden Systempakets.
@@ -128,8 +146,8 @@ mod tests {
     #[test]
     fn cargo_staging_sucht_beide_verzeichnisse() {
         let build = cargo_build_step();
-        let install = cargo_install_step();
-        for script in [build, install] {
+        let install = cargo_install_step("repo");
+        for script in [build, install.as_str()] {
             assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));
             assert!(script.contains("install -Dm755") || build.contains(script));
         }
@@ -140,6 +158,10 @@ mod tests {
         assert!(install.contains("install -Dm755"));
         assert!(install.contains("build-script-*"));
         assert!(install.contains("exit 1"));
+        assert!(install.contains("project='repo'"));
+        assert!(install.contains(r#""$project"|"$project"-*"#));
+        assert!(install.contains("matched=0"));
+        assert!(install.contains("if [ \"$matched\" -eq 0 ]"));
         assert!(strip_binaries_step().contains("--strip-unneeded"));
     }
 

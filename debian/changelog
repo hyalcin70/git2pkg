@@ -1,3 +1,10 @@
+git2pkg (0.2.0~alpha.32) unstable; urgency=medium
+
+  * Prefer project-named Cargo binaries when staging a package.
+  * Add curated release notes with a generated fallback.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Mon, 23 Nov 2026 19:28:00 +0100
+
 git2pkg (0.2.0~alpha.31) unstable; urgency=medium
 
   * Validate the selected container engine and show concise installation hints.

@@ -2648,9 +2648,9 @@ fn project_identity(url: &str, src: &Path) -> ProjectIdentity {
 }
 
 /// Paketinstallationsschritt mit dem echten Projektnamen.
-fn project_install_step(system: &BuildSystem, _name: &str) -> String {
+fn project_install_step(system: &BuildSystem, name: &str) -> String {
     let step = match system {
-        BuildSystem::Cargo => crate::core::packaging::cargo_install_step().to_string(),
+        BuildSystem::Cargo => crate::core::packaging::cargo_install_step(name),
         BuildSystem::CMake => {
             r#"cmake --build build -j$(nproc)
 if [ -f build/cmake_install.cmake ]; then DESTDIR="$pkgdir" cmake --install build; fi

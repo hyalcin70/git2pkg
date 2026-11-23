@@ -73,6 +73,7 @@ mod tests {
     #[test]
     fn cargo_install_step_beruecksichtigt_cargo_target_dir() {
         let family = DistroFamily::Fedora;
+        let install = crate::core::packaging::cargo_install_step("repo");
         let ctx = PackageContext {
             name: "repo",
             version: "1.0.0",
@@ -81,7 +82,7 @@ mod tests {
             has_pkgbuild: false,
             arch: PackageArch::Amd64,
             build_step: "true",
-            install_step: crate::core::packaging::cargo_install_step(),
+            install_step: &install,
             asset_step: "true",
         };
         let script = script(&ctx).join("\n");

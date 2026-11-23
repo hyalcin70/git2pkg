@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           git2pkg
-Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.31}
+Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.32}
 Release:        1%{?dist}
 Summary:        Isolated package builder from Git repositories
 License:        GPL-3.0-or-later
@@ -48,6 +48,10 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %license LICENSE
 
 %changelog
+* Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.32-1
+- Prefer project-named Cargo binaries when staging a package.
+- Add curated release notes with a generated fallback.
+
 * Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.31-1
 - Validate the selected container engine and show concise installation hints.
 - Localize the support-scope information box in all five READMEs.
