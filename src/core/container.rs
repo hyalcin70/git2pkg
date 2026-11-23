@@ -417,15 +417,19 @@ fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Resul
             return Err("clone failed".to_string());
         }
     } else {
-        for args in [
-            vec!["-C", "fetch", "--all", "--tags", "--prune"],
-            vec!["-C", "reset", "--hard"],
-            vec!["-C", "clean", "-fdx"],
-        ] {
-            let mut command = vec![args[0].to_string(), cache.to_string_lossy().into_owned()];
-            command.extend(args[1..].iter().map(|arg| arg.to_string()));
-            let _ = run_streamed("git", &command, tx);
+        let path = cache.to_string_lossy().into_owned();
+        let run = |args: &[&str]| {
+            let mut command = vec!["-C".to_string(), path.clone()];
+            command.extend(args.iter().map(|arg| arg.to_string()));
+            run_streamed("git", &command, tx)
+        };
+        let _ = run(&["fetch", "--all", "--tags", "--prune"]);
+        let _ = run(&["remote", "set-head", "origin", "--auto"]);
+        let reset = run(&["reset", "--hard", "origin/HEAD"]);
+        if !reset.map(|result| result.success).unwrap_or(false) {
+            let _ = run(&["reset", "--hard", "FETCH_HEAD"]);
         }
+        let _ = run(&["clean", "-fdx"]);
     }
     if cache.join(".gitmodules").is_file() {
         let path = cache.to_string_lossy().into_owned();

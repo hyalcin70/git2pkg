@@ -50,6 +50,7 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %changelog
 * Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.30-1
 - Reject packages whose desktop entry references a missing executable.
+- Refresh cached repositories to the remote default branch before reuse.
 
 * Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.29-1
 - Workspace/log retry fixes, distro-aware build scripts, pre-install verification and early ABI diagnosis.
