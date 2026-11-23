@@ -1,3 +1,10 @@
+git2pkg (0.2.0~alpha.30) unstable; urgency=medium
+
+  * Reject packages whose desktop entry references a missing executable; never
+    record such a package as a verified build recipe.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Mon, 23 Nov 2026 12:40:00 +0100
+
 git2pkg (0.2.0~alpha.29) unstable; urgency=medium
 
   * Reuse the build workspace and auto-save failed logs on strategy retries.
