@@ -32,6 +32,9 @@ pub enum MissingDep {
     Tool(String),
     /// Linker-Fehler `cannot find -l<name>` (soname ohne Entwicklungsdatei).
     Library(String),
+    /// Ein CMake-Finder meldet eine kaputte oder leere Version, obwohl das
+    /// Paket installiert ist. Das ist kein fehlendes Paket.
+    FinderBroken(String),
 }
 
 impl MissingDep {
@@ -42,7 +45,14 @@ impl MissingDep {
             MissingDep::CMakeModule(m) => format!("CMake module '{}'", m),
             MissingDep::Tool(t) => format!("tool '{}'", t),
             MissingDep::Library(l) => format!("library 'lib{}.so'", l),
+            MissingDep::FinderBroken(m) => {
+                format!("CMake finder '{}' with a broken version probe", m)
+            }
         }
+    }
+
+    pub fn is_finder_broken(&self) -> bool {
+        matches!(self, MissingDep::FinderBroken(_))
     }
 
     /// Suchbegriff für den Paketmanager: immer kleingeschrieben, da Linux-
@@ -54,7 +64,8 @@ impl MissingDep {
             MissingDep::PkgConfig(p)
             | MissingDep::CMakeModule(p)
             | MissingDep::Tool(p)
-            | MissingDep::Library(p) => p,
+            | MissingDep::Library(p)
+            | MissingDep::FinderBroken(p) => p,
         }
     }
 
@@ -66,8 +77,16 @@ impl MissingDep {
                 .trim_end_matches("Config")
                 .to_ascii_lowercase(),
             MissingDep::Tool(t) | MissingDep::Library(t) => t.to_ascii_lowercase(),
+            MissingDep::FinderBroken(m) => m.to_ascii_lowercase(),
         }
     }
+}
+
+/// Ein Finder-/Versionsfehler darf eine bereits verifizierte Zuordnung nicht
+/// abwerten: Das Paket ist installiert, der Find-Mechanismus des Projekts ist
+/// defekt.
+pub fn should_penalize_mapping(dep: &MissingDep) -> bool {
+    !dep.is_finder_broken()
 }
 
 /// Generische Wissensbasis: CMake-Modul- und pkg-config-Namen auf die
@@ -318,6 +337,7 @@ pub fn dependency_kind(dep: &MissingDep) -> &'static str {
         MissingDep::CMakeModule(_) => "cmake_module",
         MissingDep::Tool(_) => "tool",
         MissingDep::Library(_) => "soname",
+        MissingDep::FinderBroken(_) => "finder_broken",
     }
 }
 
@@ -352,6 +372,7 @@ fn legacy_dependency_key(family: &str, dep: &MissingDep) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureKind {
     Dependency,
+    FinderBroken,
     VersionMismatch,
     Vendored,
     SourceCode,
@@ -363,6 +384,7 @@ impl FailureKind {
     pub fn label(self) -> &'static str {
         match self {
             FailureKind::Dependency => "dependency error",
+            FailureKind::FinderBroken => "CMake finder/version probe error",
             FailureKind::VersionMismatch => "version/ABI mismatch",
             FailureKind::Vendored => "bundled dependency error",
             FailureKind::SourceCode => "source-code/compiler error",
@@ -373,7 +395,12 @@ impl FailureKind {
 }
 
 pub fn classify_failure(output: &str) -> FailureKind {
-    if !analyze_output(output).is_empty() {
+    let deps = analyze_output(output);
+    if !deps.is_empty() {
+        if !detect_finder_issues(output).is_empty() && deps.iter().all(MissingDep::is_finder_broken)
+        {
+            return FailureKind::FinderBroken;
+        }
         return FailureKind::Dependency;
     }
     let lower = output.to_ascii_lowercase();
@@ -1449,6 +1476,9 @@ fn prune_negative(list: &mut Vec<String>, limit: usize, last_used: &HashMap<Stri
 /// Kandidaten der Such-Kaskade Stufe 1: kleingeschriebener Name und die
 /// üblichen Dev-Paket-Suffixe der Distribution.
 pub fn candidate_names(dep: &MissingDep, package_manager: &str) -> Vec<String> {
+    if dep.is_finder_broken() {
+        return Vec::new();
+    }
     let base = dep.search_term().to_lowercase();
     let mut names = Vec::new();
     if let MissingDep::Tool(_) = dep {
@@ -1606,6 +1636,7 @@ pub fn probe_commands(package_manager: &str, dep: &MissingDep) -> Vec<String> {
             let name = lib.trim_start_matches("lib").to_lowercase();
             files.push((format!("lib{}.so", name), false));
         }
+        MissingDep::FinderBroken(_) => {}
     }
     files.retain(|(file, _)| {
         !file.is_empty()
@@ -1990,6 +2021,68 @@ fn is_generic_tool_word(name: &str) -> bool {
     )
 }
 
+/// Ein CMake-Finder hat eine kaputte oder leere Version geparst.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinderIssue {
+    pub module: String,
+    pub found: String,
+    pub required: String,
+}
+
+fn is_broken_version_probe(version: &str) -> bool {
+    let version = version.trim();
+    if version.is_empty()
+        || version.eq_ignore_ascii_case("unknown")
+        || version.eq_ignore_ascii_case("none")
+        || version.eq_ignore_ascii_case("not found")
+    {
+        return true;
+    }
+    // Kaputte Finder liefern Folgen wie ".", ".." oder "...".
+    if version.chars().all(|c| matches!(c, '.' | ',' | '?' | '!')) {
+        return true;
+    }
+    !version
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
+}
+
+/// Erkennt Meldungen wie
+/// `ExampleModule version .. found ..., but at least version 3.3 is required`.
+/// Das Paket ist dabei installiert; der Finder des Projekts parst nur die
+/// Version falsch. Solche Fälle dürfen nicht als fehlendes Paket gelten.
+pub fn detect_finder_issues(output: &str) -> Vec<FinderIssue> {
+    let Ok(regex) = Regex::new(
+        r"(?i)^\s*(?:--\s*)?([A-Za-z0-9][A-Za-z0-9_+\-]*)\s+version\s*:?\s*(.*?)\s+found\b.*?\b(?:but\s+)?at least version\s+([0-9][A-Za-z0-9_.\-]*)",
+    ) else {
+        return Vec::new();
+    };
+    let mut issues: Vec<FinderIssue> = Vec::new();
+    for line in output.lines() {
+        let Some(caps) = regex.captures(line.trim()) else {
+            continue;
+        };
+        let found = caps[2].trim().to_string();
+        if !is_broken_version_probe(&found) {
+            continue;
+        }
+        let issue = FinderIssue {
+            module: caps[1].to_string(),
+            found,
+            required: caps[3].to_string(),
+        };
+        if !issues
+            .iter()
+            .any(|existing| existing.module.eq_ignore_ascii_case(&issue.module))
+        {
+            issues.push(issue);
+        }
+    }
+    issues
+}
+
 pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     let header_re = Regex::new(r"fatal error:\s*([^\s:]+):\s*No such file or directory").unwrap();
     let pkg_re = Regex::new(r"No package '([^']+)' found").unwrap();
@@ -2017,8 +2110,21 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     // Linker: `/usr/bin/ld: cannot find -lssl` bzw. `-l:libssl.so`. Das Paket
     // liefert die Bibliothek, aber (noch) nicht die `.so`-Entwicklungsdatei.
     let library_re = Regex::new(r"cannot find -l:?([A-Za-z0-9_+.\-]+)").unwrap();
+    // CMake-Fehlerblöcke nennen das Modul oft nur im Dateinamen des Finders
+    // oder in der Meldung "Unable to find requested <Name> installation".
+    let find_module_re = Regex::new(r"(?i)Find([A-Za-z0-9_+\-]+)\.cmake").unwrap();
+    let requested_cmake_re =
+        Regex::new(r"(?i)Unable to find requested\s+([A-Za-z0-9_+\-]+)\s+installation").unwrap();
+    let find_package_call_re = Regex::new(r"(?i)find_package\s*\(\s*([A-Za-z0-9_+\-]+)").unwrap();
+    let cmake_program_names_re =
+        Regex::new(r"(?i)using the following names:\s*([A-Za-z0-9_+.\-]+)").unwrap();
+    let cmake_missing_header_re =
+        Regex::new(r#"(?i)Cannot find .*?header file\s+'([^']+)'"#).unwrap();
+    let cmake_missing_library_re = Regex::new(r#"(?i)Cannot find .*?library\s+'([^']+)'"#).unwrap();
 
     let mut deps: Vec<MissingDep> = Vec::new();
+    let mut in_cmake_error = false;
+    let mut cmake_block_has_module = false;
 
     for line in output.lines() {
         let trimmed = line.trim();
@@ -2028,6 +2134,16 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
             continue;
         }
         let lower = trimmed.to_ascii_lowercase();
+        if lower.contains("cmake error") {
+            in_cmake_error = true;
+            cmake_block_has_module = false;
+        } else if lower.starts_with("-- ")
+            || lower.starts_with("[build]")
+            || lower.starts_with("[pkg]")
+        {
+            in_cmake_error = false;
+            cmake_block_has_module = false;
+        }
         // Reine Statusmeldungen wie `-- XYZ NOT found, using bundled version...`
         // sind keine fehlenden System-Dependencies.
         if lower.starts_with("-- ")
@@ -2061,12 +2177,56 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
         for caps in cmake_config_re.captures_iter(trimmed) {
             push_unique(&mut deps, MissingDep::CMakeModule(caps[1].to_string()));
         }
-        for caps in tool_re.captures_iter(trimmed) {
-            let name = &caps[1];
-            if !is_generic_tool_word(name) {
-                push_unique(&mut deps, MissingDep::Tool(name.to_string()));
+        if in_cmake_error {
+            let mut found_module = false;
+            for caps in find_module_re.captures_iter(trimmed) {
+                push_unique(&mut deps, MissingDep::CMakeModule(caps[1].to_string()));
+                found_module = true;
+            }
+            for caps in requested_cmake_re.captures_iter(trimmed) {
+                push_unique(&mut deps, MissingDep::CMakeModule(caps[1].to_string()));
+                found_module = true;
+            }
+            for caps in find_package_call_re.captures_iter(trimmed) {
+                push_unique(&mut deps, MissingDep::CMakeModule(caps[1].to_string()));
+                found_module = true;
+            }
+            if found_module {
+                cmake_block_has_module = true;
+            }
+            for caps in cmake_program_names_re.captures_iter(trimmed) {
+                let name = &caps[1];
+                if !is_generic_tool_word(name) {
+                    push_unique(&mut deps, MissingDep::Tool(name.to_string()));
+                }
+            }
+            if !cmake_block_has_module {
+                for caps in cmake_missing_header_re.captures_iter(trimmed) {
+                    push_unique(&mut deps, MissingDep::Header(caps[1].to_string()));
+                }
+                for caps in cmake_missing_library_re.captures_iter(trimmed) {
+                    let name = caps[1].trim_start_matches("lib").trim_end_matches(".so");
+                    if !name.is_empty() && name.len() <= 64 {
+                        push_unique(&mut deps, MissingDep::Library(name.to_string()));
+                    }
+                }
             }
         }
+        if !in_cmake_error {
+            for caps in tool_re.captures_iter(trimmed) {
+                let name = &caps[1];
+                if !is_generic_tool_word(name) {
+                    push_unique(&mut deps, MissingDep::Tool(name.to_string()));
+                }
+            }
+            for caps in tool_quoted_re.captures_iter(trimmed) {
+                let name = &caps[1];
+                if !is_generic_tool_word(name) {
+                    push_unique(&mut deps, MissingDep::Tool(name.to_string()));
+                }
+            }
+        }
+        // Explizite Shell-Fehler bleiben auch in CMake-Blöcken Tool-Fehler.
         for caps in cmd_tool_re.captures_iter(trimmed) {
             let name = &caps[1];
             if !is_generic_tool_word(name) {
@@ -2074,12 +2234,6 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
             }
         }
         for caps in shell_cmd_re.captures_iter(trimmed) {
-            let name = &caps[1];
-            if !is_generic_tool_word(name) {
-                push_unique(&mut deps, MissingDep::Tool(name.to_string()));
-            }
-        }
-        for caps in tool_quoted_re.captures_iter(trimmed) {
             let name = &caps[1];
             if !is_generic_tool_word(name) {
                 push_unique(&mut deps, MissingDep::Tool(name.to_string()));
@@ -2103,14 +2257,29 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
         }
     }
 
+    // Finder-/Versionsfehler ersetzen das zugehörige CMake-Modul: Es fehlt
+    // kein Paket, sondern der Finder des Projekts muss den Config-Modus nutzen.
+    let finder_issues = detect_finder_issues(output);
+    if !finder_issues.is_empty() {
+        deps.retain(|dep| match dep {
+            MissingDep::CMakeModule(name) => !finder_issues
+                .iter()
+                .any(|issue| issue.module.eq_ignore_ascii_case(name)),
+            _ => true,
+        });
+        for issue in &finder_issues {
+            push_unique(&mut deps, MissingDep::FinderBroken(issue.module.clone()));
+        }
+    }
+
     // Tool-Meldungen, die nur ein bereits erkanntes CMake-/pkg-config-Modul
     // wiederholen (`webkit` neben `WEBKIT`), sind redundant.
     let modules: Vec<String> = deps
         .iter()
         .filter_map(|dep| match dep {
-            MissingDep::CMakeModule(name) | MissingDep::PkgConfig(name) => {
-                Some(name.to_ascii_lowercase())
-            }
+            MissingDep::CMakeModule(name)
+            | MissingDep::PkgConfig(name)
+            | MissingDep::FinderBroken(name) => Some(name.to_ascii_lowercase()),
             _ => None,
         })
         .collect();
@@ -2225,6 +2394,74 @@ mod tests {
             !zlib.iter().any(|command| command.contains(".so")),
             "{zlib:?}"
         );
+    }
+
+    #[test]
+    fn kaputte_version_wird_als_finder_broken_klassifiziert() {
+        let out = "-- ExampleModule version .. found in /usr/include/example, but at least version 3.3 is required\n-- Could NOT find ExampleModule (missing: EXAMPLEMODULE_VERSION_OK) (Required is at least version \"3.3\")\n";
+        assert_eq!(
+            detect_finder_issues(out),
+            vec![FinderIssue {
+                module: "ExampleModule".into(),
+                found: "..".into(),
+                required: "3.3".into(),
+            }]
+        );
+        let deps = analyze_output(out);
+        assert!(deps.contains(&MissingDep::FinderBroken("ExampleModule".into())));
+        assert!(!deps.contains(&MissingDep::CMakeModule("ExampleModule".into())));
+        assert_eq!(classify_failure(out), FailureKind::FinderBroken);
+    }
+
+    #[test]
+    fn gueltige_alte_version_bleibt_cmake_modul() {
+        let out = "-- ExampleModule version 3.2.1 found in /usr/include/example, but at least version 3.3 is required\n-- Could NOT find ExampleModule (missing: EXAMPLEMODULE_VERSION_OK)\n";
+        assert!(detect_finder_issues(out).is_empty());
+        assert!(analyze_output(out).contains(&MissingDep::CMakeModule("ExampleModule".into())));
+        assert_eq!(classify_failure(out), FailureKind::Dependency);
+    }
+
+    #[test]
+    fn cmake_find_program_bleibt_tool() {
+        let out = "CMake Error at CMakeLists.txt:5 (find_program):\n  Could not find SAMPLE_TOOL using the following names: sample-tool\n\n-- Configuring incomplete, errors occurred!\n";
+        let deps = analyze_output(out);
+        assert!(deps.contains(&MissingDep::Tool("sample-tool".into())));
+    }
+
+    #[test]
+    fn cmake_find_package_fehler_ist_kein_tool() {
+        let out = "CMake Error at cmake/modules/FindExampleModule.cmake:12 (message):\n  Unable to find requested ExampleModule installation: Cannot find ExampleModule library\n  'examplemodule'.  Cannot find ExampleModule header file 'examplemodule.hpp'.  ExampleModule not found in\n  system directories.\n\n-- Configuring incomplete, errors occurred!\n";
+        let deps = analyze_output(out);
+        assert!(deps.contains(&MissingDep::CMakeModule("ExampleModule".into())));
+        assert!(!deps.iter().any(
+            |dep| matches!(dep, MissingDep::Tool(name) if name.eq_ignore_ascii_case("ExampleModule"))
+        ));
+    }
+
+    #[test]
+    fn finder_fehler_wertet_verifiziertes_mapping_nicht_ab() {
+        let path = temp_mapping_path("finder-verified");
+        let mut store = MappingStore::from_path(path.clone());
+        let dep = MissingDep::CMakeModule("ExampleModule".into());
+        store.learn_dependency(
+            "arch",
+            &dep,
+            "example-package",
+            true,
+            "find_package(ExampleModule)",
+        );
+
+        let issue = MissingDep::FinderBroken("ExampleModule".into());
+        assert!(!should_penalize_mapping(&issue));
+        assert!(should_penalize_mapping(&dep));
+        if should_penalize_mapping(&issue) {
+            store.penalize_dependency("arch", &dep, "example-package");
+        }
+
+        let entry = store.lookup_dependency("arch", &dep).unwrap();
+        assert!(entry.verified);
+        assert_eq!(entry.score, 1);
+        let _ = fs::remove_file(path);
     }
 
     #[test]

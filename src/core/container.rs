@@ -11,8 +11,8 @@ use crate::core::resolver::{
     detect_repo_script_distro_rejection, detect_source_group_error, family_key,
     is_cmake_policy_error, is_compiled_build_system, is_transient_network_error,
     package_from_search, packages_from_file_database, probe_commands, search_command,
-    tool_file_database_commands, valid_package_name, BuildRecipe, MappingStore, MissingDep,
-    SourceGroupError,
+    should_penalize_mapping, tool_file_database_commands, valid_package_name, BuildRecipe,
+    MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -1040,6 +1040,7 @@ fn verify_dependency(
             let command = format!("command -v {} 2>/dev/null", shell_quote(tool));
             first_line(container.exec(&command, tx).ok()?)
         }
+        MissingDep::FinderBroken(_) => None,
         MissingDep::Library(lib) => {
             let name = lib.trim_start_matches("lib").to_lowercase();
             if !valid_package_name(&name) {
@@ -1078,34 +1079,8 @@ fn verify_cmake_module(
     module: &str,
     tx: &Sender<BuildEvent>,
 ) -> Option<String> {
-    let safe: String = module
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || "_+-".contains(*c))
-        .collect();
-    if safe.is_empty() {
-        return None;
-    }
-    let config_file = |container: &BuildContainer| {
-        let lower = safe.to_ascii_lowercase();
-        let command = format!(
-            "find /usr /usr/local -maxdepth 6 \\( -name '{}Config.cmake' -o -name '{}-config.cmake' -o -name 'Find{}.cmake' \\) -print -quit 2>/dev/null",
-            safe, lower, safe
-        );
-        first_line(container.exec(&command, tx).ok()?)
-    };
-
-    let probe = format!(
-        r#"d=$(mktemp -d) && printf '%s\n' \
-'cmake_minimum_required(VERSION 3.5)' \
-'project(g2pkg_verify C)' \
-'find_package({safe} QUIET)' \
-'if(NOT {safe}_FOUND)' \
-'  message(FATAL_ERROR "g2pkg-missing")' \
-'endif()' > "$d/CMakeLists.txt" \
-&& cmake -S "$d" -B "$d/build" >/dev/null 2>&1 \
-&& echo "find_package({safe})"; rc=$?; rm -rf "$d"; exit $rc"#,
-        safe = safe
-    );
+    let safe = sanitized_cmake_name(module)?;
+    let probe = cmake_verification_probe(&safe);
     if let Some(evidence) = first_line(container.exec(&probe, tx).ok()?) {
         return Some(evidence);
     }
@@ -1124,7 +1099,10 @@ fn verify_cmake_module(
         return None;
     }
     // Projekt-eigene Module (Qt, ECM, OpenCV, …) über ihre Config-Datei.
-    if let Some(evidence) = config_file(container) {
+    if let Some(evidence) = find_cmake_config(container, &safe, tx) {
+        return Some(evidence);
+    }
+    if let Some(evidence) = find_cmake_finder_module(container, &safe, tx) {
         return Some(evidence);
     }
     // Manche Projekte melden "Could not find libfoo!" nach eigenem
@@ -1142,6 +1120,83 @@ fn verify_cmake_module(
         }
     }
     None
+}
+
+fn sanitized_cmake_name(module: &str) -> Option<String> {
+    let safe: String = module
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || "_+-".contains(*c))
+        .collect();
+    (!safe.is_empty()).then_some(safe)
+}
+
+/// Baut das Shell-Skript, das ein CMake-Modul wirklich per `find_package`
+/// prüft. Reine Funktion, damit die Verifikationsart testbar bleibt.
+fn cmake_verification_probe(safe: &str) -> String {
+    format!(
+        r#"d=$(mktemp -d) && printf '%s\n' \
+'cmake_minimum_required(VERSION 3.5)' \
+'project(g2pkg_verify C)' \
+'find_package({safe} QUIET)' \
+'if(NOT {safe}_FOUND)' \
+'  message(FATAL_ERROR "g2pkg-missing")' \
+'endif()' > "$d/CMakeLists.txt" \
+&& cmake -S "$d" -B "$d/build" >/dev/null 2>&1 \
+&& echo "find_package({safe})"; rc=$?; rm -rf "$d"; exit $rc"#,
+        safe = safe
+    )
+}
+
+fn find_cmake_config(
+    container: &BuildContainer,
+    safe: &str,
+    tx: &Sender<BuildEvent>,
+) -> Option<String> {
+    let lower = safe.to_ascii_lowercase();
+    let command = format!(
+        "find /usr /usr/local -maxdepth 6 \\( -name '{}Config.cmake' -o -name '{}-config.cmake' \\) -print -quit 2>/dev/null",
+        safe, lower
+    );
+    first_line(container.exec(&command, tx).ok()?)
+}
+
+fn find_cmake_finder_module(
+    container: &BuildContainer,
+    safe: &str,
+    tx: &Sender<BuildEvent>,
+) -> Option<String> {
+    let command = format!(
+        "find /usr /usr/local -maxdepth 6 -name 'Find{}.cmake' -print -quit 2>/dev/null",
+        safe
+    );
+    first_line(container.exec(&command, tx).ok()?)
+}
+
+/// Lenkt einen defekten Versions-Finder generisch auf den installierten
+/// CMake-Config-Modus um. Es werden keine Paketnamen aus dem Modulnamen
+/// geraten.
+fn finder_broken_flags(
+    container: &BuildContainer,
+    module: &str,
+    tx: &Sender<BuildEvent>,
+) -> Vec<String> {
+    let mut flags = vec!["-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON".to_string()];
+    let Some(safe) = sanitized_cmake_name(module) else {
+        return flags;
+    };
+    if let Some(config) = find_cmake_config(container, &safe, tx) {
+        if let Some(dir) = Path::new(&config).parent() {
+            // CMake erwartet <PackageName>_DIR; nur bei einfachen Namen setzen.
+            if safe.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                flags.push(shell_quote(&format!("-D{}_DIR={}", safe, dir.display())));
+            }
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[cmake] installed config for '{}' found at {}",
+                safe, config
+            )));
+        }
+    }
+    flags
 }
 
 /// Löst eine fehlende Abhängigkeit auf: gelernte Zuordnung, Datei-Datenbank,
@@ -1912,6 +1967,25 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         // erneuter Buildversuch trotz unauflösbarer (z. B. optionaler) Deps.
         let mut round_progress = false;
         for dep in &missing {
+            if let MissingDep::FinderBroken(module) = dep {
+                // Kein Paket raten: Der Finder des Projekts parst die Version
+                // falsch. Stattdessen den installierten Config-Modus erzwingen.
+                let before = cmake_flags.len();
+                for flag in finder_broken_flags(&container, module, tx) {
+                    push_unique_string(&mut cmake_flags, flag);
+                }
+                if cmake_flags.len() > before {
+                    round_progress = true;
+                }
+                // Eine frühere Auflösung desselben Moduls darf jetzt nicht als
+                // Fehlschlag abgewertet werden.
+                resolved_deps.remove(&dependency_id(&MissingDep::CMakeModule(module.clone())));
+                let _ = tx.send(BuildEvent::Log(format!(
+                    "[cmake] finder for '{}' reports a broken version probe - using CMake config mode",
+                    module
+                )));
+                continue;
+            }
             // Fehlt ein Header, obwohl das Paket installiert ist, liegt er oft
             // in einem Unterordner von /usr/include. Diesen Pfad ergänzen.
             if let MissingDep::Header(header) = dep {
@@ -1945,12 +2019,14 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
             let dep_id = dependency_id(dep);
             if let Some(previous) = resolved_deps.remove(&dep_id) {
-                let _ = tx.send(BuildEvent::Log(format!(
-                    "[learn] '{}' is still missing after installing '{}' - scoring the mapping down",
-                    dep.label(),
-                    previous
-                )));
-                mappings.penalize_dependency(family, dep, &previous);
+                if should_penalize_mapping(dep) {
+                    let _ = tx.send(BuildEvent::Log(format!(
+                        "[learn] '{}' is still missing after installing '{}' - scoring the mapping down",
+                        dep.label(),
+                        previous
+                    )));
+                    mappings.penalize_dependency(family, dep, &previous);
+                }
                 failed_candidates.insert(previous);
             }
 
@@ -2208,6 +2284,27 @@ fn has_local_dependencies(src: &Path) -> bool {
     has_local_deps(src)
 }
 
+/// Shell-Funktion, die nur existierende lokale Superbuild-Prefixe als
+/// `CMAKE_PREFIX_PATH` übergibt. Wird erst zur Laufzeit im Container
+/// ausgewertet, damit ein nicht existierender Pfad nie in CMake landet.
+fn cmake_prefix_flag_function() -> String {
+    r#"g2p_cmake_prefix_flag() {
+  local out=""
+  local dir
+  for dir in /work/deps-install /work/src/deps-install /work/install /work/src/install; do
+    [ -d "$dir" ] || continue
+    if [ -z "$out" ]; then
+      out="-DCMAKE_PREFIX_PATH=$dir"
+    else
+      out="$out;$dir"
+    fi
+  done
+  printf '%s' "$out"
+}
+"#
+    .to_string()
+}
+
 /// Standard-CMake-Flags plus alle aus Fehlermeldungen gelernten Zusatz-Flags.
 fn cmake_configure_flags(extra: &[String]) -> String {
     let mut flags = vec![
@@ -2237,10 +2334,6 @@ fn with_deps_prebuild_flags(script: &str, flags: &[String]) -> String {
     if let Some(index) = anchor {
         lines.insert(
             index + 1,
-            "export CMAKE_PREFIX_PATH=/work/deps-install".to_string(),
-        );
-        lines.insert(
-            index + 2,
             format!(
                 "for sub in /work/src/deps /work/src/third_party; do if [ -f \"$sub/CMakeLists.txt\" ]; then echo '[deps] reconfiguring local dependencies (downloaded sources are kept)'; rm -f /work/deps-build/CMakeCache.txt; rm -rf /work/deps-build/CMakeFiles; cmake -S \"$sub\" -B /work/deps-build -DCMAKE_INSTALL_PREFIX=/work/deps-install {configure_flags} && cmake --build /work/deps-build && cmake --install /work/deps-build || {{ echo '[deps] build failed - resolver takes over'; exit 1; }}; fi; done"
             ),
@@ -2553,7 +2646,7 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
     match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_build_step(),
         BuildSystem::CMake => {
-            r#"cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/work/deps-install -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
+            r#"cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $(g2p_cmake_prefix_flag) -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
         }
         BuildSystem::Meson => {
             r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; meson setup build --prefix=/usr --libdir="${libdir##*/}" && ninja -C build && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
@@ -2578,7 +2671,7 @@ fn binary_build_step(system: &BuildSystem) -> &'static str {
 fn binary_build_step_with_flags(system: &BuildSystem, flags: &[String]) -> String {
     if *system == BuildSystem::CMake {
         return format!(
-            r#"cmake -S . -B build {} -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
+            r#"cmake -S . -B build {} $(g2p_cmake_prefix_flag) && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
             cmake_configure_flags(flags)
         );
     }
@@ -2816,7 +2909,7 @@ fn build_step_text_with_flags(
     if strategy == BuildStrategy::DirectStagingFallback {
         if *system == BuildSystem::CMake {
             return format!(
-                r#"cmake -S . -B build -G "Unix Makefiles" {} -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH=/work/deps-install && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
+                r#"cmake -S . -B build -G "Unix Makefiles" {} -DCMAKE_INSTALL_PREFIX=/usr $(g2p_cmake_prefix_flag) && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
                 cmake_configure_flags(flags)
             );
         }
@@ -2980,6 +3073,7 @@ fn build_script_with_flags(
         ));
     }
 
+    lines.push(cmake_prefix_flag_function());
     let build_step = build_step_text_with_flags(system, strategy, repo_script, &cmake_flags);
     let install_step = project_install_step(system, &identity.name);
     let asset_step = asset_staging_step(&identity.name);
@@ -3635,6 +3729,32 @@ mod tests {
     }
 
     #[test]
+    fn cmake_modul_verifikation_nutzt_find_package() {
+        let probe = cmake_verification_probe("ExampleModule");
+        assert!(probe.contains("find_package(ExampleModule"));
+        assert!(!probe.contains("command -v"));
+    }
+
+    #[test]
+    fn nicht_existierender_prefix_pfad_wird_entfernt() {
+        let script = build_script(
+            &config(DistroFamily::Arch, TargetFormat::NativePackage),
+            &BuildSystem::CMake,
+            &[],
+        );
+        assert!(script.contains("g2p_cmake_prefix_flag"), "{script}");
+        assert!(script.contains("[ -d \"$dir\" ]"), "{script}");
+        assert!(
+            !script.contains("-DCMAKE_PREFIX_PATH=/work/deps-install"),
+            "{script}"
+        );
+        assert!(
+            !script.contains("export CMAKE_PREFIX_PATH=/work/deps-install"),
+            "{script}"
+        );
+    }
+
+    #[test]
     fn artefaktpruefung_vermeidet_sigpipe() {
         let script = build_script(
             &config(DistroFamily::Arch, TargetFormat::NativePackage),
@@ -4049,14 +4169,14 @@ mod tests {
             .contains("apt-get update"));
         let script = "#!/usr/bin/env bash\nmkdir -p /work/out /work/dist\necho ok\n";
         let patched = with_deps_prebuild(script);
-        assert!(patched.contains("export CMAKE_PREFIX_PATH=/work/deps-install"));
+        assert!(!patched.contains("export CMAKE_PREFIX_PATH=/work/deps-install"));
         assert!(patched.contains("-DCMAKE_INSTALL_PREFIX=/work/deps-install"));
         assert!(patched.contains("rm -f /work/deps-build/CMakeCache.txt"));
         assert!(patched.contains("rm -rf /work/deps-build/CMakeFiles"));
         assert!(!patched.contains("rm -rf /work/deps-build;"));
         assert!(patched.contains("downloaded sources are kept"));
         assert!(patched.contains("resolver takes over"));
-        assert!(patched.lines().count() == script.lines().count() + 2);
+        assert!(patched.lines().count() == script.lines().count() + 1);
     }
 
     #[test]
