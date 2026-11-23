@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           git2pkg
-Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.28}
+Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.29}
 Release:        1%{?dist}
 Summary:        Isolated package builder from Git repositories
 License:        GPL-3.0-or-later
@@ -48,6 +48,9 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %license LICENSE
 
 %changelog
+* Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.29-1
+- Workspace/log retry fixes, distro-aware build scripts, pre-install verification and early ABI diagnosis.
+
 * Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.28-1
 - CMake finder, context-aware dependency and prefix fixes; document the supported scope.
 

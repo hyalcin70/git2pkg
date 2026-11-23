@@ -1,3 +1,11 @@
+git2pkg (0.2.0~alpha.29) unstable; urgency=medium
+
+  * Reuse the build workspace and auto-save failed logs on strategy retries.
+  * Distro-aware build-script selection, pre-install verification and early
+    ABI mismatch diagnosis.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Mon, 23 Nov 2026 02:30:00 +0100
+
 git2pkg (0.2.0~alpha.28) unstable; urgency=medium
 
   * CMake finder, context-aware dependency and prefix fixes.

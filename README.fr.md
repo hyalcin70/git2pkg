@@ -74,6 +74,8 @@ simple interface graphique.
 - Détection automatique du système de compilation (`Cargo.toml`, `CMakeLists.txt`,
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
+- Les scripts de compilation du dépôt sont choisis selon la distribution cible ;
+  ceux des autres distributions ou systèmes d'exploitation sont ignorés.
 - Journal de compilation en direct, défilable, avec bouton de copie.
 - Une nouvelle tentative avec une autre stratégie réutilise l'espace de travail
   existant (pas de second clone) et enregistre automatiquement le journal
@@ -87,8 +89,9 @@ simple interface graphique.
   mémorisées.
 - Diagnostic des échecs : les compilations sont classées (dépendance manquante,
   incompatibilité de version/ABI, code embarqué, erreur de compilation, erreur
-  d'empaquetage). Si les paquets ne peuvent pas aider, la compilation s'arrête
-  avec un diagnostic clair au lieu d'essayer des paquets au hasard.
+  d'empaquetage). Les conflits fatals d'ABI ou de finders intégrés arrêtent
+  immédiatement la compilation avec un diagnostic clair de version/ABI au lieu
+  d'essayer des paquets au hasard.
 - Paquets natifs : `.pkg.tar.zst` (Arch ; généré directement, `PKGBUILD` du
   dépôt via `makepkg` s'il existe), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).

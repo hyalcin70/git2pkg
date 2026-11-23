@@ -65,6 +65,8 @@ simple GUI.
 - Automatic build-system detection (`Cargo.toml`, `CMakeLists.txt`, `meson.build`,
   Autotools (`configure.ac`), qmake (`.pro`), `go.mod`, `pyproject.toml`,
   `Makefile`).
+- Repository build scripts are selected by target distribution; scripts for
+  other distributions or operating systems are ignored.
 - Live, scrollable build log streamed from the container, with a copy button.
 - Retrying with another strategy reuses the existing build workspace (no second
   clone) and automatically saves the previous failed log.
@@ -74,9 +76,9 @@ simple GUI.
   verified (the header/module/library must really exist) before the build is
   retried (max. 5 attempts). Only verified matches are remembered.
 - Failure diagnosis: builds are classified (missing dependency, version/ABI
-  mismatch, bundled code, compiler error, packaging error). If packages cannot
-  help, the build stops with a clear diagnosis instead of trying random
-  packages.
+  mismatch, bundled code, compiler error, packaging error). Fatal ABI or
+  bundled-finder conflicts stop the build immediately with a clear version/ABI
+  diagnosis instead of trying random packages.
 - Native packages: `.pkg.tar.zst` (Arch; assembled directly, in-tree `PKGBUILD`
   via `makepkg` when present), `.deb` (Debian/Ubuntu, via `dpkg-deb`), `.rpm`
   (Fedora/openSUSE, via `rpmbuild`).

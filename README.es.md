@@ -70,6 +70,8 @@ utilizable desde una interfaz gráfica sencilla.
 - Detección automática del sistema de compilación (`Cargo.toml`, `CMakeLists.txt`,
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
+- Los scripts de compilación del repositorio se eligen según la distribución
+  de destino; los de otras distribuciones u otros sistemas operativos se ignoran.
 - Registro de compilación en vivo y desplazable, con botón de copia.
 - Al reintentar con otra estrategia se reutiliza el espacio de trabajo existente
   (sin un segundo clon) y se guarda automáticamente el registro fallido anterior.
@@ -82,8 +84,9 @@ utilizable desde una interfaz gráfica sencilla.
   coincidencias verificadas.
 - Diagnóstico de fallos: las compilaciones se clasifican (dependencia ausente,
   desajuste de versión/ABI, código empaquetado, error del compilador, error de
-  empaquetado). Si los paquetes no pueden ayudar, la compilación se detiene con
-  un diagnóstico claro en lugar de probar paquetes al azar.
+  empaquetado). Los conflictos fatales de ABI o de finders incluidos detienen
+  la compilación de inmediato con un diagnóstico claro de versión/ABI en lugar
+  de probar paquetes al azar.
 - Paquetes nativos: `.pkg.tar.zst` (Arch; generado directamente, `PKGBUILD` del
   repositorio mediante `makepkg` si existe), `.deb` (Debian/Ubuntu), `.rpm`
   (Fedora/openSUSE).

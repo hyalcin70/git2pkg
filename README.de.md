@@ -68,6 +68,8 @@ per GUI nutzbar.
 - Automatische Build-System-Erkennung (`Cargo.toml`, `CMakeLists.txt`,
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
+- Repository-Build-Skripte werden nach Ziel-Distribution ausgewählt; Skripte
+  für andere Distributionen oder Betriebssysteme werden ignoriert.
 - Live-Log aus dem Container, scrollbar, mit „Log kopieren"-Button.
 - Ein Retry mit einer anderen Strategie nutzt den vorhandenen Build-Workspace
   weiter (kein zweiter Clone) und speichert das vorherige fehlgeschlagene Log
@@ -80,8 +82,8 @@ per GUI nutzbar.
   dauerhaft gemerkt.
 - Fehlerdiagnose: Builds werden klassifiziert (fehlende Abhängigkeit,
   Versions-/ABI-Konflikt, gebündelter Code, Compilerfehler, Paketierungsfehler).
-  Wenn Pakete nicht helfen können, endet der Build mit einer klaren Diagnose
-  statt weiterer Zufallsversuche.
+  Fatale ABI- oder Bundled-Finder-Konflikte beenden den Build sofort mit einer
+  klaren Versions-/ABI-Diagnose statt weiterer Zufallsversuche.
 - Native Pakete: `.pkg.tar.zst` (Arch; direkt erzeugt, vorhandenes `PKGBUILD`
   über `makepkg`), `.deb` (Debian/Ubuntu via `dpkg-deb`), `.rpm`
   (Fedora/openSUSE via `rpmbuild`).

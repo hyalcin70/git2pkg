@@ -69,6 +69,8 @@ kullanılabiliyor.
 - Otomatik derleme sistemi algılama (`Cargo.toml`, `CMakeLists.txt`,
   `meson.build`, Autotools (`configure.ac`), qmake (`.pro`), `go.mod`,
   `pyproject.toml`, `Makefile`).
+- Depo derleme betikleri hedef dağıtıma göre seçilir; başka dağıtımlara veya
+  işletim sistemlerine ait betikler yok sayılır.
 - Konteynerden canlı, kaydırılabilir derleme günlüğü ve kopyalama düğmesi.
 - Başka bir stratejiyle yeniden denemek mevcut derleme çalışma alanını yeniden
   kullanır (ikinci klon yok) ve önceki başarısız günlüğü otomatik kaydeder.
@@ -79,9 +81,9 @@ kullanılabiliyor.
   derleme yeniden denenir (en fazla 5 deneme). Yalnızca doğrulanmış eşleşmeler
   kalıcı olarak saklanır.
 - Hata teşhisi: derlemeler sınıflandırılır (eksik bağımlılık, sürüm/ABI
-  uyuşmazlığı, paketlenmiş kod, derleyici hatası, paketleme hatası). Paketler
-  yardımcı olamıyorsa derleme rastgele paketler denemek yerine net bir tanıyla
-  durur.
+  uyuşmazlığı, paketlenmiş kod, derleyici hatası, paketleme hatası). Ölümcül
+  ABI veya paket içi finder çakışmaları, rastgele paketler denemek yerine
+  derlemeyi net bir sürüm/ABI tanısıyla hemen durdurur.
 - Yerel paketler: `.pkg.tar.zst` (Arch; doğrudan üretilir, depoda varsa
   `PKGBUILD` ile `makepkg`), `.deb` (Debian/Ubuntu), `.rpm` (Fedora/openSUSE).
 - **Çıktı klasörü**: sonuçlar varsayılan olarak `~/Downloads/git2pkg` içine
