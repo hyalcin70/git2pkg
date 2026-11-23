@@ -7,7 +7,7 @@ use crate::core::detector::{detect_build_system, has_local_deps, BuildSystem, Pr
 use crate::core::distro::{DistroFamily, DistroInfo, TargetDistro};
 use crate::core::resolver::{
     analyze_output, candidate_names, classify_failure, cmake_alternative_flags,
-    cmake_option_flags_from_text, dependency_id, detect_build_fixes,
+    cmake_option_flags_from_text, dependency_id, detect_abi_mismatch, detect_build_fixes,
     detect_repo_script_distro_rejection, detect_source_group_error, family_key,
     is_cmake_policy_error, is_compiled_build_system, is_transient_network_error,
     package_from_search, packages_from_file_database, probe_commands, search_command,
@@ -981,6 +981,19 @@ fn try_candidate(
     {
         return None;
     }
+    // Vor der Installation prüfen: Ist das Artefakt bereits vorhanden, kann
+    // kein Paket etwas reparieren. Das verhindert falsche Learnings, wenn eine
+    // Datei bereits aus einem anderen Paket stammt (z. B. aus einem
+    // Dokumentationspaket statt aus dem eigentlichen Entwicklerpaket).
+    if let Some(evidence) = verify_dependency(container, dep, tx) {
+        let _ = tx.send(BuildEvent::Log(format!(
+            "[learn] {} is already present ({}) - not installing '{}'",
+            dep.label(),
+            evidence,
+            package
+        )));
+        return None;
+    }
     step(tx, texts.step_install(&package));
     if !try_install(config, container, &package, tx, db_synced) {
         failed_candidates.insert(package.clone());
@@ -1569,7 +1582,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut repo_script = config
         .repo_script
         .clone()
-        .or_else(|| find_repo_script(&src));
+        .or_else(|| find_repo_script(&src, family));
     let repo_pkgbuild = src.join("PKGBUILD").is_file();
     let identity = project_identity(&config.url, &src);
     let _ = tx.send(BuildEvent::Log(format!(
@@ -1977,6 +1990,15 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 kind.label()
             )));
             return Err(texts.err_failure_class(kind.label()));
+        }
+
+        if let Some(detail) = detect_abi_mismatch(&last_output) {
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[failure] version/ABI mismatch - installing packages cannot help: {}",
+                detail
+            )));
+            mark_failed_build(&work);
+            return Err(texts.err_failure_class("version/ABI mismatch"));
         }
 
         let mut unresolved: Option<MissingDep> = None;
@@ -3213,8 +3235,8 @@ fn temp_workdir(_url: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn find_repo_script(src: &Path) -> Option<String> {
-    crate::core::detector::find_build_script(src)
+fn find_repo_script(src: &Path, family: &str) -> Option<String> {
+    crate::core::detector::find_build_script_for(src, family)
 }
 
 fn install_command(config: &BuildConfig, artifacts: &[PathBuf]) -> String {
@@ -3748,7 +3770,10 @@ mod tests {
 
         // Wortgrenzen statt Teilstrings: `build-docker.sh`/`build-ci.sh` sind
         // keine Bau-Skripte, CamelCase wird aber erkannt.
-        assert_eq!(find_repo_script(&root).as_deref(), Some("BuildProject.sh"));
+        assert_eq!(
+            find_repo_script(&root, "arch").as_deref(),
+            Some("BuildProject.sh")
+        );
         let _ = fs::remove_dir_all(root);
     }
 

@@ -148,7 +148,9 @@ classes instead.
 
 Concretely, the code must never branch on a repository URL or project name, and
 must not contain fixed lists of one project's files. Detect patterns (script
-names containing `build`/`compile`, error classes, file types) instead. Tests,
+names containing `build`/`compile`, error classes, file types) instead. Repo build
+scripts are selected by target distribution family (`arch`, `debian`, `fedora`,
+`suse`); scripts naming another distribution or a foreign OS are ignored. Tests,
 scripts and documentation must not use real application names as fixtures or
 examples. The dependency table in `assets/default_mappings.json` and
 `distro_package_name` is generic library metadata (CMake module names and

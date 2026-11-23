@@ -151,6 +151,13 @@ fn script_tokens(stem: &str) -> Vec<String> {
 /// Sucht ein Shell-Skript im Wurzelverzeichnis, das nach Bauen oder
 /// Konfigurieren klingt. Bewusst ohne feste Projekt- oder Dateinamen.
 pub fn find_build_script(root: &Path) -> Option<String> {
+    find_build_script_for(root, "")
+}
+
+/// Wie `find_build_script`, bevorzugt aber Skripte für die Ziel-
+/// Distributionsfamilie (`arch`, `debian`, `fedora`, `suse`) und ignoriert
+/// Skripte für fremde Betriebssysteme. Reine Namensheuristik.
+pub fn find_build_script_for(root: &Path, family: &str) -> Option<String> {
     const BLOCKED: &[&str] = &[
         "test",
         "tests",
@@ -177,6 +184,22 @@ pub fn find_build_script(root: &Path) -> Option<String> {
     // `package.sh` installieren oder paketieren meist nur und würden den
     // Build-Schritt nicht ersetzen.
     const BUILD: &[&str] = &["build", "compile", "make", "bootstrap", "configure"];
+    const FOREIGN: &[&str] = &[
+        "mac", "macos", "osx", "darwin", "windows", "mingw", "msvc", "android", "ios", "freebsd",
+        "openbsd", "netbsd",
+    ];
+    let target_tokens: &[&str] = match family {
+        "arch" => &["arch", "cachyos", "manjaro", "pacman"],
+        "debian" => &["debian", "ubuntu", "mint", "apt"],
+        "fedora" => &["fedora", "rhel", "centos", "dnf"],
+        "suse" => &["suse", "opensuse", "sles", "zypper"],
+        _ => &[],
+    };
+    let all_family_tokens: &[&str] = &[
+        "arch", "cachyos", "manjaro", "pacman", "debian", "ubuntu", "mint", "apt", "fedora",
+        "rhel", "centos", "dnf", "suse", "opensuse", "sles", "zypper",
+    ];
+
     let mut candidates: Vec<(u8, String)> = std::fs::read_dir(root)
         .ok()?
         .flatten()
@@ -193,12 +216,57 @@ pub fn find_build_script(root: &Path) -> Option<String> {
             if tokens.iter().any(|token| BLOCKED.contains(&token.as_str())) {
                 return None;
             }
+            if tokens.iter().any(|token| {
+                FOREIGN
+                    .iter()
+                    .any(|foreign| token == foreign || token.starts_with(foreign))
+            }) {
+                return None;
+            }
+            let family_match = |token: &str, wanted: &[&str]| {
+                if wanted.contains(&token) {
+                    return true;
+                }
+                // Auch zusammengeschriebene Namen wie `buildfedora` erkennen.
+                for prefix in BUILD {
+                    if let Some(rest) = token.strip_prefix(prefix) {
+                        if wanted
+                            .iter()
+                            .any(|name| rest == *name || rest.starts_with(name))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                false
+            };
+            let matched_target = !target_tokens.is_empty()
+                && tokens
+                    .iter()
+                    .any(|token| family_match(token, target_tokens));
+            let matched_other = !target_tokens.is_empty()
+                && !matched_target
+                && tokens.iter().any(|token| {
+                    all_family_tokens.iter().any(|other| {
+                        !target_tokens.contains(other) && family_match(token, &[*other])
+                    })
+                });
+            if matched_other {
+                return None;
+            }
+            let family_rank = if matched_target {
+                0
+            } else if tokens.iter().any(|token| family_match(token, &["linux"])) {
+                1
+            } else {
+                2
+            };
             let priority = BUILD.iter().position(|keyword| {
                 tokens
                     .iter()
                     .any(|token| token == keyword || token.starts_with(keyword))
             })?;
-            Some((priority as u8, name))
+            Some(((family_rank * 10 + priority) as u8, name))
         })
         .collect();
     candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -424,6 +492,35 @@ mod tests {
         let third = temp_root("third", &["CMakeLists.txt", "third_party/CMakeLists.txt"]);
         assert!(has_local_deps(&third));
         fs::remove_dir_all(third).unwrap();
+    }
+
+    #[test]
+    fn build_skripte_werden_nach_ziel_distro_gewaehlt() {
+        let root = temp_root(
+            "script-family",
+            &["BuildFedora.sh", "BuildLinux.sh", "BuildMac.sh"],
+        );
+        assert_eq!(
+            find_build_script_for(&root, "arch").as_deref(),
+            Some("BuildLinux.sh")
+        );
+        assert_eq!(
+            find_build_script_for(&root, "debian").as_deref(),
+            Some("BuildLinux.sh")
+        );
+        assert_eq!(
+            find_build_script_for(&root, "suse").as_deref(),
+            Some("BuildLinux.sh")
+        );
+        assert_eq!(
+            find_build_script_for(&root, "fedora").as_deref(),
+            Some("BuildFedora.sh")
+        );
+        fs::remove_dir_all(root).unwrap();
+
+        let foreign = temp_root("script-foreign", &["BuildMac.sh"]);
+        assert!(find_build_script_for(&foreign, "arch").is_none());
+        fs::remove_dir_all(foreign).unwrap();
     }
 
     #[test]

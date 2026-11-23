@@ -395,6 +395,9 @@ impl FailureKind {
 }
 
 pub fn classify_failure(output: &str) -> FailureKind {
+    if detect_abi_mismatch(output).is_some() {
+        return FailureKind::VersionMismatch;
+    }
     let deps = analyze_output(output);
     if !deps.is_empty() {
         if !detect_finder_issues(output).is_empty() && deps.iter().all(MissingDep::is_finder_broken)
@@ -438,6 +441,23 @@ pub fn classify_failure(output: &str) -> FailureKind {
         return FailureKind::SourceCode;
     }
     FailureKind::Unknown
+}
+
+/// Erkennt fatale ABI-/Bundled-Finder-Konflikte, bei denen weitere
+/// Paketinstallationen nicht helfen können.
+pub fn detect_abi_mismatch(output: &str) -> Option<String> {
+    let lower = output.to_ascii_lowercase();
+    if (lower.contains("unable to determine") && lower.contains("abi version"))
+        || lower.contains("could not be found with the bundled find module")
+        || lower.contains("incompatible abi")
+        || lower.contains("abi version mismatch")
+    {
+        return Some(
+            "installed library has an incompatible ABI or the project's bundled find module rejects it"
+                .to_string(),
+        );
+    }
+    None
 }
 
 /// Kurzschlüssel für die Wissensdatenbank, z. B. `arch` oder `debian`.
@@ -2394,6 +2414,19 @@ mod tests {
             !zlib.iter().any(|command| command.contains(".so")),
             "{zlib:?}"
         );
+    }
+
+    #[test]
+    fn abi_und_bundled_finder_werden_als_versionskonflikt_erkannt() {
+        let abi = "CMake Warning at cmake/modules/FindExampleModule.cmake:328 (message):\n  Unable to determine ExampleModule ABI version from ExampleModule installation.\n";
+        assert!(detect_abi_mismatch(abi).is_some());
+        assert_eq!(classify_failure(abi), FailureKind::VersionMismatch);
+
+        let bundled = "CMake Error at CMakeLists.txt:694 (message):\n  ExampleModule could not be found with the bundled find module.\n";
+        assert!(detect_abi_mismatch(bundled).is_some());
+        assert_eq!(classify_failure(bundled), FailureKind::VersionMismatch);
+
+        assert!(detect_abi_mismatch("Could NOT find ExampleModule").is_none());
     }
 
     #[test]
