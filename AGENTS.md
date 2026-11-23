@@ -58,6 +58,15 @@ source/compiler, packaging). If no dependency pattern remains and the failure
 is a source or packaging error, the build stops with a clear diagnosis instead
 of trying more packages.
 
+CMake dependency analysis is context-aware. `find_package`, header and library
+errors inside a CMake error block become CMakeModule/Header/Library entries,
+while `find_program`, explicit `command not found` and shell failures stay
+tools. A broken or empty version probe (`FinderBroken`) never penalizes a
+verified mapping: it switches to CMake config mode and sets `<Module>_DIR` when
+an installed config is found, without guessing package names. `CMAKE_PREFIX_PATH`
+is assembled at configure time from existing superbuild prefixes only; a
+nonexistent path must never be passed to CMake.
+
 Strategy profiles marked "incomplete" are skipped, but if every strategy is
 marked for a repository the markers are cleared and one real attempt runs
 instead of failing without a build. CMake and Meson projects without install
