@@ -36,11 +36,22 @@ ancak test edilen destek kapsamına girmez.
 | Bağımlılık arama | Hedef konteynerdeki dağıtım paketleri, kurulumdan sonra doğrulanır |
 | Desteklenmeyen | Gömülü/mikrodenetleyici araç zincirleri, mobil uygulamalar, web uygulamaları, IDE eklentileri, çekirdek modülleri, farklı mimari derlemeleri, konteynere kurulamayan tescilli SDK'lar, dağıtım paketleme politikalarına garantili uyum |
 
-Herkese açık bir kaynak kod deposu tek başına Linux desteği anlamına gelmez.
-`git2pkg`, Linux'u resmi olarak hedefleyen projeleri destekler; belirleyici olan
-projenin kendi destek beyanıdır, kaynak kodunun erişilebilir olması değildir.
-Yalnızca Windows/macOS için olan projeler ve yalnızca topluluk tarafından
-sürdürülen Linux portları destek matrisinin dışındadır.
+> **ⓘ Information**
+>
+> **« Açık kaynak kodu tek başına Linux desteği anlamına gelmez. »**
+>
+> Ancak: git2pkg, Linux'u resmi olarak hedefleyen projeleri destekler.
+> Belirleyici olan projenin kendi destek beyanıdır, kaynak kodunun erişilebilir
+> olması değildir.
+>
+> <details>
+> <summary>Ayrıntı: Destek matrisinde neler var?</summary>
+>
+> - ✓ **Resmi Linux hedefli projeler** (git2pkg tarafından desteklenir).
+> - ✗ **Yalnızca Windows/macOS için olan projeler** ve **yalnızca topluluk
+>   portları** destek matrisinin dışındadır.
+>
+> </details>
 
 `git2pkg`, dağıtım paketlemesinin, AUR'un, Flatpak'ın veya bir güvenlik
 denetiminin yerini almaz. Güvenilir şekilde derleyebildiğini derler, gerisini

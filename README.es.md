@@ -37,11 +37,22 @@ probado.
 | Búsqueda de dependencias | Paquetes de la distribución dentro del contenedor de destino, verificados tras la instalación |
 | No compatible | Cadenas de herramientas embebidas/microcontroladores, apps móviles, apps web, complementos de IDE, módulos del kernel, compilaciones para otra arquitectura, SDK propietarios que no se puedan instalar en el contenedor, cumplimiento garantizado de las políticas de empaquetado de la distribución |
 
-Un repositorio de código público no implica por sí solo soporte para Linux.
-`git2pkg` admite proyectos que tienen Linux como objetivo oficial; lo decisivo
-es la declaración de soporte del propio proyecto, no la disponibilidad de su
-código fuente. Los proyectos exclusivos para Windows/macOS y los ports de Linux
-mantenidos únicamente por la comunidad quedan fuera de la matriz de soporte.
+> **ⓘ Information**
+>
+> **« El código fuente público por sí solo no implica soporte para Linux. »**
+>
+> Pero: git2pkg admite proyectos que tienen Linux como objetivo oficial. Lo
+> decisivo es la declaración de soporte del propio proyecto, no la disponibilidad
+> de su código fuente.
+>
+> <details>
+> <summary>Detalle: ¿Qué hay en la matriz de soporte?</summary>
+>
+> - ✓ **Proyectos oficiales con Linux como objetivo** (admitidos por git2pkg).
+> - ✗ **Los proyectos exclusivos para Windows/macOS** y **los ports solo
+>   comunitarios** quedan fuera de la matriz de soporte.
+>
+> </details>
 
 `git2pkg` no sustituye al empaquetado de la distribución, AUR, Flatpak ni una
 auditoría de seguridad. Compila lo que puede compilar de forma fiable, informa

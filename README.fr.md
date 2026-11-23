@@ -38,12 +38,22 @@ partie du périmètre de support testé.
 | Recherche des dépendances | Paquets de la distribution dans le conteneur cible, vérifiés après installation |
 | Non pris en charge | Chaînes d'outils embarquées/microcontrôleurs, applications mobiles, applications web, plugins d'IDE, modules du noyau, compilations pour une autre architecture, SDK propriétaires non installables dans le conteneur, conformité garantie aux politiques d'empaquetage de la distribution |
 
-Un dépôt de code public ne garantit pas à lui seul la prise en charge de Linux.
-`git2pkg` prend en charge les projets qui ciblent officiellement Linux ; ce qui
-compte est la déclaration de support du projet lui-même, et non la disponibilité
-de son code source. Les projets exclusivement Windows/macOS et les ports Linux
-maintenus uniquement par la communauté sont hors de la matrice de prise en
-charge.
+> **ⓘ Information**
+>
+> **« La disponibilité du code source ne suffit pas à garantir la prise en charge de Linux. »**
+>
+> Mais : git2pkg prend en charge les projets qui ciblent officiellement Linux.
+> Ce qui compte est la déclaration de support du projet lui-même, et non la
+> disponibilité de son code source.
+>
+> <details>
+> <summary>Détail : Que contient la matrice de prise en charge ?</summary>
+>
+> - ✓ **Projets officiellement ciblés Linux** (pris en charge par git2pkg).
+> - ✗ **Les projets exclusivement Windows/macOS** et **les ports uniquement
+>   communautaires** sont hors de la matrice de prise en charge.
+>
+> </details>
 
 `git2pkg` ne remplace ni l'empaquetage de la distribution, ni AUR, ni Flatpak, ni
 un audit de sécurité. Il compile ce qu'il peut compiler de manière fiable,

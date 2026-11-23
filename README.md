@@ -34,10 +34,21 @@ not part of the tested support scope.
 | Dependency lookup | Distribution packages inside the target container, verified after installation |
 | Not supported | Embedded/microcontroller toolchains, mobile apps, web apps, IDE plugins, kernel modules, cross-architecture builds, proprietary SDKs that cannot be installed in the container, guaranteed compliance with distribution packaging policies |
 
-A public source repository alone does not imply Linux support. `git2pkg` supports
-projects that officially target Linux; what matters is the project's own support
-statement, not the availability of its source code. Windows/macOS-only projects
-and community-only Linux ports are outside the support matrix.
+> **ⓘ Information**
+>
+> **« Public source code alone does not imply Linux support. »**
+>
+> But: git2pkg supports projects that officially target Linux. What matters is
+> the project's own support statement, not the availability of its source code.
+>
+> <details>
+> <summary>Detail: What is in the support matrix?</summary>
+>
+> - ✓ **Official Linux-target projects** (supported by git2pkg).
+> - ✗ **Windows/macOS-only projects** and **community-only ports** are outside
+>   the support matrix.
+>
+> </details>
 
 `git2pkg` is not a replacement for distribution packaging, AUR, Flatpak or a
 security audit. It builds what it can build reliably, reports the rest clearly,
