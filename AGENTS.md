@@ -266,8 +266,8 @@ Additional practical rules:
 - After each completed code change: run QA, restart the GUI with the current
   release binary and commit locally. Do not push unless the maintainer asks
   explicitly.
-- Create physical backups under `/home/hakan/projects/` when a backup folder is
-  requested; never delete old backups.
+- Create physical backups under `/home/hakan/Privat/projects/` when a backup
+  folder is requested; never delete old backups.
 
 ---
 
