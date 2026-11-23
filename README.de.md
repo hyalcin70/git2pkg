@@ -36,6 +36,12 @@ funktionieren, gehört aber nicht zum getesteten Supportumfang.
 | Abhängigkeitssuche | Distributionspakete im Ziel-Container, nach der Installation verifiziert |
 | Nicht unterstützt | Embedded-/Mikrocontroller-Toolchains, mobile Apps, Web-Apps, IDE-Plugins, Kernelmodule, Cross-Architektur-Builds, proprietäre SDKs, die nicht im Container installierbar sind, garantierte Einhaltung von Distributions-Packaging-Richtlinien |
 
+Öffentlicher Quellcode allein bedeutet keinen Linux-Support. `git2pkg`
+unterstützt Projekte, die Linux offiziell als Ziel haben; maßgeblich ist die
+Support-Erklärung des Projekts, nicht die Verfügbarkeit des Quellcodes. Reine
+Windows-/macOS-Projekte und reine Community-Ports liegen außerhalb der
+Support-Matrix.
+
 `git2pkg` ist kein Ersatz für Distributions-Packaging, AUR, Flatpak oder ein
 Sicherheitsaudit. Es baut, was es zuverlässig bauen kann, meldet den Rest klar,
 und das fertige Paket sollte auf der Ziel-Distribution getestet werden.

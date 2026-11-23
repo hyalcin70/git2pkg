@@ -36,6 +36,12 @@ ancak test edilen destek kapsamına girmez.
 | Bağımlılık arama | Hedef konteynerdeki dağıtım paketleri, kurulumdan sonra doğrulanır |
 | Desteklenmeyen | Gömülü/mikrodenetleyici araç zincirleri, mobil uygulamalar, web uygulamaları, IDE eklentileri, çekirdek modülleri, farklı mimari derlemeleri, konteynere kurulamayan tescilli SDK'lar, dağıtım paketleme politikalarına garantili uyum |
 
+Herkese açık bir kaynak kod deposu tek başına Linux desteği anlamına gelmez.
+`git2pkg`, Linux'u resmi olarak hedefleyen projeleri destekler; belirleyici olan
+projenin kendi destek beyanıdır, kaynak kodunun erişilebilir olması değildir.
+Yalnızca Windows/macOS için olan projeler ve yalnızca topluluk tarafından
+sürdürülen Linux portları destek matrisinin dışındadır.
+
 `git2pkg`, dağıtım paketlemesinin, AUR'un, Flatpak'ın veya bir güvenlik
 denetiminin yerini almaz. Güvenilir şekilde derleyebildiğini derler, gerisini
 açıkça bildirir ve ortaya çıkan paket hedef dağıtımda test edilmelidir.

@@ -160,7 +160,11 @@ it applies to every project and never special-cases one.
 Positioning is deliberately narrow: never claim that `git2pkg` builds "any" or
 "all" projects. Keep the support matrix in the five READMEs accurate and speak
 of "supported projects", not universal support. Do not add feature promises to
-release notes or the repository description.
+release notes or the repository description. A public repository does not imply
+Linux support: projects that officially target only Windows/macOS, or whose
+Linux build is explicitly a community or unsupported port, are outside the
+support matrix. Never add URL-based warnings, blocklists or project-name lists
+for them.
 
 ---
 
