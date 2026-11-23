@@ -2,6 +2,7 @@
 
 use crate::core::container::{BuildConfig, BuildContainer};
 use crate::core::resolver::MappingStore;
+use std::path::Path;
 use std::sync::mpsc::Sender;
 
 pub fn archive_listing_command(kind: &str, path: &str) -> String {
@@ -98,10 +99,10 @@ pub fn listing_payload_with_size(
     (files, bytes, has_size)
 }
 
-/// Zählt echte Programmdateien in den ausführbaren Standardpfaden.
-pub fn listing_program_files(text: &str, kind: &str) -> usize {
+/// Liefert alle Dateien unter den ausführbaren Standardpfaden.
+fn listing_program_paths(text: &str, kind: &str) -> Vec<String> {
     let prefixes = ["usr/bin/", "usr/local/bin/", "bin/", "usr/sbin/", "opt/"];
-    let mut count = 0usize;
+    let mut paths = Vec::new();
     for line in text.lines() {
         let tokens: Vec<&str> = line.split_whitespace().collect();
         if tokens.is_empty() {
@@ -120,10 +121,85 @@ pub fn listing_program_files(text: &str, kind: &str) -> usize {
         };
         let path = raw.trim_start_matches("./").trim_start_matches('/');
         if prefixes.iter().any(|prefix| path.starts_with(prefix)) && !path.ends_with('/') {
-            count += 1;
+            paths.push(path.to_string());
         }
     }
-    count
+    paths
+}
+
+/// Zählt echte Programmdateien in den ausführbaren Standardpfaden.
+pub fn listing_program_files(text: &str, kind: &str) -> usize {
+    listing_program_paths(text, kind).len()
+}
+
+/// Liefert die Basisnamen der Programmdateien in Kleinschreibung.
+fn listing_program_names(text: &str, kind: &str) -> Vec<String> {
+    listing_program_paths(text, kind)
+        .iter()
+        .filter_map(|path| path.rsplit('/').next())
+        .map(str::to_ascii_lowercase)
+        .collect()
+}
+
+/// Shell-Befehl, der die `.desktop`-Dateien aus einem Paket ausliest.
+pub fn desktop_entry_command(kind: &str, path: &str) -> String {
+    match kind {
+        "pkg" => format!(
+            "tar --zstd -xOf '{0}' --wildcards 'usr/share/applications/*.desktop' 2>/dev/null || bsdtar -xOf '{0}' 'usr/share/applications/*.desktop' 2>/dev/null",
+            path
+        ),
+        "deb" => format!(
+            "dpkg-deb --fsys-tarfile '{0}' 2>/dev/null | tar -xO --wildcards '*usr/share/applications/*.desktop' 2>/dev/null",
+            path
+        ),
+        "rpm" => format!(
+            "rpm2cpio '{0}' 2>/dev/null | cpio -i --to-stdout --quiet '*usr/share/applications/*.desktop' 2>/dev/null",
+            path
+        ),
+        _ => String::new(),
+    }
+}
+
+/// Liest die Programmnamen aus den `Exec=`-Zeilen von Desktop-Dateien.
+pub fn desktop_exec_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in text.lines() {
+        let Some(value) = line.trim().strip_prefix("Exec=") else {
+            continue;
+        };
+        let mut tokens = value.split_whitespace();
+        let mut token = tokens.next().unwrap_or("");
+        if token == "env" {
+            token = tokens
+                .find(|candidate| !candidate.contains('='))
+                .unwrap_or("");
+        }
+        let token = token.trim_matches(|c| c == '"' || c == '\'');
+        if token.is_empty() || token.starts_with('-') || matches!(token, "env" | "sh" | "bash") {
+            continue;
+        }
+        let name = Path::new(token)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(token)
+            .to_ascii_lowercase();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Ein Paket mit Desktop-Eintrag muss die dort genannte Binary enthalten.
+fn desktop_binary_missing(listing: &str, kind: &str, desktop_text: &str) -> bool {
+    let execs = desktop_exec_names(desktop_text);
+    if execs.is_empty() {
+        return false;
+    }
+    let programs = listing_program_names(listing, kind);
+    !execs
+        .iter()
+        .any(|exec| programs.iter().any(|program| program == exec))
 }
 
 /// Ergebnis der Paketprüfung. Der Aufrufer entscheidet anhand dieses
@@ -133,6 +209,8 @@ pub enum VerifyOutcome {
     Ok,
     /// Kompiliertes Projekt, aber das Paket enthält keine Programmdateien.
     NoProgramFiles,
+    /// Desktop-Eintrag vorhanden, aber die dort genannte Binary fehlt.
+    MissingDesktopBinary,
     /// Paket ist leer oder besteht nur aus Metadaten.
     Invalid,
 }
@@ -153,6 +231,7 @@ pub fn verify_built_packages(
     let mut checked = 0usize;
     let mut invalid: Vec<String> = Vec::new();
     let mut compiled_without_program = false;
+    let mut desktop_without_binary = false;
 
     for raw in listing.text.lines() {
         let path = raw.trim();
@@ -198,13 +277,21 @@ pub fn verify_built_packages(
         };
         let (files, bytes, has_size) = listing_payload_with_size(&output.text, kind, forced_bytes);
         let program_files = listing_program_files(&output.text, kind);
+        let desktop_text = container
+            .exec(&desktop_entry_command(kind, path), tx)
+            .map(|output| output.text)
+            .unwrap_or_default();
+        let missing_desktop_binary =
+            compiled && desktop_binary_missing(&output.text, kind, &desktop_text);
         let plausible = if compiled {
-            program_files > 0
+            program_files > 0 && !missing_desktop_binary
         } else {
             files > 0 && (!has_size || bytes >= 256 || files >= 2)
         };
         if !plausible {
-            if compiled && program_files == 0 {
+            if missing_desktop_binary {
+                desktop_without_binary = true;
+            } else if compiled && program_files == 0 {
                 compiled_without_program = true;
             }
             invalid.push(path.to_string());
@@ -215,7 +302,14 @@ pub fn verify_built_packages(
         return VerifyOutcome::Ok;
     }
 
-    let outcome = if compiled_without_program {
+    let outcome = if desktop_without_binary {
+        mappings.mark_incomplete_strategy(&config.url, strategy_label);
+        let _ = tx.send(crate::core::container::BuildEvent::Log(
+            "[warn] produced package declares a desktop entry but does not contain its executable - marking strategy as incomplete"
+                .to_string(),
+        ));
+        VerifyOutcome::MissingDesktopBinary
+    } else if compiled_without_program {
         mappings.mark_incomplete_strategy(&config.url, strategy_label);
         let _ = tx.send(crate::core::container::BuildEvent::Log(
             "[warn] produced package contains no program files - marking strategy as incomplete"
@@ -292,5 +386,43 @@ mod tests {
         assert_eq!(files, 2);
         assert_eq!(bytes, 4096);
         assert!(has_size);
+    }
+
+    #[test]
+    fn desktop_exec_namen_werden_geparst() {
+        assert_eq!(
+            desktop_exec_names("Exec=orcaslicer %U\nTryExec=orcaslicer\n"),
+            vec!["orcaslicer"]
+        );
+        assert_eq!(
+            desktop_exec_names("Exec=/usr/bin/app --flag\nExec=env FOO=bar other\n"),
+            vec!["app", "other"]
+        );
+        assert!(desktop_exec_names("Name=App\nIcon=app\n").is_empty());
+        assert!(desktop_exec_names("Exec=sh -c 'app'\n").is_empty());
+    }
+
+    #[test]
+    fn paket_mit_desktop_eintrag_ohne_binary_wird_erkannt() {
+        let wrong = "-rwxr-xr-x 0 0 4096 usr/bin/uv\n\
+-rw-r--r-- 0 0 120 usr/share/applications/orcaslicer.desktop\n";
+        assert!(desktop_binary_missing(wrong, "pkg", "Exec=orcaslicer\n"));
+
+        let correct = "-rwxr-xr-x 0 0 4096 usr/bin/orcaslicer\n\
+-rw-r--r-- 0 0 120 usr/share/applications/orcaslicer.desktop\n";
+        assert!(!desktop_binary_missing(correct, "pkg", "Exec=orcaslicer\n"));
+
+        assert!(!desktop_binary_missing("usr/bin/uv\n", "pkg", ""));
+    }
+
+    #[test]
+    fn desktop_befehl_kennt_alle_paketformate() {
+        for kind in ["pkg", "deb", "rpm"] {
+            let command = desktop_entry_command(kind, "/work/dist/app.pkg");
+            assert!(
+                command.contains("usr/share/applications/*.desktop"),
+                "{kind}: {command}"
+            );
+        }
     }
 }

@@ -282,6 +282,11 @@ Additional practical rules:
   explicitly.
 - Create physical backups under `/home/hakan/Privat/projects/` when a backup
   folder is requested; never delete old backups.
+- Package content verification: a package that contains
+  `usr/share/applications/*.desktop` must also contain the executable named by
+  the desktop file's `Exec=` key. A package that fails this check is rejected,
+  its strategy is marked incomplete, and it must never be recorded as a
+  verified recipe.
 
 ---
 
