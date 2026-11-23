@@ -1,3 +1,10 @@
+git2pkg (0.2.0~alpha.28) unstable; urgency=medium
+
+  * CMake finder, context-aware dependency and prefix fixes.
+  * Document the supported scope.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Mon, 23 Nov 2026 01:30:00 +0100
+
 git2pkg (0.2.0~alpha.27) unstable; urgency=medium
 
   * Remove the misleading build progress percentage from the GUI.

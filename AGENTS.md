@@ -160,7 +160,7 @@ release notes or the repository description.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.27`)
+## 3. Repository Map (as of `v0.2.0-alpha.28`)
 
 ### Entry points
 
@@ -298,7 +298,7 @@ Version bumps happen **only when cutting a release**:
 
 - Update `Cargo.toml` and `Cargo.lock` (via `cargo check`).
 - Update `packaging/PKGBUILD` with an Arch-compliant `pkgver` without hyphens
-  (for example `0.2.0alpha27`). This PKGBUILD builds the local checkout and
+  (for example `0.2.0alpha28`). This PKGBUILD builds the local checkout and
   deliberately has no `_tag` or source archive. It sets `options=('!lto')`
   because makepkg's default `-flto=auto` produces GCC LTO objects for the
   `ring` C code that `rust-lld` cannot link.
@@ -315,9 +315,9 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.27`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.28`)
 
-Current release: `v0.2.0-alpha.27`.
+Current release: `v0.2.0-alpha.28`.
 
 - **`v0.2.0-alpha.21` → `v0.2.0-alpha.30`**: hardening tests on CachyOS —
   C++/CMake superbuilds, Meson/C projects and Go projects. Fix real failures
