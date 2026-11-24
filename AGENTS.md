@@ -364,11 +364,11 @@ Current release: `v0.2.0-alpha.33`.
   generically; never hardcode application or project names into the code.
 - **`v0.2.0-beta.1`**: feature freeze and a fresh VM test round —
   Debian/Ubuntu, Fedora, openSUSE, plus a Podman check.
-- **Deferred input feature (beta candidate):** support source archives
-  (`.tar.gz`, `.tar.xz`, `.zip`) and local source directories in addition to
-  Git URLs. Read version and metadata from project manifests; do not assume Git
-  tags, submodules or LFS. CLI first, GUI path picker later. No project names or
-  special cases in code.
+- **Deferred until `v0.2.0-beta.1` (do not implement during alpha):** support
+  source archives (`.tar.gz`, `.tar.xz`, `.zip`) and local source directories in
+  addition to Git URLs. Read version and metadata from project manifests; do not
+  assume Git tags, submodules or LFS. CLI first, GUI path picker later. No
+  project names or special cases in code.
 - **`v0.2.0-rc.1` → `v1.0.0`**: release candidate, then official support start.
 
 When updating this roadmap, keep the current version at the top accurate.
