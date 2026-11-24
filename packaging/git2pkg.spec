@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           git2pkg
-Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.33}
+Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.34}
 Release:        1%{?dist}
 Summary:        Isolated package builder from Git repositories
 License:        GPL-3.0-or-later
@@ -48,6 +48,10 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %license LICENSE
 
 %changelog
+* Tue Nov 24 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.34-1
+- Build only the Cargo binaries selected by the project packaging manifest.
+- Document that source-archive input is deferred to beta.1.
+
 * Mon Nov 23 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.33-1
 - Select Cargo application binaries from project packaging manifests and Cargo metadata.
 - Read description, license and URL from project manifests and stage documentation/license files.
