@@ -288,6 +288,9 @@ Additional practical rules:
   the project name, then a project-name prefix; only when none match does it
   fall back to all built binaries. Never package unrelated workspace tools when
   a project-named or manifest-listed binary exists.
+- Cargo builds use the same manifest/Cargo package selection as staging; only
+  the selected binaries are compiled. If that targeted build fails, fall back
+  to the full workspace build.
 - Package metadata (description, license, URL) is read from the project
   manifests (`Cargo.toml`, `pyproject.toml`, CMake, nfpm) and desktop files;
   `README*`, `LICENSE*`, `NOTICE*` and `THIRD-PARTY*` are staged. Never use the

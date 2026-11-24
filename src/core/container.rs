@@ -2897,29 +2897,33 @@ fi"#
     )
 }
 
-fn binary_build_step(system: &BuildSystem) -> &'static str {
+fn binary_build_step(system: &BuildSystem) -> String {
     match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_build_step(),
         BuildSystem::CMake => {
             r#"cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $(g2p_cmake_prefix_flag) -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
+                .to_string()
         }
         BuildSystem::Meson => {
             r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; meson setup build --prefix=/usr --libdir="${libdir##*/}" && ninja -C build && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
+                .to_string()
         }
         BuildSystem::Go => {
             r#"export GOCACHE=/work/go-cache; mkdir -p /work/dist /work/go-cache; found=0; for pkg in $(go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./... 2>/dev/null); do name=$(basename "$pkg"); go build -o "/work/dist/$name" "$pkg" && found=1; done; if [ "$found" = 0 ]; then go build -o /work/dist/app .; fi"#
+                .to_string()
         }
-        BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .",
+        BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .".to_string(),
         BuildSystem::Autotools => {
             r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; if [ -x ./configure ]; then ./configure --prefix=/usr --libdir="$libdir"; else autoreconf -fi && ./configure --prefix=/usr --libdir="$libdir"; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b "$1" | grep -q ELF && cp "$1" /work/dist/; else cp "$1" /work/dist/; fi' _ {} \;"#
+                .to_string()
         }
         BuildSystem::Make => {
-            "make && find . -maxdepth 2 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b \"$1\" | grep -q ELF && cp \"$1\" /work/dist/; else cp \"$1\" /work/dist/; fi' _ {} \\;"
+            "make && find . -maxdepth 2 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b \"$1\" | grep -q ELF && cp \"$1\" /work/dist/; else cp \"$1\" /work/dist/; fi' _ {} \\;".to_string()
         }
         BuildSystem::Qmake => {
-            "(qmake6 . 2>/dev/null || qmake .) && make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;"
+            "(qmake6 . 2>/dev/null || qmake .) && make && find . -maxdepth 2 -type f -perm -u+x -exec cp {} /work/dist/ \\;".to_string()
         }
-        BuildSystem::Unknown => "true",
+        BuildSystem::Unknown => "true".to_string(),
     }
 }
 

@@ -92,14 +92,41 @@ pub fn run_step(command: &str) -> String {
     format!("if ! ( {command} ); then echo '[build] step failed - aborting' >&2; exit 1; fi")
 }
 
-/// Cargo-Build: nur echte ausführbare Artefakte nach `/work/dist` kopieren.
-pub fn cargo_build_step() -> &'static str {
+/// Cargo-Build: baut bevorzugt nur die Binaries aus dem Projekt-Packaging-
+/// Manifest (`nfpm`). Ohne Manifest bleibt der bisherige Workspace-Build.
+pub fn cargo_build_step() -> String {
     r#"mkdir -p /work/dist "${CARGO_TARGET_DIR:-target}/release"
-cargo build --release
+bins=""
+for manifest in packaging/linux/nfpm.yaml nfpm.yaml packaging/nfpm.yaml; do
+  [ -f "$manifest" ] || continue
+  bins=$(python3 -c '
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+seen = []
+for line in text.splitlines():
+    match = re.search(r"src:\s*.*?/usr/bin/([A-Za-z0-9._+-]+)", line)
+    if match and match.group(1) not in seen:
+        seen.append(match.group(1))
+        print(match.group(1))
+' "$manifest" 2>/dev/null)
+  [ -n "$bins" ] && break
+done
+if [ -n "$bins" ]; then
+  args=""
+  for name in $bins; do args="$args --bin $name"; done
+  echo "[build] Cargo bins from packaging manifest: $(echo $bins)"
+  if ! cargo build --release $args; then
+    echo "[build] selected Cargo bins failed - building the workspace" >&2
+    cargo build --release
+  fi
+else
+  cargo build --release
+fi
 for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist; do
   [ -d "$directory" ] || continue
   find "$directory" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' ! -name '*.rlib' ! -name 'build-script-*' -exec cp {} /work/dist/ \; 2>/dev/null
 done"#
+        .to_string()
 }
 
 /// Cargo-Staging: wählt zuerst die Binaries des Pakets, dessen Name zum
@@ -218,7 +245,10 @@ mod tests {
     fn cargo_staging_sucht_beide_verzeichnisse() {
         let build = cargo_build_step();
         let install = cargo_install_step("repo");
-        for script in [build, install.as_str()] {
+        assert!(build.contains("packaging/linux/nfpm.yaml"));
+        assert!(build.contains("--bin"));
+        assert!(build.contains("[build] Cargo bins from packaging manifest"));
+        for script in [build.as_str(), install.as_str()] {
             assert!(script.contains("${CARGO_TARGET_DIR:-target}/release"));
             assert!(script.contains("install -Dm755") || build.contains(script));
         }
