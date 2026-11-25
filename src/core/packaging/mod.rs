@@ -96,6 +96,18 @@ pub fn run_step(command: &str) -> String {
 /// Manifest (`nfpm`). Ohne Manifest bleibt der bisherige Workspace-Build.
 pub fn cargo_build_step() -> String {
     r#"mkdir -p /work/dist "${CARGO_TARGET_DIR:-target}/release"
+# Upstream-Bootstrap-Projekte (Rust-Compiler & Verwandte) bringen ein eigenes
+# Build-System im Wurzelverzeichnis mit (`x.py` + `src/bootstrap`). Sie sind
+# kein normales Cargo-Projekt: ein `cargo build` scheitert dort an Nightly-
+# Features und fehlender Bootstrap-Konfiguration.
+if [ -f x.py ] && [ -d src/bootstrap ]; then
+  echo '[build] upstream bootstrap detected (x.py) - using the project build system' >&2
+  if [ ! -f bootstrap.toml ] && [ ! -f config.toml ]; then
+    ./configure --prefix=/usr --set llvm.download-ci-llvm=true
+  fi
+  ./x.py build --stage "${GIT2PKG_BOOTSTRAP_STAGE:-1}"
+  exit 0
+fi
 bins=""
 for manifest in packaging/linux/nfpm.yaml nfpm.yaml packaging/nfpm.yaml; do
   [ -f "$manifest" ] || continue
@@ -220,6 +232,18 @@ fi"#
     )
 }
 
+/// Upstream-Bootstrap-Installation (`x.py install`): nur fuer Projekte mit
+/// eigenem Build-System im Wurzelverzeichnis (`x.py` + `src/bootstrap`).
+/// Wird dem Cargo-Installationsschritt vorangestellt.
+pub fn bootstrap_install_guard() -> &'static str {
+    r#"if [ -f x.py ] && [ -d src/bootstrap ]; then
+  echo '[pkg] upstream bootstrap detected - installing via x.py' >&2
+  DESTDIR="$pkgdir" ./x.py install --stage "${GIT2PKG_BOOTSTRAP_STAGE:-1}" --set install.prefix=/usr
+  exit 0
+fi
+"#
+}
+
 /// Erzeugt die Shell-Zeilen zum Schnüren des passenden Systempakets.
 pub fn generate(ctx: &PackageContext<'_>) -> Vec<String> {
     match ctx.family {
@@ -269,6 +293,19 @@ mod tests {
         assert!(install.contains("if [ \"$selected\" -eq 0 ]"));
         assert!(install.contains("[ \"$matched\" -eq 1 ]"));
         assert!(strip_binaries_step().contains("--strip-unneeded"));
+    }
+
+    #[test]
+    fn bootstrap_projekte_bauen_ueber_x_py() {
+        let build = cargo_build_step();
+        assert!(build.contains("[ -f x.py ] && [ -d src/bootstrap ]"));
+        assert!(build.contains("./x.py build --stage"));
+        assert!(build.contains("llvm.download-ci-llvm=true"));
+        let guard = bootstrap_install_guard();
+        assert!(guard.contains("[ -f x.py ] && [ -d src/bootstrap ]"));
+        assert!(guard.contains("./x.py install"));
+        assert!(guard.contains("DESTDIR=\"$pkgdir\""));
+        assert!(guard.contains("install.prefix=/usr"));
     }
 
     #[test]

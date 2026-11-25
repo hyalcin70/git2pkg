@@ -74,6 +74,16 @@ rules (or with empty install rules) stage their built ELF programs to
 `/usr/bin` and shared libraries to `/usr/lib` as a generic fallback; internal
 CMake probe binaries in `CMakeFiles/` are never treated as programs.
 
+Repositories that ship their own upstream bootstrap (`x.py` plus
+`src/bootstrap` in the repository root, for example the Rust compiler) are not
+normal Cargo projects: a plain `cargo build` fails on nightly features and a
+missing bootstrap configuration. Such trees are configured with
+`./configure --prefix=/usr --set llvm.download-ci-llvm=true` and built /
+installed through `./x.py build|install --stage <n>`; the stage defaults to 1
+and can be overridden with `GIT2PKG_BOOTSTRAP_STAGE`. The extra packages they
+need (curl, xz, zlib, OpenSSL) are installed only when those marker files
+actually exist.
+
 **Log language policy:** static UI text is localized in five languages
 (`src/gui/i18n.rs`), but live build logs are English technical diagnostics
 (`[learn]`, `[warn]`, `[strategy]`, `[retry]`, `[cmake]`, ...). Do not add new

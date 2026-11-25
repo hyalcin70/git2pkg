@@ -2430,6 +2430,19 @@ fn toolchain_packages(family: &DistroFamily, system: &BuildSystem) -> Vec<&'stat
     packages
 }
 
+/// Zusaetzliche Pakete fuer Upstream-Bootstrap-Builds (`x.py`): sie laden eine
+/// Stage0-Toolchain und ein LLVM-Archiv und brauchen curl, xz, zlib und OpenSSL.
+fn bootstrap_packages(family: &DistroFamily) -> Vec<String> {
+    let names: &[&str] = match family {
+        DistroFamily::Arch => &["curl", "xz", "zlib", "openssl"],
+        DistroFamily::Debian => &["curl", "xz-utils", "zlib1g-dev", "libssl-dev"],
+        DistroFamily::Fedora => &["curl", "xz", "zlib-devel", "openssl-devel"],
+        DistroFamily::Suse => &["curl", "xz", "zlib-devel", "libopenssl-devel"],
+        DistroFamily::Unknown => &[],
+    };
+    names.iter().map(|name| (*name).to_string()).collect()
+}
+
 fn base_dependencies(family: &DistroFamily, system: &BuildSystem) -> String {
     let base = match family {
         DistroFamily::Arch => {
@@ -2857,7 +2870,11 @@ fn project_identity(source_url: &str, src: &Path) -> ProjectIdentity {
 /// Paketinstallationsschritt mit dem echten Projektnamen.
 fn project_install_step(system: &BuildSystem, name: &str) -> String {
     let step = match system {
-        BuildSystem::Cargo => crate::core::packaging::cargo_install_step(name),
+        BuildSystem::Cargo => format!(
+            "{}{}",
+            crate::core::packaging::bootstrap_install_guard(),
+            crate::core::packaging::cargo_install_step(name)
+        ),
         BuildSystem::CMake => {
             r#"cmake --build build -j$(nproc)
 if [ -f build/cmake_install.cmake ]; then DESTDIR="$pkgdir" cmake --install build; fi
@@ -3280,6 +3297,17 @@ fn build_script_with_flags(
         format!("export GIT2PKG_LIBDIR={}", target_libdir(&target.family)),
         base_dependencies(&target.family, system),
     ];
+    // Upstream-Bootstrap-Projekte (`x.py`, z. B. der Rust-Compiler) laden ihre
+    // Stage0-Toolchain und LLVM selbst herunter. Die Dateien werden erst zur
+    // Laufzeit geprueft, damit normale Cargo-Projekte nichts extra installieren.
+    let bootstrap_cmd =
+        install_packages_command(&target.family, &bootstrap_packages(&target.family));
+    if !bootstrap_cmd.is_empty() {
+        lines.push(format!(
+            "if [ -f /work/src/x.py ] && [ -d /work/src/src/bootstrap ]; then {} || true; fi",
+            bootstrap_cmd
+        ));
+    }
     // Erst nach der Installation von git wirksam.
     lines.push("git config --global --add safe.directory '*' 2>/dev/null || true".to_string());
     if config.cmake_compat {
@@ -3707,6 +3735,47 @@ mod tests {
             .unwrap_or(false);
         let _ = std::fs::remove_file(&path);
         assert!(ok, "ungueltiges Asset-Staging-Skript");
+    }
+
+    #[test]
+    fn bootstrap_pakete_haengen_von_der_familie_ab() {
+        let arch = bootstrap_packages(&DistroFamily::Arch).join(" ");
+        assert!(arch.contains("curl"));
+        assert!(arch.contains("xz"));
+        assert!(arch.contains("zlib"));
+
+        let debian = bootstrap_packages(&DistroFamily::Debian).join(" ");
+        assert!(debian.contains("xz-utils"));
+        assert!(debian.contains("zlib1g-dev"));
+
+        let fedora = bootstrap_packages(&DistroFamily::Fedora).join(" ");
+        assert!(fedora.contains("zlib-devel"));
+
+        let suse = bootstrap_packages(&DistroFamily::Suse).join(" ");
+        assert!(suse.contains("libopenssl-devel"));
+
+        assert!(bootstrap_packages(&DistroFamily::Unknown).is_empty());
+    }
+
+    #[test]
+    fn bootstrap_pakete_werden_nur_bei_x_py_installiert() {
+        let identity = ProjectIdentity {
+            name: "sample-tool".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        };
+        let cfg = config(DistroFamily::Arch, TargetFormat::NativePackage);
+        let script = build_script_with(
+            &cfg,
+            &BuildSystem::Cargo,
+            &[],
+            None,
+            &identity,
+            BuildStrategy::Default,
+            false,
+        );
+        assert!(script.contains("if [ -f /work/src/x.py ] && [ -d /work/src/src/bootstrap ]"));
+        assert!(script.contains("pacman -S --noconfirm --needed -- curl xz zlib openssl"));
     }
 
     #[test]
