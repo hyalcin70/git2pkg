@@ -132,7 +132,11 @@ releases before alpha/beta/rc). Untagged checkouts fall back to `0.1.0`.
 
 Persistent Git clones live in `~/.cache/git2pkg/repos/repo-<repo_hash>/` and
 are refreshed to the remote default branch (`origin/HEAD`) and updated in place;
-build workspaces use the separate prefix
+submodules are initialized shallow and in parallel (`git submodule update
+--init --recursive --depth=1 --jobs=4`) because only the working tree is
+needed - the Rust compiler clone drops from roughly 15 GB to 5 GB and the
+clone time from about 15 to 8 minutes. Tags are fetched separately for the
+shallow clone. Build workspaces use the separate prefix
 `~/.cache/git2pkg/builds/build-<unix_millis>-<pid>/src/` and are complete
 independent copies (no symlink or shared clone). The exit dialog option
 "Delete everything" first cancels the active build and stops build containers,

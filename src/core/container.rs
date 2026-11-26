@@ -394,6 +394,21 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Submodule werden flach und parallel geholt: grosse Projekte (z. B. der
+/// Rust-Compiler mit LLVM und GCC als Submodule) brauchen sonst ein
+/// Vielfaches an Zeit und Plattenplatz, obwohl nur der Arbeitsbaum gebraucht
+/// wird.
+fn submodule_update_args() -> Vec<String> {
+    vec![
+        "submodule".to_string(),
+        "update".to_string(),
+        "--init".to_string(),
+        "--recursive".to_string(),
+        "--depth=1".to_string(),
+        "--jobs=4".to_string(),
+    ]
+}
+
 fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Result<(), String> {
     if !cache.join(".git").is_dir() {
         if cache.exists() {
@@ -448,18 +463,9 @@ fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Resul
     }
     if cache.join(".gitmodules").is_file() {
         let path = cache.to_string_lossy().into_owned();
-        let _ = run_streamed(
-            "git",
-            &[
-                "-C".to_string(),
-                path.clone(),
-                "submodule".to_string(),
-                "update".to_string(),
-                "--init".to_string(),
-                "--recursive".to_string(),
-            ],
-            tx,
-        );
+        let mut args = vec!["-C".to_string(), path.clone()];
+        args.extend(submodule_update_args());
+        let _ = run_streamed("git", &args, tx);
         let _ = run_streamed(
             "git",
             &[
@@ -2676,20 +2682,49 @@ fn git_version(src: &Path) -> Option<String> {
     git(&["tag", "--sort=-v:refname"]).and_then(|tags| pick_version_tag(&tags))
 }
 
-/// Waehlt aus `git tag --sort=-v:refname` den passenden Versions-Tag:
-/// stabile Versionen vor Vorabversionen, Tags ohne Ziffern werden ignoriert.
+/// Waehlt aus der Tag-Liste die plausibelste Projektversion.
+///
+/// Kriterien in dieser Reihenfolge: hoehere Versionsnummer (damit gewinnt
+/// `1.102.0` gegen `release-0.7`), stabile Version vor `alpha`/`beta`/`rc`,
+/// dann kurzes Namenspraefix ("v2.0.0" vor "release-2.0.0").
 fn pick_version_tag(tags: &str) -> Option<String> {
-    let version = Regex::new(r"\d+\.\d+").ok()?;
-    let names: Vec<&str> = tags
-        .lines()
-        .map(str::trim)
-        .filter(|tag| !tag.is_empty() && version.is_match(tag))
-        .collect();
-    names
-        .iter()
-        .find(|tag| !is_prerelease(tag))
-        .or_else(|| names.first())
-        .map(|tag| (*tag).to_string())
+    let re = Regex::new(r"(?i)^([a-z][a-z0-9_-]*[-_]?)?v?(\d+)(?:\.(\d+))?(?:\.(\d+))?").ok()?;
+    let mut best: Option<(usize, Vec<u32>, bool, String)> = None;
+    for tag in tags.lines().map(str::trim).filter(|tag| !tag.is_empty()) {
+        let Some(caps) = re.captures(tag) else {
+            continue;
+        };
+        let prefix_len = caps.get(1).map(|m| m.as_str().len()).unwrap_or(0);
+        let numbers: Vec<u32> = (2..=4)
+            .filter_map(|index| caps.get(index))
+            .filter_map(|m| m.as_str().parse().ok())
+            .collect();
+        if numbers.len() < 2 {
+            continue;
+        }
+        let candidate = (prefix_len, numbers, !is_prerelease(tag), tag.to_string());
+        if best.as_ref().map(|current| better_tag(&candidate, current)) != Some(false) {
+            best = Some(candidate);
+        }
+    }
+    best.map(|(_, _, _, tag)| tag)
+}
+
+/// `true`, wenn `candidate` den bisherigen Kandidaten schlaegt.
+fn better_tag(
+    candidate: &(usize, Vec<u32>, bool, String),
+    current: &(usize, Vec<u32>, bool, String),
+) -> bool {
+    if candidate.1 != current.1 {
+        return candidate.1 > current.1;
+    }
+    if candidate.2 != current.2 {
+        return candidate.2;
+    }
+    if candidate.0 != current.0 {
+        return candidate.0 < current.0;
+    }
+    candidate.3 > current.3
 }
 
 fn is_prerelease(tag: &str) -> bool {
@@ -3847,6 +3882,19 @@ mod tests {
     }
 
     #[test]
+    fn submodule_werden_flach_und_parallel_geholt() {
+        let args = submodule_update_args();
+        for expected in ["--init", "--recursive", "--depth=1", "--jobs=4"] {
+            assert!(
+                args.contains(&expected.to_string()),
+                "{} fehlt in {:?}",
+                expected,
+                args
+            );
+        }
+    }
+
+    #[test]
     fn versionen_bevorzugen_stabile_tags() {
         assert_eq!(
             pick_version_tag("v2.0.0-alpha.2\nv2.0.0\nv1.10.0").as_deref(),
@@ -3858,6 +3906,15 @@ mod tests {
         assert_eq!(
             pick_version_tag("v3.0.0-rc.1").as_deref(),
             Some("v3.0.0-rc.1")
+        );
+        // Praefixe duerfen eine hoehere Version nicht verdraengen.
+        assert_eq!(
+            pick_version_tag("release-0.7\n1.102.0\n1.101.0").as_deref(),
+            Some("1.102.0")
+        );
+        assert_eq!(
+            pick_version_tag("v1.0.0\nrelease-1.0.0").as_deref(),
+            Some("v1.0.0")
         );
     }
 
