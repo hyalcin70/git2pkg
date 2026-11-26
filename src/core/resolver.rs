@@ -377,10 +377,35 @@ pub enum FailureKind {
     Vendored,
     SourceCode,
     Packaging,
+    /// Das Build-Skript hat kein Paket erzeugt (`__GIT2PKG_NO_ARTIFACT__`).
+    NoArtifact,
+    /// Das Paket enthaelt keine Binaries (`__GIT2PKG_EMPTY_PACKAGE__`).
+    EmptyPackage,
+    /// Die Toolchain der Distribution ist aelter als die MSRV des Projekts.
+    Toolchain,
     Unknown,
 }
 
 impl FailureKind {
+    /// Kurzer Hinweis, ob weitere Paketinstallationen ueberhaupt helfen.
+    pub fn hint(self) -> &'static str {
+        match self {
+            FailureKind::EmptyPackage => {
+                "no binaries were packaged - check the install prefix and install rules"
+            }
+            FailureKind::NoArtifact => "the build finished without producing a package file",
+            FailureKind::Toolchain => {
+                "the distribution toolchain is older than the project requires"
+            }
+            FailureKind::Packaging => "the packaging step itself failed",
+            FailureKind::SourceCode => "the source code rejected the compiler settings",
+            FailureKind::Vendored => "the project expects a bundled dependency",
+            FailureKind::VersionMismatch => "a library version does not match",
+            FailureKind::FinderBroken => "the project's version probe is broken",
+            FailureKind::Dependency | FailureKind::Unknown => "installing packages cannot help",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             FailureKind::Dependency => "dependency error",
@@ -389,12 +414,35 @@ impl FailureKind {
             FailureKind::Vendored => "bundled dependency error",
             FailureKind::SourceCode => "source-code/compiler error",
             FailureKind::Packaging => "packaging error",
+            FailureKind::NoArtifact => "build produced no package",
+            FailureKind::EmptyPackage => "package contains no binaries",
+            FailureKind::Toolchain => "rustc toolchain too old for the project",
             FailureKind::Unknown => "unknown error",
         }
     }
 }
 
+/// Die MSRV des Projekts liegt ueber der rustc-Version der Distribution.
+fn is_toolchain_too_old(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("is not supported by the following packages")
+        || lower.contains("requires rustc ")
+        || lower.contains("minimum supported rust version")
+        || lower.contains("unsupported rust version")
+}
+
 pub fn classify_failure(output: &str) -> FailureKind {
+    // Marker aus dem generierten Paketskript haben Vorrang: sie beschreiben
+    // den Zustand exakt, waehrend Textmuster nur Indizien sind.
+    if output.contains("__GIT2PKG_NO_ARTIFACT__") {
+        return FailureKind::NoArtifact;
+    }
+    if output.contains("__GIT2PKG_EMPTY_PACKAGE__") {
+        return FailureKind::EmptyPackage;
+    }
+    if is_toolchain_too_old(output) {
+        return FailureKind::Toolchain;
+    }
     if detect_abi_mismatch(output).is_some() {
         return FailureKind::VersionMismatch;
     }
@@ -3284,6 +3332,37 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.join("learned_mappings.json")
+    }
+
+    #[test]
+    fn klassifiziert_paketmarker_und_msrv() {
+        assert_eq!(
+            classify_failure("__GIT2PKG_EMPTY_PACKAGE__"),
+            FailureKind::EmptyPackage
+        );
+        assert_eq!(
+            classify_failure("__GIT2PKG_NO_ARTIFACT__"),
+            FailureKind::NoArtifact
+        );
+        assert_eq!(
+            classify_failure("error: rustc 1.85.1 is not supported by the following packages:"),
+            FailureKind::Toolchain
+        );
+        assert_eq!(
+            classify_failure("package `foo` requires rustc 1.97.0"),
+            FailureKind::Toolchain
+        );
+        // Textmuster duerfen die Marker nicht ueberstimmen.
+        assert_eq!(
+            classify_failure("__GIT2PKG_EMPTY_PACKAGE__\nCMake Error: Could NOT find ZLIB"),
+            FailureKind::EmptyPackage
+        );
+        assert_eq!(
+            FailureKind::EmptyPackage.label(),
+            "package contains no binaries"
+        );
+        assert!(FailureKind::Toolchain.hint().contains("toolchain"));
+        assert!(FailureKind::EmptyPackage.hint().contains("install prefix"));
     }
 
     #[test]

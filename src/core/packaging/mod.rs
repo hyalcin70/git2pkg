@@ -105,7 +105,7 @@ if [ -f x.py ] && [ -d src/bootstrap ]; then
   if [ ! -f bootstrap.toml ] && [ ! -f config.toml ]; then
     ./configure --prefix=/usr --set llvm.download-ci-llvm=true
   fi
-  ./x.py build --stage "${GIT2PKG_BOOTSTRAP_STAGE:-1}"
+  ./x.py build --stage "${GIT2PKG_BOOTSTRAP_STAGE:-1}" || exit 1
   exit 0
 fi
 bins=""
@@ -123,16 +123,24 @@ for line in text.splitlines():
 ' "$manifest" 2>/dev/null)
   [ -n "$bins" ] && break
 done
+build_failed=0
 if [ -n "$bins" ]; then
   args=""
   for name in $bins; do args="$args --bin $name"; done
   echo "[build] Cargo bins from packaging manifest: $(echo $bins)"
   if ! cargo build --release $args; then
     echo "[build] selected Cargo bins failed - building the workspace" >&2
-    cargo build --release
+    cargo build --release || build_failed=1
   fi
 else
-  cargo build --release
+  cargo build --release || build_failed=1
+fi
+# `set -e` ist innerhalb der Fehlerpruefung des Aufrufers abgeschaltet; ein
+# fehlgeschlagenes `cargo build` muss deshalb explizit zum Abbruch fuehren,
+# sonst laeuft der Installationsschritt ohne Binaries weiter.
+if [ "$build_failed" -ne 0 ]; then
+  echo '[build] cargo build failed - see the compiler errors above' >&2
+  exit 1
 fi
 for directory in "${CARGO_TARGET_DIR:-target}/release" target/release /work/dist; do
   [ -d "$directory" ] || continue
@@ -293,6 +301,17 @@ mod tests {
         assert!(install.contains("if [ \"$selected\" -eq 0 ]"));
         assert!(install.contains("[ \"$matched\" -eq 1 ]"));
         assert!(strip_binaries_step().contains("--strip-unneeded"));
+    }
+
+    #[test]
+    fn cargo_build_fehler_bricht_ab() {
+        let build = cargo_build_step();
+        assert!(build.contains("build_failed=0"));
+        assert!(build.contains("cargo build --release || build_failed=1"));
+        assert!(build.contains("if [ \"$build_failed\" -ne 0 ]"));
+        assert!(build.contains("cargo build failed - see the compiler errors above"));
+        assert!(build.contains("./x.py build --stage"));
+        assert!(build.contains("|| exit 1"));
     }
 
     #[test]

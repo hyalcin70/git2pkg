@@ -12,7 +12,7 @@ use crate::core::resolver::{
     is_cmake_policy_error, is_compiled_build_system, is_transient_network_error,
     package_from_search, packages_from_file_database, probe_commands, search_command,
     should_penalize_mapping, tool_file_database_commands, valid_package_name, BuildRecipe,
-    MappingStore, MissingDep, SourceGroupError,
+    FailureKind, MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -1701,6 +1701,8 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut strategy_attempt: u8 = 1;
     let mut visited_strategies: HashSet<&'static str> = HashSet::new();
     let mut heal_round: u8 = 1;
+    // Die MSRV-Heilung wird pro Lauf hoechstens einmal angewandt.
+    let mut toolchain_healed = false;
     let mut allowed_rounds: u8 = INITIAL_HEAL_ROUNDS;
     'attempt: loop {
         if config.cancel_flag.load(Ordering::Relaxed) {
@@ -1990,6 +1992,19 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
         let missing = analyze_output(&last_output);
         if missing.is_empty() {
+            // Der Toolchain-Fix wurde gerade erst gelernt; das laufende Skript
+            // kennt ihn noch nicht. Einmal mit rustup wiederholen, statt mit
+            // einer nichtssagenden Diagnose abzubrechen.
+            if !toolchain_healed
+                && config.rustup_fix
+                && classify_failure(&last_output) == FailureKind::Toolchain
+            {
+                toolchain_healed = true;
+                let _ = tx.send(BuildEvent::Log(
+                    "[heal] retrying with a current stable toolchain (rustup)".to_string(),
+                ));
+                continue;
+            }
             if deps_failed {
                 let _ = tx.send(BuildEvent::Log(
                     "[warn] local deps/ prebuild failed - switching to the distribution's system libraries..."
@@ -2010,8 +2025,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             mark_failed_build(&work);
             let kind = classify_failure(&last_output);
             let _ = tx.send(BuildEvent::Log(format!(
-                "[failure] {} - installing packages cannot help",
-                kind.label()
+                "[failure] {} - {}",
+                kind.label(),
+                kind.hint()
             )));
             return Err(texts.err_failure_class(kind.label()));
         }

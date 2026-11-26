@@ -54,9 +54,15 @@ mappings remain as fallbacks.
 `git2pkg --explain-learning` prints the learned table.
 
 Failures are classified (dependency, version/ABI, bundled dependency,
-source/compiler, packaging). If no dependency pattern remains and the failure
-is a source or packaging error, the build stops with a clear diagnosis instead
-of trying more packages.
+source/compiler, packaging, no artifact, empty package, toolchain). If no
+dependency pattern remains and the failure is a source or packaging error, the
+build stops with a clear diagnosis instead of trying more packages. The
+generated scripts set the markers `__GIT2PKG_NO_ARTIFACT__` and
+`__GIT2PKG_EMPTY_PACKAGE__`, which take precedence over text patterns, and a
+failed `cargo build` aborts explicitly instead of leaving the install step to
+report "no binaries". When the distro `rustc` is older than the project's MSRV
+(`rustc X is not supported`, `requires rustc`), the build is retried once in
+the same run with a current stable toolchain via rustup.
 
 CMake dependency analysis is context-aware. `find_package`, header and library
 errors inside a CMake error block become CMakeModule/Header/Library entries,
