@@ -416,6 +416,19 @@ fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Resul
         if !cloned.success {
             return Err("clone failed".to_string());
         }
+        // `--depth 1 --tags` liefert bei GitHub keine Tags; separat nachladen.
+        let _ = run_streamed(
+            "git",
+            &[
+                "-C".to_string(),
+                cache.to_string_lossy().into_owned(),
+                "fetch".to_string(),
+                "--tags".to_string(),
+                "--depth=1".to_string(),
+                "origin".to_string(),
+            ],
+            tx,
+        );
     } else {
         let path = cache.to_string_lossy().into_owned();
         let run = |args: &[&str]| {
@@ -424,6 +437,8 @@ fn prepare_repo_cache(url: &str, cache: &Path, tx: &Sender<BuildEvent>) -> Resul
             run_streamed("git", &command, tx)
         };
         let _ = run(&["fetch", "--all", "--tags", "--prune"]);
+        // Tags auch bei Shallow-Repositories zuverlaessig nachziehen.
+        let _ = run(&["fetch", "--tags", "--depth=1", "origin"]);
         let _ = run(&["remote", "set-head", "origin", "--auto"]);
         let reset = run(&["reset", "--hard", "origin/HEAD"]);
         if !reset.map(|result| result.success).unwrap_or(false) {
@@ -2615,20 +2630,57 @@ fn cmake_version(text: &str) -> Option<String> {
 }
 
 fn git_version(src: &Path) -> Option<String> {
-    for args in [
-        vec!["describe", "--tags", "--abbrev=0"],
-        vec!["describe", "--tags"],
-    ] {
-        if let Ok(output) = Command::new("git").arg("-C").arg(src).args(args).output() {
-            if output.status.success() {
-                let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !tag.is_empty() {
-                    return Some(tag);
-                }
-            }
+    let git = |args: &[&str]| -> Option<String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(src)
+            .args(args)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
         }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    };
+    // Ein Tag direkt am HEAD ist die genaueste Aussage.
+    if let Some(tag) = git(&["describe", "--tags", "--exact-match", "HEAD"]) {
+        return Some(tag);
     }
-    None
+    // Sonst der naechste erreichbare Tag (nur bei vollstaendiger Historie).
+    if let Some(tag) = git(&["describe", "--tags", "--abbrev=0"]) {
+        return Some(tag);
+    }
+    // Shallow-Clone: HEAD liegt in keiner getaggten Historie, aber die Tags
+    // selbst sind vorhanden. Dann gilt der neueste Versions-Tag.
+    git(&["tag", "--sort=-v:refname"]).and_then(|tags| pick_version_tag(&tags))
+}
+
+/// Waehlt aus `git tag --sort=-v:refname` den passenden Versions-Tag:
+/// stabile Versionen vor Vorabversionen, Tags ohne Ziffern werden ignoriert.
+fn pick_version_tag(tags: &str) -> Option<String> {
+    let version = Regex::new(r"\d+\.\d+").ok()?;
+    let names: Vec<&str> = tags
+        .lines()
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty() && version.is_match(tag))
+        .collect();
+    names
+        .iter()
+        .find(|tag| !is_prerelease(tag))
+        .or_else(|| names.first())
+        .map(|tag| (*tag).to_string())
+}
+
+fn is_prerelease(tag: &str) -> bool {
+    let lower = tag.to_ascii_lowercase();
+    ["alpha", "beta", "rc", "pre", "dev", "nightly"]
+        .iter()
+        .any(|marker| lower.contains(marker))
 }
 
 fn toml_string_field(text: &str, key: &str) -> Option<String> {
@@ -2918,7 +2970,7 @@ fn binary_build_step(system: &BuildSystem) -> String {
     match system {
         BuildSystem::Cargo => crate::core::packaging::cargo_build_step(),
         BuildSystem::CMake => {
-            r#"cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $(g2p_cmake_prefix_flag) -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
+            r#"cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr $(g2p_cmake_prefix_flag) -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {} \;"#
                 .to_string()
         }
         BuildSystem::Meson => {
@@ -2947,7 +2999,7 @@ fn binary_build_step(system: &BuildSystem) -> String {
 fn binary_build_step_with_flags(system: &BuildSystem, flags: &[String]) -> String {
     if *system == BuildSystem::CMake {
         return format!(
-            r#"cmake -S . -B build {} $(g2p_cmake_prefix_flag) && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
+            r#"cmake -S . -B build {} -DCMAKE_INSTALL_PREFIX=/usr $(g2p_cmake_prefix_flag) && cmake --build build -j$(nproc) && find build -maxdepth 3 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.so|*.so.*|*.a|*.o) exit 0;; esac; head -c 4 "$1" | grep -q ELF && cp "$1" /work/dist/' _ {{}} \;"#,
             cmake_configure_flags(flags)
         );
     }
@@ -3776,6 +3828,30 @@ mod tests {
         );
         assert!(script.contains("if [ -f /work/src/x.py ] && [ -d /work/src/src/bootstrap ]"));
         assert!(script.contains("pacman -S --noconfirm --needed -- curl xz zlib openssl"));
+    }
+
+    #[test]
+    fn versionen_bevorzugen_stabile_tags() {
+        assert_eq!(
+            pick_version_tag("v2.0.0-alpha.2\nv2.0.0\nv1.10.0").as_deref(),
+            Some("v2.0.0")
+        );
+        assert_eq!(pick_version_tag("1.4.5\n1.3.0").as_deref(), Some("1.4.5"));
+        assert_eq!(pick_version_tag("nightly\nstable").as_deref(), None);
+        assert_eq!(pick_version_tag("").as_deref(), None);
+        assert_eq!(
+            pick_version_tag("v3.0.0-rc.1").as_deref(),
+            Some("v3.0.0-rc.1")
+        );
+    }
+
+    #[test]
+    fn cmake_baut_mit_install_prefix_usr() {
+        let plain = binary_build_step(&BuildSystem::CMake);
+        assert!(plain.contains("-DCMAKE_INSTALL_PREFIX=/usr"));
+        let with_flags =
+            binary_build_step_with_flags(&BuildSystem::CMake, &["-DEXAMPLE=ON".to_string()]);
+        assert!(with_flags.contains("-DCMAKE_INSTALL_PREFIX=/usr"));
     }
 
     #[test]
