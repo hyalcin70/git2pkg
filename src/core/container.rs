@@ -3011,10 +3011,23 @@ fi"#
         BuildSystem::Unknown => "true".to_string(),
     };
     format!(
-        "mkdir -p \"$pkgdir/usr/bin\" \"$pkgdir/usr/lib\" \"$pkgdir/usr/share\"\n{}\n{}",
+        "mkdir -p \"$pkgdir/usr/bin\" \"$pkgdir/usr/lib\" \"$pkgdir/usr/share\"\n{}\n{}\n{}",
         step,
-        crate::core::packaging::strip_binaries_step()
+        crate::core::packaging::strip_binaries_step(),
+        dev_artifacts_cleanup_step()
     )
+}
+
+/// Anwendungspakete sollen keine Entwicklungsdateien ausliefern. Header,
+/// statische Bibliotheken und pkg-config-Dateien stammen bei solchen Projekten
+/// fast immer aus mitgebauten Fremdbibliotheken (z. B. einem eingebetteten
+/// Test-Framework) und gehoeren in ein separates -dev-Paket.
+fn dev_artifacts_cleanup_step() -> &'static str {
+    r#"if [ -n "$(find "$pkgdir/usr/bin" -maxdepth 1 -type f -perm -u+x 2>/dev/null | head -1)" ]; then
+  rm -rf "$pkgdir/usr/include"
+  find "$pkgdir/usr/lib" "$pkgdir/usr/lib64" -name '*.a' -type f -delete 2>/dev/null || true
+  find "$pkgdir/usr/lib" "$pkgdir/usr/lib64" -name '*.pc' -type f -delete 2>/dev/null || true
+fi"#
 }
 
 fn binary_build_step(system: &BuildSystem) -> String {
@@ -3879,6 +3892,16 @@ mod tests {
         );
         assert!(script.contains("if [ -f /work/src/x.py ] && [ -d /work/src/src/bootstrap ]"));
         assert!(script.contains("pacman -S --noconfirm --needed -- curl xz zlib openssl"));
+    }
+
+    #[test]
+    fn anwendungspakete_verlieren_entwicklungsdateien() {
+        let step = project_install_step(&BuildSystem::CMake, "example-app");
+        assert!(step.contains("rm -rf \"$pkgdir/usr/include\""));
+        assert!(step.contains("-name '*.a' -type f -delete"));
+        assert!(step.contains("-name '*.pc' -type f -delete"));
+        // Nur Pakete mit ausfuehrbaren Dateien werden bereinigt.
+        assert!(step.contains("-type f -perm -u+x"));
     }
 
     #[test]

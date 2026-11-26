@@ -124,7 +124,10 @@ packages use `AutoReqProv`, ignore standard RPATHs (`QA_RPATHS=0x0001`) and
 compress man pages before the `%files` list is generated. The target libdir and
 `CMAKE_INSTALL_PREFIX=/usr` are passed explicitly (`/usr/lib64` on
 Fedora/openSUSE) so installed files land where packages expect them and
-binaries can find their libraries. Project versions are read from Cargo, CMake,
+binaries can find their libraries. Packages that contain executables under
+`usr/bin` drop development-only artifacts afterwards (`usr/include`, `*.a`,
+`*.pc`); such files almost always come from vendored libraries (for example an
+embedded test framework) and belong in a separate -dev package. Project versions are read from Cargo, CMake,
 `pyproject.toml`, `AC_INIT`/`PACKAGE_VERSION`, then Git tags. The clone is
 shallow, so tags are fetched separately (`git fetch --tags --depth=1`); a tag
 directly at `HEAD` wins, otherwise the newest version tag is used (stable
