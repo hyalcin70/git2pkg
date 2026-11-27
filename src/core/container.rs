@@ -2763,6 +2763,92 @@ fn is_prerelease(tag: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// Erkennt die Lizenz an den Lizenzdateien im Projektwurzelverzeichnis.
+///
+/// Viele Projekte deklarieren ihre Lizenz nur in `LICENSE`/`COPYING` und nicht
+/// in einem Manifest. Mehrere Treffer (duale Lizenz) werden in fester
+/// Reihenfolge mit ` OR ` verbunden.
+fn license_from_files(src: &Path) -> Option<String> {
+    let Ok(entries) = fs::read_dir(src) else {
+        return None;
+    };
+    let mut files: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_ascii_uppercase())
+                .unwrap_or_default();
+            name.starts_with("LICENSE")
+                || name.starts_with("LICENCE")
+                || name.starts_with("COPYING")
+                || name.starts_with("COPYRIGHT")
+        })
+        .collect();
+    files.sort();
+
+    let mut found: Vec<&'static str> = Vec::new();
+    for path in files.iter().take(6) {
+        let Ok(bytes) = fs::read(path) else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes[..bytes.len().min(8192)]).to_ascii_lowercase();
+        if let Some(id) = spdx_from_text(&text) {
+            if !found.contains(&id) {
+                found.push(id);
+            }
+        }
+    }
+    if found.is_empty() {
+        None
+    } else {
+        Some(found.join(" OR "))
+    }
+}
+
+fn spdx_from_text(text: &str) -> Option<&'static str> {
+    let has = |needle: &str| text.contains(needle);
+    if has("gnu affero general public license") && has("version 3") {
+        return Some("AGPL-3.0-or-later");
+    }
+    if has("gnu lesser general public license") && has("version 3") {
+        return Some("LGPL-3.0-or-later");
+    }
+    if has("gnu lesser general public license") && has("version 2.1") {
+        return Some("LGPL-2.1-or-later");
+    }
+    if has("gnu general public license") && has("version 3") {
+        return Some("GPL-3.0-or-later");
+    }
+    if has("gnu general public license") && has("version 2") {
+        return Some("GPL-2.0-or-later");
+    }
+    if has("apache license") && has("version 2.0") {
+        return Some("Apache-2.0");
+    }
+    if has("mozilla public license") && has("2.0") {
+        return Some("MPL-2.0");
+    }
+    if has("permission is hereby granted, free of charge") {
+        return Some("MIT");
+    }
+    if has("redistribution and use in source and binary forms") && has("neither the name") {
+        return Some("BSD-3-Clause");
+    }
+    if has("redistribution and use in source and binary forms") {
+        return Some("BSD-2-Clause");
+    }
+    if has("this is free and unencumbered software released into the public domain") {
+        return Some("Unlicense");
+    }
+    if has("isc license") {
+        return Some("ISC");
+    }
+    None
+}
+
 fn toml_string_field(text: &str, key: &str) -> Option<String> {
     let pattern = format!(r#"(?m)^\s*{}\s*=\s*"([^"]*)""#, regex::escape(key));
     Regex::new(&pattern)
@@ -2961,6 +3047,13 @@ fn project_identity(source_url: &str, src: &Path) -> ProjectIdentity {
             pyproject
                 .as_deref()
                 .and_then(|text| toml_string_field(text, "license"))
+        })
+        .or_else(|| {
+            if src.as_os_str().is_empty() {
+                None
+            } else {
+                license_from_files(src)
+            }
         })
         .unwrap_or_else(|| "unknown".to_string());
     let url = http_url(nfpm_url)
@@ -3929,6 +4022,63 @@ mod tests {
         );
         assert!(script.contains("if [ -f /work/src/x.py ] && [ -d /work/src/src/bootstrap ]"));
         assert!(script.contains("pacman -S --noconfirm --needed -- curl xz zlib openssl"));
+    }
+
+    #[test]
+    fn lizenz_wird_aus_lizenzdateien_erkannt() {
+        use std::fs;
+        let root = std::env::temp_dir().join(format!(
+            "g2p-license-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        // Keine Lizenzdatei -> None
+        assert_eq!(license_from_files(&root), None);
+
+        // Duale Lizenz: deterministisch in Dateinamen-Reihenfolge
+        fs::write(
+            root.join("LICENSE-APACHE"),
+            "Apache License\nVersion 2.0, January 2004\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("LICENSE-MIT"),
+            "MIT License\nPermission is hereby granted, free of charge, to any person\n",
+        )
+        .unwrap();
+        assert_eq!(
+            license_from_files(&root).as_deref(),
+            Some("Apache-2.0 OR MIT")
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn spdx_erkennt_die_haeufigsten_lizenzen() {
+        assert_eq!(
+            spdx_from_text("gnu general public license version 3"),
+            Some("GPL-3.0-or-later")
+        );
+        assert_eq!(
+            spdx_from_text("gnu lesser general public license version 3"),
+            Some("LGPL-3.0-or-later")
+        );
+        assert_eq!(
+            spdx_from_text("apache license version 2.0"),
+            Some("Apache-2.0")
+        );
+        assert_eq!(
+            spdx_from_text("permission is hereby granted, free of charge"),
+            Some("MIT")
+        );
+        assert_eq!(spdx_from_text("voellig unbekannter text"), None);
     }
 
     #[test]
