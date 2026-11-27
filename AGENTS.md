@@ -79,9 +79,14 @@ errors inside a CMake error block become CMakeModule/Header/Library entries,
 while `find_program`, explicit `command not found` and shell failures stay
 tools. A broken or empty version probe (`FinderBroken`) never penalizes a
 verified mapping: it switches to CMake config mode and sets `<Module>_DIR` when
-an installed config is found, without guessing package names. `CMAKE_PREFIX_PATH`
+an installed config is found, without guessing package names. A
+`Find<Name>.cmake` below `/usr/share/cmake` is CMake's own module and never a
+missing dependency; a finder installed by a package (OpenVDB ships one there)
+is valid evidence for that package. `CMAKE_PREFIX_PATH`
 is assembled at configure time from existing superbuild prefixes only; a
-nonexistent path must never be passed to CMake.
+nonexistent path must never be passed to CMake. An install counts as successful
+when the package is in the package database afterwards, even if a
+post-transaction hook returned a non-zero exit code.
 
 Strategy profiles marked "incomplete" are skipped, but if every strategy is
 marked for a repository the markers are cleared and one real attempt runs
