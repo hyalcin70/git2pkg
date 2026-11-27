@@ -425,6 +425,9 @@ impl FailureKind {
 /// Die MSRV des Projekts liegt ueber der rustc-Version der Distribution.
 fn is_toolchain_too_old(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
+    if lower.contains("lock file version") && lower.contains("next-lockfile-bump") {
+        return true;
+    }
     lower.contains("is not supported by the following packages")
         || lower.contains("requires rustc ")
         || lower.contains("minimum supported rust version")
@@ -1807,6 +1810,11 @@ pub fn detect_repo_script_distro_rejection(output: &str) -> bool {
 /// `package ... cannot be built because it requires rustc 1.89.0`.
 pub fn detect_outdated_rustc(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
+    // Ein zu altes Cargo versteht moderne Lockfiles nicht (Version 4 braucht
+    // Cargo >= 1.78). Das ist derselbe Fall wie eine zu alte rustc.
+    if lower.contains("lock file version") && lower.contains("next-lockfile-bump") {
+        return true;
+    }
     if !lower.contains("rustc") {
         return false;
     }
@@ -3382,6 +3390,18 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
 
         let plain = candidate_names(&MissingDep::PkgConfig("zlib".to_string()), "pacman");
         assert!(plain.iter().any(|name| name == "libzlib"), "{plain:?}");
+    }
+
+    #[test]
+    fn altes_cargo_wegen_lockfile_wird_erkannt() {
+        let output = "error: failed to parse lock file at: /work/src/Cargo.lock\n\
+                      Caused by:\n  lock file version 4 requires `-Znext-lockfile-bump`";
+        assert!(detect_outdated_rustc(output));
+        assert!(is_toolchain_too_old(output));
+        assert_eq!(classify_failure(output), FailureKind::Toolchain);
+        assert!(detect_build_fixes(output)
+            .iter()
+            .any(|fix| fix.key == "rustup_toolchain"));
     }
 
     #[test]
