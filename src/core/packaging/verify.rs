@@ -162,29 +162,43 @@ pub fn desktop_entry_command(kind: &str, path: &str) -> String {
 
 /// Liest die Programmnamen aus den `Exec=`-Zeilen von Desktop-Dateien.
 pub fn desktop_exec_names(text: &str) -> Vec<String> {
+    // Huelle-Programme, die selbst nicht im Paket liegen muessen.
+    const WRAPPERS: &[&str] = &["env", "sh", "bash", "dash", "zsh", "exec", "nohup"];
     let mut names = Vec::new();
     for line in text.lines() {
         let Some(value) = line.trim().strip_prefix("Exec=") else {
             continue;
         };
-        let mut tokens = value.split_whitespace();
-        let mut token = tokens.next().unwrap_or("");
-        if token == "env" {
-            token = tokens
-                .find(|candidate| !candidate.contains('='))
-                .unwrap_or("");
+        // Eintraege wie `Exec=/bin/sh -c "$SHELL -i -c scrcpy"` nennen das
+        // eigentliche Programm erst hinter der Shell. Deshalb wird der erste
+        // plausible Programmtoken gesucht, nicht nur der erste Token.
+        let mut found: Option<String> = None;
+        for raw in value.split_whitespace() {
+            let token = raw
+                .trim_matches(|c| c == '"' || c == '\'')
+                .trim_start_matches('\\');
+            if token.is_empty()
+                || token.starts_with('-')
+                || token.starts_with('$')
+                || token.contains('=')
+            {
+                continue;
+            }
+            let name = Path::new(token)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(token)
+                .to_ascii_lowercase();
+            if name.is_empty() || WRAPPERS.contains(&name.as_str()) {
+                continue;
+            }
+            found = Some(name);
+            break;
         }
-        let token = token.trim_matches(|c| c == '"' || c == '\'');
-        if token.is_empty() || token.starts_with('-') || matches!(token, "env" | "sh" | "bash") {
-            continue;
-        }
-        let name = Path::new(token)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(token)
-            .to_ascii_lowercase();
-        if !name.is_empty() && !names.contains(&name) {
-            names.push(name);
+        if let Some(name) = found {
+            if !names.contains(&name) {
+                names.push(name);
+            }
         }
     }
     names
@@ -330,6 +344,32 @@ pub fn verify_built_packages(
 }
 
 #[cfg(test)]
+mod exec_tests {
+    use super::desktop_exec_names;
+
+    #[test]
+    fn exec_hinter_shell_wird_erkannt() {
+        let text = "Name=scrcpy\nExec=/bin/sh -c \"\\$SHELL -i -c scrcpy\"\n";
+        assert_eq!(desktop_exec_names(text), vec!["scrcpy".to_string()]);
+
+        let console = "Exec=/bin/sh -c \"\\$SHELL -i -c 'scrcpy --pause-on-exit=if-error'\"\n";
+        assert_eq!(desktop_exec_names(console), vec!["scrcpy".to_string()]);
+    }
+
+    #[test]
+    fn exec_mit_env_und_pfad_wird_erkannt() {
+        assert_eq!(
+            desktop_exec_names("Exec=env LC_ALL=C /usr/bin/sample-tool --run\n"),
+            vec!["sample-tool".to_string()]
+        );
+        assert_eq!(
+            desktop_exec_names("Exec=example-app %f\n"),
+            vec!["example-app".to_string()]
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -399,7 +439,11 @@ mod tests {
             vec!["app", "other"]
         );
         assert!(desktop_exec_names("Name=App\nIcon=app\n").is_empty());
-        assert!(desktop_exec_names("Exec=sh -c 'app'\n").is_empty());
+        // Hinter einer Shell steht das eigentliche Programm.
+        assert_eq!(
+            desktop_exec_names("Exec=sh -c 'app'\n"),
+            vec!["app".to_string()]
+        );
     }
 
     #[test]
