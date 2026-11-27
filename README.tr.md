@@ -103,6 +103,11 @@ kullanılabiliyor.
   derlemeyi net bir sürüm/ABI tanısıyla hemen durdurur.
 - Yerel paketler: `.pkg.tar.zst` (Arch; doğrudan üretilir, depoda varsa
   `PKGBUILD` ile `makepkg`), `.deb` (Debian/Ubuntu), `.rpm` (Fedora/openSUSE).
+  Kendi `debian/` veya `*.spec` dosyasını içeren projeler bu tarifle
+  `dpkg-buildpackage`/`rpmbuild` üzerinden paketlenir.
+- İsteğe bağlı hazır builder imajları (`packaging/builders/build.sh`) her
+  dağıtım için tam araç zincirini sağlar ve tekrarlanan derlemeleri birkaç kat
+  hızlandırır; onlar olmadan her şey eskisi gibi çalışır.
 - **Çıktı klasörü**: sonuçlar varsayılan olarak `~/Downloads/git2pkg` içine
   yazılır. GUI'deki yerel klasör seçici (`rfd`) veya doğrudan yol girişiyle
   değiştirilebilir.

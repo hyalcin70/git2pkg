@@ -103,7 +103,12 @@ per GUI nutzbar.
   klaren Versions-/ABI-Diagnose statt weiterer Zufallsversuche.
 - Native Pakete: `.pkg.tar.zst` (Arch; direkt erzeugt, vorhandenes `PKGBUILD`
   über `makepkg`), `.deb` (Debian/Ubuntu via `dpkg-deb`), `.rpm`
-  (Fedora/openSUSE via `rpmbuild`).
+  (Fedora/openSUSE via `rpmbuild`). Projekte mit eigenem `debian/` oder
+  `*.spec` werden mit `dpkg-buildpackage`/`rpmbuild` nach deren Rezept
+  paketiert.
+- Optionale vorgebaute Builder-Images (`packaging/builders/build.sh`) bringen
+  die komplette Toolchain je Distribution und beschleunigen wiederholte Builds
+  um ein Mehrfaches; ohne sie funktioniert alles wie bisher.
 - **Ausgabeordner**: Fertige Artefakte landen standardmäßig in
   `~/Downloads/git2pkg`. Die GUI bietet einen nativen Ordnerdialog (`rfd`)
   oder die direkte Eingabe eines Pfads.

@@ -106,7 +106,11 @@ utilizable desde una interfaz gráfica sencilla.
   de probar paquetes al azar.
 - Paquetes nativos: `.pkg.tar.zst` (Arch; generado directamente, `PKGBUILD` del
   repositorio mediante `makepkg` si existe), `.deb` (Debian/Ubuntu), `.rpm`
-  (Fedora/openSUSE).
+  (Fedora/openSUSE). Los proyectos que incluyen su propio `debian/` o `*.spec`
+  se empaquetan con `dpkg-buildpackage`/`rpmbuild` usando esa receta.
+- Imágenes de compilación opcionales (`packaging/builders/build.sh`) aportan la
+  cadena de herramientas completa de cada distribución y aceleran varias veces
+  las compilaciones repetidas; sin ellas todo funciona como antes.
 - **Carpeta de salida**: los resultados van a `~/Downloads/git2pkg` por defecto.
   Cámbiela en la GUI con el selector nativo (`rfd`) o escribiendo una ruta.
 - Acciones de resultado: abrir la carpeta de salida, guardar la receta de

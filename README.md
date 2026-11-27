@@ -97,7 +97,11 @@ simple GUI.
   diagnosis instead of trying random packages.
 - Native packages: `.pkg.tar.zst` (Arch; assembled directly, in-tree `PKGBUILD`
   via `makepkg` when present), `.deb` (Debian/Ubuntu, via `dpkg-deb`), `.rpm`
-  (Fedora/openSUSE, via `rpmbuild`).
+  (Fedora/openSUSE, via `rpmbuild`). Projects that ship their own `debian/` or
+  `*.spec` are packaged with `dpkg-buildpackage`/`rpmbuild` using that recipe.
+- Optional prebuilt builder images (`packaging/builders/build.sh`) carry the
+  complete toolchain for each distribution and make repeated builds several
+  times faster; without them everything works as before.
 - **Output folder**: finished artifacts land in `~/Downloads/git2pkg` by default.
   Change it in the GUI with the native folder picker (`rfd`) or type a path.
 - Result actions: open the output folder, save the build recipe, and see the
