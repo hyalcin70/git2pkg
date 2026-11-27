@@ -127,7 +127,11 @@ Fedora/openSUSE) so installed files land where packages expect them and
 binaries can find their libraries. Packages that contain executables under
 `usr/bin` drop development-only artifacts afterwards (`usr/include`, `*.a`,
 `*.pc`); such files almost always come from vendored libraries (for example an
-embedded test framework) and belong in a separate -dev package. Project versions are read from Cargo, CMake,
+embedded test framework) and belong in a separate -dev package. Projects that ship their own `debian/`
+directory are packaged with `dpkg-buildpackage` using that recipe - package
+name and version come from `debian/control` and `debian/changelog`, and
+`dh` handles layout, `Depends` and documentation. If that fails (for example
+missing build dependencies), the generated path runs unchanged. Project versions are read from Cargo, CMake,
 `pyproject.toml`, `AC_INIT`/`PACKAGE_VERSION`, then Git tags. The clone is
 shallow, so tags are fetched separately (`git fetch --tags --depth=1`); a tag
 directly at `HEAD` wins, otherwise the newest version tag is used (stable

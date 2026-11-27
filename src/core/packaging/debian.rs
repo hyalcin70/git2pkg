@@ -4,6 +4,46 @@ use super::{line_echo, metadata_line, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![line_echo("[pkg] building Debian package")];
+    // Bringt das Projekt seine eigene Debian-Paketierung mit, uebernimmt
+    // `dpkg-buildpackage` mit *seinem* Rezept: Dateilayout, Abhaengigkeiten und
+    // Doku-Regeln kommen dann von dh statt von unseren generierten Schritten.
+    // Schlaegt das fehl (z. B. fehlende Build-Depends), laeuft der generische
+    // Weg unveraendert weiter.
+    let name = ctx.name.replace('\'', "'\\''");
+    let ok_marker = crate::core::container::OK_MARKER;
+    lines.push(format!(
+        r#"if [ -f /work/src/debian/control ] && [ -f /work/src/debian/rules ]; then
+  echo '[pkg] in-tree Debian packaging detected - using dpkg-buildpackage' >&2
+  package='{name}'
+  if ( cd /work/src && dpkg-buildpackage -b -us -uc -tc >/dev/null 2>&1 ); then
+    for candidate in /work/*.deb; do
+      case "$candidate" in *-dbgsym_*|*-dbg_*|*.ddeb) continue;; esac
+      case "$(basename "$candidate")" in
+        "$package"_*)
+          if dpkg-deb -c "$candidate" 2>/dev/null | grep -qE 'usr/(bin|lib|lib64)/'; then
+            cp "$candidate" /work/dist/
+            echo "[pkg] native package: $(basename "$candidate")" >&2
+            echo '{ok_marker}'
+            exit 0
+          fi
+          echo '__GIT2PKG_EMPTY_PACKAGE__' >&2
+          exit 1
+          ;;
+      esac
+    done
+    for candidate in /work/*.deb; do
+      case "$candidate" in *-dbgsym_*|*-dbg_*|*.ddeb) continue;; esac
+      if dpkg-deb -c "$candidate" 2>/dev/null | grep -qE 'usr/(bin|lib|lib64)/'; then
+        cp "$candidate" /work/dist/
+        echo "[pkg] native package: $(basename "$candidate")" >&2
+        echo '{ok_marker}'
+        exit 0
+      fi
+    done
+  fi
+  echo '[pkg] in-tree packaging failed - using the generated build' >&2
+fi"#
+    ));
     lines.push(super::run_step(&format!(
         "cd /work/src && {}",
         ctx.build_step
@@ -61,6 +101,30 @@ mod tests {
     use crate::core::container::BuildStrategy;
     use crate::core::distro::DistroFamily;
     use crate::core::packaging::PackageArch;
+
+    #[test]
+    fn eigenes_debian_verzeichnis_nutzt_dpkg_buildpackage() {
+        let ctx = PackageContext {
+            name: "example-app",
+            version: "1.0.0",
+            family: &DistroFamily::Debian,
+            strategy: BuildStrategy::Default,
+            has_pkgbuild: false,
+            arch: PackageArch::Amd64,
+            description: "Example application",
+            license: "MIT",
+            url: "https://example.invalid/app",
+            build_step: "true",
+            install_step: "true",
+            asset_step: "true",
+        };
+        let script = script(&ctx).join("\n");
+        assert!(script.contains("[ -f /work/src/debian/control ]"));
+        assert!(script.contains("dpkg-buildpackage -b -us -uc -tc"));
+        assert!(script.contains("in-tree packaging failed - using the generated build"));
+        assert!(script.contains("cp \"$candidate\" /work/dist/"));
+        assert!(script.contains("*-dbgsym_*|*-dbg_*|*.ddeb"));
+    }
 
     #[test]
     fn control_enthaelt_dynamic_depends() {

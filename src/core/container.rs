@@ -28,7 +28,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const OK_MARKER: &str = "__GIT2PKG_BUILD_OK__";
+pub(crate) const OK_MARKER: &str = "__GIT2PKG_BUILD_OK__";
 const DEPS_FAILURE_MARKER: &str = "[deps] build failed";
 
 fn deps_fallback_needed(output: &str, skip_deps: bool) -> bool {
@@ -2973,9 +2973,32 @@ fn http_url(value: Option<String>) -> Option<String> {
     value.filter(|url| url.starts_with("https://") || url.starts_with("http://"))
 }
 
+/// Paketname aus `debian/control` (`Source:` zuerst, dann `Package:`).
+fn debian_package_name(text: &str) -> Option<String> {
+    let re = Regex::new(r"(?m)^(?:Source|Package):\s*([A-Za-z0-9][A-Za-z0-9+.-]*)").ok()?;
+    re.captures(text).map(|caps| caps[1].to_string())
+}
+
+/// Version aus der ersten Zeile von `debian/changelog`.
+fn debian_changelog_version(text: &str) -> Option<String> {
+    let first = text.lines().next()?;
+    let re = Regex::new(r"^\S+\s+\(([^)]+)\)").ok()?;
+    re.captures(first).map(|caps| caps[1].to_string())
+}
+
 fn project_identity(source_url: &str, src: &Path) -> ProjectIdentity {
-    let name = repo_name_from_url(source_url)
+    // Bringt das Projekt eine eigene Debian-Paketierung mit, sind deren Angaben
+    // verbindlich - so heisst das Paket wie beim Distributions-Paketbauer.
+    let debian_name = if src.as_os_str().is_empty() {
+        None
+    } else {
+        fs::read_to_string(src.join("debian/control"))
+            .ok()
+            .and_then(|text| debian_package_name(&text))
+    };
+    let name = debian_name
         .map(|raw| package_slug(&raw))
+        .or_else(|| repo_name_from_url(source_url).map(|raw| package_slug(&raw)))
         .unwrap_or_else(|| "app".to_string());
     let version = if src.as_os_str().is_empty() {
         None
@@ -2994,7 +3017,11 @@ fn project_identity(source_url: &str, src: &Path) -> ProjectIdentity {
                 .ok()
                 .and_then(|text| autotools_version(&text))
         });
-        from_cargo
+        let from_debian = fs::read_to_string(src.join("debian/changelog"))
+            .ok()
+            .and_then(|text| debian_changelog_version(&text));
+        from_debian
+            .or(from_cargo)
             .or(from_cmake)
             .or(from_python)
             .or(from_autotools)
@@ -4025,6 +4052,27 @@ mod tests {
     }
 
     #[test]
+    fn debian_metadaten_werden_gelesen() {
+        assert_eq!(
+            debian_package_name("Source: example-app\nPackage: example-app\n").as_deref(),
+            Some("example-app")
+        );
+        assert_eq!(
+            debian_package_name("Package: sample-tool\n").as_deref(),
+            Some("sample-tool")
+        );
+        assert_eq!(debian_package_name("kein control"), None);
+        assert_eq!(
+            debian_changelog_version(
+                "example-app (1.4.2-1) unstable; urgency=medium\n\n  * test\n"
+            )
+            .as_deref(),
+            Some("1.4.2-1")
+        );
+        assert_eq!(debian_changelog_version("kaputt"), None);
+    }
+
+    #[test]
     fn lizenz_wird_aus_lizenzdateien_erkannt() {
         use std::fs;
         let root = std::env::temp_dir().join(format!(
@@ -5004,7 +5052,9 @@ mod tests {
             let check = script
                 .find("__GIT2PKG_NO_ARTIFACT__")
                 .expect("artefaktcheck");
-            let ok = script.find(OK_MARKER).expect("ok-marker");
+            // Der Marker kann mehrfach vorkommen (nativer Debian-Pfad); der
+            // generische Pfad endet mit dem letzten Vorkommen.
+            let ok = script.rfind(OK_MARKER).expect("ok-marker");
             assert!(check < ok, "{:?}: check muss vor OK stehen", family);
             let empty = script
                 .find("__GIT2PKG_EMPTY_PACKAGE__")
