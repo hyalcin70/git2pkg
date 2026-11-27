@@ -427,6 +427,14 @@ Current release: `v0.2.0-alpha.35`.
   addition to Git URLs. Read version and metadata from project manifests; do not
   assume Git tags, submodules or LFS. CLI first, GUI path picker later. No
   project names or special cases in code.
+- **Noted for later (target versions):** a build for a foreign distribution can
+  only match that distribution's ABI. The planned extension is an explicit
+  target release (`--target=ubuntu:24.04`, `--target=debian:13`), while the
+  default keeps following the host version. Per-release packages are the native
+  way; a single package for many glibc versions is not attempted (an ABI floor
+  via `cargo zigbuild` is only realistic for statically linked Rust binaries).
+  Never lower `Depends: libc6` cosmetically - that produces packages that
+  install and then crash.
 - **`v0.2.0-rc.1` → `v1.0.0`**: release candidate, then official support start.
 
 When updating this roadmap, keep the current version at the top accurate.
