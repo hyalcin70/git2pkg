@@ -576,8 +576,18 @@ fn builder_image_name(family: &DistroFamily) -> String {
 }
 
 /// Waehlt das Builder-Image, wenn es lokal vorhanden ist, sonst das Basis-Image.
+///
+/// Ein versionsgebundenes Basis-Image (z. B. `ubuntu:24.04` fuer Mint) darf
+/// nicht durch ein familienweites Builder-Image ersetzt werden - dessen glibc
+/// waere die des `latest`-Images und damit zu neu fuer den Host.
 fn choose_build_image(config: &BuildConfig, base_image: &str) -> String {
-    let builder = builder_image_name(&config.target_distro.info(&config.distro).family);
+    let info = config.target_distro.info(&config.distro);
+    let family_default =
+        crate::core::distro::DistroInfo::for_family(info.family.clone()).base_image;
+    if base_image != family_default {
+        return base_image.to_string();
+    }
+    let builder = builder_image_name(&info.family);
     if !builder.is_empty() && local_image_exists(&config.engine, &builder) {
         return builder;
     }

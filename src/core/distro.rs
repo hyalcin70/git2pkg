@@ -78,7 +78,14 @@ impl DistroInfo {
         let content = fs::read_to_string("/etc/os-release")
             .or_else(|_| fs::read_to_string("/usr/lib/os-release"))
             .unwrap_or_default();
-        Self::from_os_release(&content)
+        let mut info = Self::from_os_release(&content);
+        // Das Build-Image folgt der Host-Version: ein Paket, das gegen eine
+        // neuere glibc gebaut wurde, laesst sich auf dem Host nicht
+        // installieren (Mint 22.3 = Ubuntu 24.04, nicht ubuntu:latest).
+        if let Some(image) = pinned_image(&content, upstream_ubuntu_version().as_deref()) {
+            info.base_image = image;
+        }
+        info
     }
 
     /// Synthetische Distro-Info für ein explizites Ziel (Cross-Build).
@@ -184,6 +191,90 @@ fn classify(id: &str, id_like: &[String]) -> DistroFamily {
         DistroFamily::Fedora
     } else {
         DistroFamily::Unknown
+    }
+}
+
+/// Wert eines Schluessels aus einer `key=value`-Datei (os-release, lsb-release).
+fn release_value(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let line = line.trim();
+        let rest = line.strip_prefix(key)?;
+        let value = rest.strip_prefix('=')?;
+        let value = unquote(value).trim().to_string();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
+}
+
+/// Liest die Ubuntu-Basisversion von Mint (`/etc/upstream-release/lsb-release`).
+fn upstream_ubuntu_version() -> Option<String> {
+    let content = fs::read_to_string("/etc/upstream-release/lsb-release").ok()?;
+    release_value(&content, "DISTRIB_RELEASE")
+}
+
+/// Bild-Tag, das zur Host-Distribution und -Version passt.
+///
+/// Rolling-Release-Distributionen bleiben bei `latest`; feste Releases werden
+/// auf ihre eigene Version gepinnt, damit der Build dieselbe glibc und
+/// dieselben Bibliotheksversionen sieht wie der Host.
+fn pinned_image(os_release: &str, upstream_version: Option<&str>) -> Option<String> {
+    let id = release_value(os_release, "ID")?.to_ascii_lowercase();
+    let version = release_value(os_release, "VERSION_ID");
+    match id.as_str() {
+        "debian" => version
+            .filter(|value| value.chars().next().is_some_and(|c| c.is_ascii_digit()))
+            .map(|value| format!("debian:{value}")),
+        "ubuntu" => version.map(|value| format!("ubuntu:{value}")),
+        // Mint ist Ubuntu-basiert und hat keine eigenen Images.
+        "linuxmint" | "lmde" => upstream_version.map(|value| format!("ubuntu:{value}")),
+        "fedora" => version.map(|value| format!("fedora:{value}")),
+        "opensuse-leap" | "opensuse" => version
+            .filter(|value| value.chars().next().is_some_and(|c| c.is_ascii_digit()))
+            .map(|value| format!("opensuse/leap:{value}")),
+        // Rolling: arch, cachyos, tumbleweed, endeavouros, ...
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::pinned_image;
+
+    #[test]
+    fn bild_folgt_der_host_version() {
+        let debian = "ID=debian\nVERSION_ID=\"13\"\n";
+        assert_eq!(pinned_image(debian, None).as_deref(), Some("debian:13"));
+
+        let ubuntu = "ID=ubuntu\nVERSION_ID=\"26.10\"\n";
+        assert_eq!(pinned_image(ubuntu, None).as_deref(), Some("ubuntu:26.10"));
+
+        // Mint hat kein eigenes Image: die Ubuntu-Basis zaehlt.
+        let mint = "ID=linuxmint\nVERSION_ID=\"22.3\"\n";
+        assert_eq!(
+            pinned_image(mint, Some("24.04")).as_deref(),
+            Some("ubuntu:24.04")
+        );
+        // Ohne upstream-Angabe bleibt das Standard-Image.
+        assert_eq!(pinned_image(mint, None), None);
+
+        let fedora = "ID=fedora\nVERSION_ID=45\n";
+        assert_eq!(pinned_image(fedora, None).as_deref(), Some("fedora:45"));
+
+        let leap = "ID=\"opensuse-leap\"\nVERSION_ID=\"16.1\"\n";
+        assert_eq!(
+            pinned_image(leap, None).as_deref(),
+            Some("opensuse/leap:16.1")
+        );
+
+        // Rolling-Release bleibt bei latest.
+        let arch = "ID=arch\n";
+        assert_eq!(pinned_image(arch, None), None);
+        let cachy = "ID=cachyos\nID_LIKE=arch\n";
+        assert_eq!(pinned_image(cachy, None), None);
+        assert_eq!(pinned_image("", None), None);
     }
 }
 

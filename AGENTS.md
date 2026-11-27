@@ -150,6 +150,14 @@ shallow, so tags are fetched separately (`git fetch --tags --depth=1`); a tag
 directly at `HEAD` wins, otherwise the newest version tag is used (stable
 releases before alpha/beta/rc). Untagged checkouts fall back to `0.1.0`.
 
+The container image follows the host distribution **and its version**: Debian 13
+builds in `debian:13`, Ubuntu 26.10 in `ubuntu:26.10`, Linux Mint in its upstream
+Ubuntu release (`/etc/upstream-release/lsb-release`), Fedora in `fedora:<version>`,
+openSUSE Leap in `opensuse/leap:<version>`. Rolling releases stay on `latest`.
+Otherwise a package built against a newer glibc cannot be installed on the host
+(Mint 22.3 = Ubuntu 24.04, while `ubuntu:latest` already had glibc 2.43).
+Version-pinned images are never replaced by a family builder image.
+
 Optional prebuilt builder images (`git2pkg-builder:arch`, `:debian`,
 `:fedora`, `:suse`) carry the complete toolchain and are built with
 `packaging/builders/build.sh`. When one exists locally, git2pkg uses it
