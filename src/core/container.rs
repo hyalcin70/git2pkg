@@ -166,7 +166,7 @@ impl BuildContainer {
             "--name".to_string(),
             name.clone(),
             "-v".to_string(),
-            format!("{}:/work", work.to_string_lossy()),
+            workspace_mount(work),
             "-w".to_string(),
             "/work".to_string(),
             choose_build_image(
@@ -542,7 +542,7 @@ pub fn cleanup_all_builds() -> usize {
 /// Shell-Kommando für den Fall, dass root-eigene Dateien im Build-Cache liegen.
 fn container_cleanup_args(builds: &Path, image: &str) -> (String, Vec<String>) {
     let script = "rm -rf /cleanup/* /cleanup/.[!.]* /cleanup/..?*";
-    let mount = format!("{}:/cleanup", builds.display());
+    let mount = format!("{}:/cleanup:z", builds.display());
     (
         "docker".to_string(),
         vec![
@@ -592,6 +592,14 @@ fn choose_build_image(config: &BuildConfig, base_image: &str) -> String {
         return builder;
     }
     base_image.to_string()
+}
+
+/// Bind-Mount des Arbeitsverzeichnisses. Das `:z` relabelt die Dateien fuer
+/// SELinux (Standard auf openSUSE Tumbleweed und Fedora); ohne das Flag
+/// scheitert `/work/build.sh` mit "Permission denied" und Exit-Code 126.
+/// Auf Hosts ohne SELinux ignoriert Docker das Suffix.
+fn workspace_mount(work: &Path) -> String {
+    format!("{}:/work:z", work.display())
 }
 
 fn local_image_exists(engine: &ContainerEngine, image: &str) -> bool {
@@ -4360,6 +4368,12 @@ mod tests {
     }
 
     #[test]
+    fn arbeitsverzeichnis_wird_fuer_selinux_relabelt() {
+        let mount = workspace_mount(std::path::Path::new("/home/user/.cache/git2pkg/builds/x"));
+        assert!(mount.ends_with(":/work:z"), "{mount}");
+    }
+
+    #[test]
     fn anwendungspakete_verlieren_entwicklungsdateien() {
         let step = project_install_step(&BuildSystem::CMake, "example-app");
         assert!(step.contains("rm -rf \"$pkgdir/usr/include\""));
@@ -5844,7 +5858,7 @@ mod tests {
         assert_eq!(program, "docker");
         assert_eq!(args[0], "run");
         assert_eq!(args[1], "--rm");
-        assert_eq!(args[3], "/tmp/example-builds:/cleanup");
+        assert_eq!(args[3], "/tmp/example-builds:/cleanup:z");
         assert_eq!(args[4], "example-image:latest");
         assert!(args[7].contains("rm -rf /cleanup/*"));
     }
