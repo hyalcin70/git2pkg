@@ -83,6 +83,8 @@ pub struct Git2PkgApp {
     step: String,
     building: bool,
     build_attempt: u32,
+    /// Versuch, dessen Log der Nutzer bereits manuell gespeichert hat.
+    manual_log_saved_attempt: Option<u32>,
     cancel_flag: Arc<AtomicBool>,
     container_id: Arc<Mutex<Option<String>>>,
     receiver: Option<Receiver<BuildEvent>>,
@@ -125,7 +127,7 @@ fn unique_log_path(dir: &Path, attempt: u32) -> PathBuf {
     let base = suggested_log_filename(attempt);
     let stem = base.strip_suffix(".log").unwrap_or(&base);
     let mut path = dir.join(&base);
-    let mut index = 1;
+    let mut index = 2;
     while path.exists() {
         path = dir.join(format!("{}-{}.log", stem, index));
         index += 1;
@@ -279,6 +281,7 @@ impl Git2PkgApp {
             step: String::new(),
             building: false,
             build_attempt: 1,
+            manual_log_saved_attempt: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             container_id: Arc::new(Mutex::new(None)),
             receiver: None,
@@ -412,6 +415,7 @@ impl Git2PkgApp {
 
     fn start_build(&mut self) {
         self.build_attempt = 1;
+        self.manual_log_saved_attempt = None;
         self.last_workspace = None;
         let url = self.url.trim().to_string();
         self.start_build_with(url, BuildStrategy::Default);
@@ -428,7 +432,13 @@ impl Git2PkgApp {
             return;
         };
         let strategy = self.next_strategy;
-        let saved = self.save_current_log();
+        // Wurde das Log fuer diesen Versuch schon manuell gesichert, entsteht
+        // keine zweite, inhaltsgleiche Datei.
+        let saved = if self.manual_log_saved_attempt == Some(self.build_attempt) {
+            None
+        } else {
+            self.save_current_log()
+        };
         self.build_attempt = self.build_attempt.saturating_add(1);
         self.start_build_with(url, strategy);
         match saved {
@@ -1750,6 +1760,7 @@ impl eframe::App for Git2PkgApp {
                         match fs::write(&path, log_text.as_bytes()) {
                             Ok(()) => {
                                 self.last_log_dir = path.parent().map(Path::to_path_buf);
+                                self.manual_log_saved_attempt = Some(self.build_attempt);
                                 self.persist_settings();
                                 self.hint = Some(
                                     texts.log_saved().replace("{}", &path.display().to_string()),
@@ -1995,6 +2006,26 @@ mod tests {
     }
 
     #[test]
+    fn log_nummerierung_bleibt_einstellig() {
+        let dir = std::env::temp_dir().join(format!(
+            "git2pkg-log-number-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let first = save_log_to(&dir, 1, "a").unwrap();
+        let second = save_log_to(&dir, 1, "b").unwrap();
+        let third = save_log_to(&dir, 1, "c").unwrap();
+        assert!(first.ends_with("git2pkg-build-1.log"));
+        assert!(second.ends_with("git2pkg-build-1-2.log"));
+        assert!(third.ends_with("git2pkg-build-1-3.log"));
+        assert!(!second.display().to_string().contains("-1-1"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn fehlgeschlagenes_log_wird_kollisionsfrei_gespeichert() {
         let dir = std::env::temp_dir().join(format!(
             "git2pkg-log-save-{}-{}",
@@ -2007,7 +2038,7 @@ mod tests {
         let first = save_log_to(&dir, 1, "erster Versuch").unwrap();
         let second = save_log_to(&dir, 1, "zweiter Versuch").unwrap();
         assert!(first.ends_with("git2pkg-build-1.log"));
-        assert!(second.ends_with("git2pkg-build-1-1.log"));
+        assert!(second.ends_with("git2pkg-build-1-2.log"));
         assert_eq!(fs::read_to_string(&first).unwrap(), "erster Versuch");
         assert_eq!(fs::read_to_string(&second).unwrap(), "zweiter Versuch");
         let _ = fs::remove_dir_all(dir);
