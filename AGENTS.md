@@ -232,7 +232,7 @@ for them.
 
 ---
 
-## 3. Repository Map (as of `v0.2.0-alpha.35`)
+## 3. Repository Map (as of `v0.2.0-alpha.36`)
 
 ### Entry points
 
@@ -418,11 +418,11 @@ Documentation-only commits do **not** require a version bump or release tag.
 
 ---
 
-## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.35`)
+## 6. Current Milestone & Roadmap (as of `v0.2.0-alpha.36`)
 
-Current release: `v0.2.0-alpha.35`.
+Current release: `v0.2.0-alpha.36`.
 
-- **`v0.2.0-alpha.21` → `v0.2.0-alpha.35`**: hardening tests on CachyOS —
+- **`v0.2.0-alpha.21` → `v0.2.0-alpha.36`**: hardening tests on CachyOS —
   C++/CMake superbuilds, Meson/C projects and Go projects. Fix real failures
   generically; never hardcode application or project names into the code.
 - **`v0.2.0-beta.1`**: feature freeze and a fresh VM test round —

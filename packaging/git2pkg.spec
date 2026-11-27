@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           git2pkg
-Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.35}
+Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.36}
 Release:        1%{?dist}
 Summary:        Isolated package builder from Git repositories
 License:        GPL-3.0-or-later
@@ -48,6 +48,13 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %license LICENSE
 
 %changelog
+* Fri Nov 27 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.36-1
+- Build in the host distribution's own version (glibc compatibility).
+- Relabel the workspace mount for SELinux (openSUSE/Fedora).
+- Heal an outdated rustc (lock file version 4) and an outdated g++.
+- Fix ABI misclassification, CMake module lookup and verification.
+- Never stage badges as the app icon; no duplicate log files.
+
 * Fri Nov 27 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.35-1
 - Optional prebuilt builder images per distribution (git2pkg-builder:*).
 - Native packaging through the project's own debian/ or *.spec.

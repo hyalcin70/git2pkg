@@ -1,3 +1,13 @@
+git2pkg (0.2.0~alpha.36) unstable; urgency=medium
+
+  * Build in the host distribution's own version for glibc compatibility.
+  * Relabel the workspace mount for SELinux hosts.
+  * Heal an outdated rustc (lock file version 4) and an outdated g++.
+  * Fix ABI misclassification and CMake module verification.
+  * Never stage badges as the app icon; no duplicate log files.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Fri, 27 Nov 2026 20:10:00 +0100
+
 git2pkg (0.2.0~alpha.35) unstable; urgency=medium
 
   * Optional prebuilt builder images per distribution.
