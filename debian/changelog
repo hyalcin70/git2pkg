@@ -1,3 +1,13 @@
+git2pkg (0.2.0~alpha.35) unstable; urgency=medium
+
+  * Optional prebuilt builder images per distribution.
+  * Native packaging through the project's own debian/ or *.spec.
+  * CMake installs under /usr, versions from git tags, license detection.
+  * Clear failure diagnoses and an in-run toolchain heal.
+  * Shallow submodules, direct DT_NEEDED dependencies for Arch.
+
+ -- Hakan Yalçın <hyalcin70@github.com>  Fri, 27 Nov 2026 15:45:00 +0100
+
 git2pkg (0.2.0~alpha.34) unstable; urgency=medium
 
   * Build only the Cargo binaries selected by the project packaging manifest.

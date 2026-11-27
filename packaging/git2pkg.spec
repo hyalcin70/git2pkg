@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           git2pkg
-Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.34}
+Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.35}
 Release:        1%{?dist}
 Summary:        Isolated package builder from Git repositories
 License:        GPL-3.0-or-later
@@ -48,6 +48,13 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %license LICENSE
 
 %changelog
+* Fri Nov 27 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.35-1
+- Optional prebuilt builder images per distribution (git2pkg-builder:*).
+- Native packaging through the project's own debian/ or *.spec.
+- CMake installs under /usr; versions from git tags; license from LICENSE files.
+- Clear failure diagnoses, in-run toolchain heal, shallow submodules.
+- Only direct DT_NEEDED libraries as Arch dependencies.
+
 * Tue Nov 24 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.34-1
 - Build only the Cargo binaries selected by the project packaging manifest.
 - Document that source-archive input is deferred to beta.1.
