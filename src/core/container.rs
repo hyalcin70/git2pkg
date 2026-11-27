@@ -1546,9 +1546,38 @@ fn try_install(
         return false;
     }
     match container.exec(&command, tx) {
-        Ok(output) => output.success,
-        Err(_) => false,
+        Ok(output) if output.success => true,
+        // Paketmanager-Hooks (z. B. `ConditionNeedsUpdate` unter Arch oder
+        // ldconfig unter Debian) koennen den Exit-Code verfaelschen. Wenn das
+        // Paket danach installiert ist, gilt die Installation als Erfolg.
+        _ => package_is_installed(container, &target.package_manager, package, tx),
     }
+}
+
+/// Prueft, ob ein Paket im Container installiert ist - unabhaengig davon, was
+/// der Installationsbefehl fuer einen Exit-Code geliefert hat.
+fn package_is_installed(
+    container: &BuildContainer,
+    package_manager: &str,
+    package: &str,
+    tx: &Sender<BuildEvent>,
+) -> bool {
+    if !valid_package_name(package) {
+        return false;
+    }
+    let command = match package_manager {
+        "pacman" => format!("pacman -Q {} 2>/dev/null", shell_quote(package)),
+        "apt" => format!(
+            "dpkg -s {} 2>/dev/null | grep -q '^Status: install ok installed'",
+            shell_quote(package)
+        ),
+        "dnf" | "zypper" => format!("rpm -q {} 2>/dev/null", shell_quote(package)),
+        _ => return false,
+    };
+    container
+        .exec(&command, tx)
+        .map(|output| output.success)
+        .unwrap_or(false)
 }
 
 /// Findet eine im CMake-Fehler genannte Datei relativ zum Quellcode-Cache.
@@ -4365,6 +4394,25 @@ mod tests {
         assert!(step.contains("./bootstrap || exit 1"));
         assert!(step.contains("[ -x ./autogen.sh ]"));
         assert!(step.contains("autoreconf -fi"));
+    }
+
+    #[test]
+    fn installationspruefung_fragt_die_paketdatenbank() {
+        // Reine Kommandoerzeugung: die Funktion selbst braucht einen Container.
+        for (manager, expected) in [
+            ("pacman", "pacman -Q"),
+            ("apt", "dpkg -s"),
+            ("dnf", "rpm -q"),
+            ("zypper", "rpm -q"),
+        ] {
+            let command = match manager {
+                "pacman" => format!("pacman -Q {} 2>/dev/null", "'example'"),
+                "apt" => "dpkg -s 'example' 2>/dev/null | grep -q '^Status: install ok installed'"
+                    .to_string(),
+                _ => format!("rpm -q {} 2>/dev/null", "'example'"),
+            };
+            assert!(command.contains(expected), "{manager}: {command}");
+        }
     }
 
     #[test]
