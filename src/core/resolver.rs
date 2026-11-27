@@ -1570,6 +1570,9 @@ pub fn candidate_names(dep: &MissingDep, package_manager: &str) -> Vec<String> {
             names.push(format!("{}-devel", base));
             names.push(format!("lib{}-devel", base));
         }
+        // Kein doppeltes "lib" erzeugen, wenn der pkg-config-Name schon so
+        // beginnt (libavformat -> nicht liblibavformat).
+        "pacman" if base.starts_with("lib") => {}
         "pacman" => names.push(format!("lib{}", base)),
         _ => {}
     }
@@ -2189,6 +2192,15 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     let cmake_missing_header_re =
         Regex::new(r#"(?i)Cannot find .*?header file\s+'([^']+)'"#).unwrap();
     let cmake_missing_library_re = Regex::new(r#"(?i)Cannot find .*?library\s+'([^']+)'"#).unwrap();
+    // Meson: `Dependency "libavformat" not found (tried pkg-config and cmake)`
+    // sowie `Run-time dependency libavformat found: NO`.
+    let meson_dep_re =
+        Regex::new(r#"(?i)dependency\s+"?([A-Za-z0-9_+.\-]+)"?\s+not found"#).unwrap();
+    let meson_found_no_re = Regex::new(
+        r"(?i)(?:run-time|build-time)?\s*dependency\s+([A-Za-z0-9_+.\-]+)\s+found:\s*NO",
+    )
+    .unwrap();
+    let meson_program_re = Regex::new(r"(?i)program\s+'([^']+)'\s+found:\s*NO").unwrap();
 
     let mut deps: Vec<MissingDep> = Vec::new();
     let mut in_cmake_error = false;
@@ -2233,6 +2245,18 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
         }
         for caps in pkg2_re.captures_iter(trimmed) {
             push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
+        }
+        for caps in meson_dep_re.captures_iter(trimmed) {
+            push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
+        }
+        for caps in meson_found_no_re.captures_iter(trimmed) {
+            push_unique(&mut deps, MissingDep::PkgConfig(caps[1].to_string()));
+        }
+        for caps in meson_program_re.captures_iter(trimmed) {
+            let name = &caps[1];
+            if !is_generic_tool_word(name) {
+                push_unique(&mut deps, MissingDep::Tool(name.to_string()));
+            }
         }
         for caps in cmake_find_re.captures_iter(trimmed) {
             let name = &caps[1];
@@ -3332,6 +3356,40 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.join("learned_mappings.json")
+    }
+
+    #[test]
+    fn keine_doppelten_lib_paketnamen() {
+        let names = candidate_names(&MissingDep::PkgConfig("libavformat".to_string()), "pacman");
+        assert!(
+            !names.iter().any(|name| name == "liblibavformat"),
+            "{names:?}"
+        );
+        assert!(names.iter().any(|name| name == "libavformat"), "{names:?}");
+
+        let plain = candidate_names(&MissingDep::PkgConfig("zlib".to_string()), "pacman");
+        assert!(plain.iter().any(|name| name == "libzlib"), "{plain:?}");
+    }
+
+    #[test]
+    fn erkennt_meson_abhaengigkeiten() {
+        let deps = analyze_output(
+            "Run-time dependency libavformat found: NO  (tried pkg-config and cmake)\n\
+             app/meson.build:146:4: ERROR: Dependency \"libavformat\" not found (tried pkg-config and cmake)",
+        );
+        assert!(
+            deps.iter()
+                .any(|dep| matches!(dep, MissingDep::PkgConfig(name) if name == "libavformat")),
+            "{deps:?}"
+        );
+
+        let tools = analyze_output("Program 'nasm' found: NO");
+        assert!(
+            tools
+                .iter()
+                .any(|dep| matches!(dep, MissingDep::Tool(name) if name == "nasm")),
+            "{tools:?}"
+        );
     }
 
     #[test]
