@@ -80,6 +80,11 @@ rules (or with empty install rules) stage their built ELF programs to
 `/usr/bin` and shared libraries to `/usr/lib` as a generic fallback; internal
 CMake probe binaries in `CMakeFiles/` are never treated as programs.
 
+Autotools projects without a pre-generated `configure` run their own
+`./bootstrap` or `./autogen.sh` first (GNU projects fetch gnulib there), then
+`autoreconf -fi`. The rustup healing only applies to Cargo projects - learned
+build fixes must never install a Rust toolchain for a C/C++ build.
+
 Repositories that ship their own upstream bootstrap (`x.py` plus
 `src/bootstrap` in the repository root, for example the Rust compiler) are not
 normal Cargo projects: a plain `cargo build` fails on nightly features and a

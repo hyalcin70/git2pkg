@@ -2017,13 +2017,14 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         config.cmake_compat |= mappings.build_fix("cmake_policy").is_some();
         config.cstdint_fix = mappings.build_fix("cstdint").is_some();
         config.submodule_fix = mappings.build_fix("submodules").is_some();
-        if !config.rustup_fix && mappings.build_fix("rustup_toolchain").is_some() {
+        let cargo_project = system == BuildSystem::Cargo;
+        if !config.rustup_fix && cargo_project && mappings.build_fix("rustup_toolchain").is_some() {
             let _ = tx.send(BuildEvent::Log(
                 "[heal] outdated rustc toolchain detected - installing stable via rustup"
                     .to_string(),
             ));
         }
-        config.rustup_fix = mappings.build_fix("rustup_toolchain").is_some();
+        config.rustup_fix = cargo_project && mappings.build_fix("rustup_toolchain").is_some();
 
         let missing = analyze_output(&last_output);
         if missing.is_empty() {
@@ -3232,7 +3233,7 @@ fn binary_build_step(system: &BuildSystem) -> String {
         }
         BuildSystem::Python => "python3 -m pip wheel --no-deps -w /work/dist .".to_string(),
         BuildSystem::Autotools => {
-            r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; if [ -x ./configure ]; then ./configure --prefix=/usr --libdir="$libdir"; else autoreconf -fi && ./configure --prefix=/usr --libdir="$libdir"; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b "$1" | grep -q ELF && cp "$1" /work/dist/; else cp "$1" /work/dist/; fi' _ {} \;"#
+            r#"libdir="${GIT2PKG_LIBDIR:-/usr/lib}"; if [ ! -x ./configure ]; then if [ -x ./bootstrap ]; then ./bootstrap || exit 1; elif [ -x ./autogen.sh ]; then ./autogen.sh || exit 1; fi; fi; if [ -x ./configure ]; then ./configure --prefix=/usr --libdir="$libdir"; else autoreconf -fi && ./configure --prefix=/usr --libdir="$libdir"; fi && make -j$(nproc) && find . -maxdepth 3 -type f -perm -u+x -exec sh -c 'if command -v file >/dev/null 2>&1; then file -b "$1" | grep -q ELF && cp "$1" /work/dist/; else cp "$1" /work/dist/; fi' _ {} \;"#
                 .to_string()
         }
         BuildSystem::Make => {
@@ -3661,7 +3662,7 @@ fn build_script_with_flags(
             extra_cmd
         ));
     }
-    if config.rustup_fix {
+    if config.rustup_fix && *system == BuildSystem::Cargo {
         lines.extend(rustup_bootstrap_step(&target.family));
     }
 
@@ -4208,6 +4209,15 @@ mod tests {
             "git2pkg-builder:suse"
         );
         assert!(builder_image_name(&DistroFamily::Unknown).is_empty());
+    }
+
+    #[test]
+    fn autotools_fuehrt_bootstrap_aus() {
+        let step = binary_build_step(&BuildSystem::Autotools);
+        assert!(step.contains("[ -x ./bootstrap ]"));
+        assert!(step.contains("./bootstrap || exit 1"));
+        assert!(step.contains("[ -x ./autogen.sh ]"));
+        assert!(step.contains("autoreconf -fi"));
     }
 
     #[test]
