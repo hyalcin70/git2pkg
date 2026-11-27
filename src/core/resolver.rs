@@ -474,6 +474,9 @@ pub fn classify_failure(output: &str) -> FailureKind {
     if lower.contains("using bundled") || lower.contains("no_default_path") {
         return FailureKind::Vendored;
     }
+    if is_compiler_too_old(output) {
+        return FailureKind::SourceCode;
+    }
     if lower.contains("no cmake_cxx_compiler")
         || lower.contains("no cmake_c_compiler")
         || lower.contains("compiler could not be found")
@@ -1810,6 +1813,15 @@ pub fn detect_repo_script_distro_rejection(output: &str) -> bool {
 /// Deckt beide gaengigen Formulierungen ab:
 /// `rustc 1.85.1 is not supported by the following packages:` und
 /// `package ... cannot be built because it requires rustc 1.89.0`.
+/// Der C++-Compiler der Distribution kennt ein C++23-Feature nicht
+/// (z. B. `std::ranges::to` in Ubuntu 24.04 mit GCC 13).
+pub fn is_compiler_too_old(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("compiler doesn't support std::")
+        || lower.contains("compiler does not support std::")
+        || lower.contains("__cpp_lib_ranges_to_container - not found")
+}
+
 pub fn detect_outdated_rustc(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
     // Ein zu altes Cargo versteht moderne Lockfiles nicht (Version 4 braucht
@@ -1862,6 +1874,14 @@ pub fn detect_build_fixes(output: &str) -> Vec<BuildFix> {
             description: "CMake-Policy-/Prefix-Fehler".to_string(),
             value: "-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_SUPPRESS_DEVELOPER_ERRORS=ON"
                 .to_string(),
+        });
+    }
+
+    if is_compiler_too_old(output) {
+        fixes.push(BuildFix {
+            key: "newer_gxx".to_string(),
+            description: "C++-Compiler der Distribution zu alt".to_string(),
+            value: "install the newest available g++ and use it".to_string(),
         });
     }
 
@@ -3409,6 +3429,21 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
 
         let plain = candidate_names(&MissingDep::PkgConfig("zlib".to_string()), "pacman");
         assert!(plain.iter().any(|name| name == "libzlib"), "{plain:?}");
+    }
+
+    #[test]
+    fn zu_alter_cpp_compiler_wird_erkannt() {
+        let output = "CMake Error at CMakeLists.txt:127 (message):\n  The compiler doesn't support std::ranges::to\n";
+        assert!(is_compiler_too_old(output));
+        assert_eq!(classify_failure(output), FailureKind::SourceCode);
+        assert!(detect_build_fixes(output)
+            .iter()
+            .any(|fix| fix.key == "newer_gxx"));
+
+        let probe = "-- Looking for __cpp_lib_ranges_to_container - not found\n";
+        assert!(is_compiler_too_old(probe));
+
+        assert!(!is_compiler_too_old("undefined reference to `x'"));
     }
 
     #[test]

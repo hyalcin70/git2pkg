@@ -532,6 +532,7 @@ impl Git2PkgApp {
             cstdint_fix: false,
             submodule_fix: false,
             rustup_fix: false,
+            newer_gxx: false,
             skip_deps: false,
             include_dirs: Vec::new(),
             workspace: self.last_workspace.clone(),

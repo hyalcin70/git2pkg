@@ -9,10 +9,10 @@ use crate::core::resolver::{
     analyze_output, candidate_names, classify_failure, cmake_alternative_flags,
     cmake_option_flags_from_text, dependency_id, detect_abi_mismatch, detect_build_fixes,
     detect_repo_script_distro_rejection, detect_source_group_error, family_key,
-    is_cmake_policy_error, is_compiled_build_system, is_transient_network_error,
-    package_from_search, packages_from_file_database, probe_commands, search_command,
-    should_penalize_mapping, tool_file_database_commands, valid_package_name, BuildRecipe,
-    FailureKind, MappingStore, MissingDep, SourceGroupError,
+    is_cmake_policy_error, is_compiled_build_system, is_compiler_too_old,
+    is_transient_network_error, package_from_search, packages_from_file_database, probe_commands,
+    search_command, should_penalize_mapping, tool_file_database_commands, valid_package_name,
+    BuildRecipe, FailureKind, MappingStore, MissingDep, SourceGroupError,
 };
 use crate::gui::i18n::{Language, Texts};
 use regex::Regex;
@@ -946,6 +946,8 @@ pub struct BuildConfig {
     pub submodule_fix: bool,
     /// Gelernter Self-Healing-Fix: stabile rustc-Toolchain via rustup.
     pub rustup_fix: bool,
+    /// Gelernter Self-Healing-Fix: neuester verfuegbarer C++-Compiler.
+    pub newer_gxx: bool,
     /// Nach gescheitertem deps/-Vorbau: Hauptprojekt gegen Systembibliotheken bauen.
     pub skip_deps: bool,
     /// Zusätzliche Include-Pfade, die aus fehlenden Headern/pkg-config ermittelt wurden.
@@ -1756,6 +1758,8 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut heal_round: u8 = 1;
     // Die MSRV-Heilung wird pro Lauf hoechstens einmal angewandt.
     let mut toolchain_healed = false;
+    // Ebenso die C++-Compiler-Heilung.
+    let mut gxx_healed = false;
     let mut allowed_rounds: u8 = INITIAL_HEAL_ROUNDS;
     'attempt: loop {
         if config.cancel_flag.load(Ordering::Relaxed) {
@@ -2043,6 +2047,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             ));
         }
         config.rustup_fix = cargo_project && mappings.build_fix("rustup_toolchain").is_some();
+        config.newer_gxx |= mappings.build_fix("newer_gxx").is_some();
 
         let missing = analyze_output(&last_output);
         if missing.is_empty() {
@@ -2056,6 +2061,13 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 toolchain_healed = true;
                 let _ = tx.send(BuildEvent::Log(
                     "[heal] retrying with a current stable toolchain (rustup)".to_string(),
+                ));
+                continue;
+            }
+            if !gxx_healed && config.newer_gxx && is_compiler_too_old(&last_output) {
+                gxx_healed = true;
+                let _ = tx.send(BuildEvent::Log(
+                    "[heal] retrying with the newest available C++ compiler".to_string(),
                 ));
                 continue;
             }
@@ -2590,6 +2602,35 @@ fn rustup_bootstrap_step(family: &DistroFamily) -> Vec<String> {
         "\"$HOME/.cargo/bin/cargo\" --version".to_string(),
     ]);
     lines
+}
+
+/// Installiert den neuesten verfuegbaren C++-Compiler und stellt ihn als
+/// `CC`/`CXX` bereit. Aeltere Distributionen bringen moderne C++23-Projekte
+/// nicht mit dem Standard-Compiler zusammen, bieten aber neuere Pakete an
+/// (Ubuntu 24.04 liefert g++-13 als Standard, g++-14 als Paket).
+fn newer_gxx_step(family: &DistroFamily) -> Vec<String> {
+    let install = match family {
+        DistroFamily::Debian => {
+            "pkg=$(apt-cache search --names-only '^g\\+\\+-[0-9]+$' 2>/dev/null | awk '{print $1}' | sort -V | tail -n 1); [ -n \"$pkg\" ] && DEBIAN_FRONTEND=noninteractive apt-get install -y \"$pkg\""
+        }
+        DistroFamily::Fedora => "dnf install -y gcc-c++",
+        DistroFamily::Suse => "zypper --non-interactive install gcc gcc-c++",
+        DistroFamily::Arch | DistroFamily::Unknown => "true",
+    };
+    vec![
+        echo_line("[build] looking for a newer C++ compiler"),
+        format!(
+            "if ! ( {} ); then echo '[pkg] newer compiler unavailable - continuing' >&2; fi",
+            install
+        ),
+        r#"for candidate in $(ls /usr/bin/g++-[0-9]* 2>/dev/null | sort -V -r); do
+  export CXX="$candidate"
+  export CC="${candidate//g++/gcc}"
+  echo "[build] using $candidate for C++"
+  break
+done"#
+            .to_string(),
+    ]
 }
 
 fn install_packages_command(family: &DistroFamily, packages: &[String]) -> String {
@@ -3683,6 +3724,9 @@ fn build_script_with_flags(
     if config.rustup_fix && *system == BuildSystem::Cargo {
         lines.extend(rustup_bootstrap_step(&target.family));
     }
+    if config.newer_gxx && is_compiled_build_system(system.label()) {
+        lines.extend(newer_gxx_step(&target.family));
+    }
 
     lines.push("mkdir -p /work/out /work/dist".to_string());
 
@@ -3945,6 +3989,7 @@ mod tests {
             cstdint_fix: false,
             submodule_fix: false,
             rustup_fix: false,
+            newer_gxx: false,
             skip_deps: false,
             include_dirs: Vec::new(),
             workspace: None,
@@ -4227,6 +4272,43 @@ mod tests {
             "git2pkg-builder:suse"
         );
         assert!(builder_image_name(&DistroFamily::Unknown).is_empty());
+    }
+
+    #[test]
+    fn neuer_compiler_wird_im_skript_gesetzt() {
+        let identity = ProjectIdentity {
+            name: "sample-tool".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        };
+        let mut cfg = config(DistroFamily::Debian, TargetFormat::NativePackage);
+        cfg.newer_gxx = true;
+        let script = build_script_with(
+            &cfg,
+            &BuildSystem::CMake,
+            &[],
+            None,
+            &identity,
+            BuildStrategy::Default,
+            false,
+        );
+        assert!(script.contains("looking for a newer C++ compiler"));
+        assert!(script.contains("g++-[0-9]*"));
+        assert!(script.contains("export CXX="));
+        assert!(script.contains("apt-cache search"));
+
+        // Ein reines Rust-Projekt bekommt den Schritt nicht.
+        let plain = config(DistroFamily::Debian, TargetFormat::NativePackage);
+        let rust = build_script_with(
+            &plain,
+            &BuildSystem::Cargo,
+            &[],
+            None,
+            &identity,
+            BuildStrategy::Default,
+            false,
+        );
+        assert!(!rust.contains("newer C++ compiler"));
     }
 
     #[test]

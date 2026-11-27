@@ -64,6 +64,7 @@ pub fn run_cli(url: &str) {
         cstdint_fix: false,
         submodule_fix: false,
         rustup_fix: false,
+        newer_gxx: false,
         skip_deps: false,
         include_dirs: Vec::new(),
         workspace: None,
