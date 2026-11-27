@@ -36,8 +36,12 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     )));
     lines.push(
         r#"depends=()
+# Nur direkte Abhaengigkeiten (DT_NEEDED) auffuehren: `ldd` liefert auch
+# transitive Bibliotheken, die native Pakete nicht als Abhaengigkeit nennen.
 for binary in $(find /work/out/usr/bin /work/out/usr/lib /work/out/usr/lib64 -type f -perm -u+x 2>/dev/null); do
-  for lib in $(ldd "$binary" 2>/dev/null | awk '/=> \// {print $3}'); do
+  for soname in $(readelf -d "$binary" 2>/dev/null | awk '/\(NEEDED\)/ {gsub(/[\[\]]/, "", $NF); print $NF}'); do
+    lib=$(ldconfig -p 2>/dev/null | awk -v s="$soname" '$1 == s {print $NF; exit}')
+    [ -n "$lib" ] || continue
     package=$(pacman -Qoq "$lib" 2>/dev/null || true)
     [ -n "$package" ] && depends+=("$package")
   done
@@ -136,7 +140,8 @@ mod tests {
         };
         let script = script(&ctx).join("\n");
         assert!(script.contains("pacman -Qoq"));
-        assert!(script.contains("ldd"));
+        assert!(script.contains("NEEDED"));
+        assert!(script.contains("pacman -Qoq"));
         assert!(script.contains(".PKGINFO"));
         assert!(script.contains("depend = $dep"));
         assert!(script.contains("bsdtar --zstd"));
