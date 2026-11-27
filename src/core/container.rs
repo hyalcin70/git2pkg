@@ -1115,7 +1115,10 @@ fn verify_dependency(
                 "find /usr /usr/local -maxdepth 8 -path '*/include/*' -name {} -print -quit 2>/dev/null",
                 shell_quote(base)
             );
-            first_line(container.exec(&command, tx).ok()?)
+            container
+                .exec(&command, tx)
+                .ok()
+                .and_then(|output| first_output_line(&output))
         }
         MissingDep::PkgConfig(name) => {
             if !valid_package_name(name) {
@@ -1149,9 +1152,23 @@ fn verify_dependency(
                 "find /usr/lib /usr/lib64 /usr/local/lib -maxdepth 4 -name {} -print -quit 2>/dev/null",
                 shell_quote(&format!("lib{}.so", name))
             );
-            first_line(container.exec(&command, tx).ok()?)
+            container
+                .exec(&command, tx)
+                .ok()
+                .and_then(|output| first_output_line(&output))
         }
     }
+}
+
+/// Wie `first_line`, ignoriert aber den Exit-Code: `find` liefert 1, sobald
+/// ein Suchpfad fehlt oder nicht lesbar ist, obwohl es Treffer ausgibt.
+fn first_output_line(output: &CommandOutput) -> Option<String> {
+    output
+        .text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 fn first_line(output: CommandOutput) -> Option<String> {
@@ -1211,7 +1228,10 @@ fn verify_cmake_module(
             "find /usr /usr/local -maxdepth 8 \\( -path '*/include/*' -o -path '*/lib*/*' \\) -name {} -print -quit 2>/dev/null",
             shell_quote(&name)
         );
-        if let Some(found) = first_line(container.exec(&command, tx).ok()?) {
+        let Ok(output) = container.exec(&command, tx) else {
+            continue;
+        };
+        if let Some(found) = first_output_line(&output) {
             return Some(found);
         }
     }
@@ -1253,7 +1273,10 @@ fn find_cmake_config(
         "find /usr /usr/local -maxdepth 6 \\( -name '{}Config.cmake' -o -name '{}-config.cmake' \\) -print -quit 2>/dev/null",
         safe, lower
     );
-    first_line(container.exec(&command, tx).ok()?)
+    container
+        .exec(&command, tx)
+        .ok()
+        .and_then(|output| first_output_line(&output))
 }
 
 fn find_cmake_finder_module(
