@@ -136,9 +136,9 @@ rustup default stable
 cargo build --release
 ```
 
-Dağıtımın sağladığı Rust sürümü çoğu zaman gerekenden eskidir (özellikle
-Debian/Ubuntu/Mint). `rustup default stable` güncel bir araç zinciri kullanmanızı
-sağlar.
+`git2pkg` için Rust 1.89 veya daha yenisi gerekir. Linux Mint 22.3 (Ubuntu
+24.04) 1.75, Debian 13 ise 1.85 sürümünü getirir - `rustup default stable`
+yeterince yeni bir araç zinciri sağlar.
 
 GUI'yi `cargo run --release`, CLI'yı
 `cargo run --release -- --cli https://github.com/user/repo` ile çalıştırın.

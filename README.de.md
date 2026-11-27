@@ -137,9 +137,9 @@ rustup default stable
 cargo build --release
 ```
 
-Die von der Distribution mitgelieferte Rust-Version ist oft älter als
-nötig (besonders bei Debian/Ubuntu/Mint). `rustup default stable` stellt eine
-aktuelle Toolchain sicher.
+`git2pkg` braucht Rust 1.89 oder neuer. Linux Mint 22.3 (Ubuntu 24.04) liefert
+1.75, Debian 13 liefert 1.85 - `rustup default stable` sorgt für eine
+ausreichend neue Toolchain.
 
 Die GUI startet mit `cargo run --release`, die CLI mit
 `cargo run --release -- --cli https://github.com/user/repo`.
