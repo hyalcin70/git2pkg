@@ -131,7 +131,10 @@ embedded test framework) and belong in a separate -dev package. Projects that sh
 directory are packaged with `dpkg-buildpackage` using that recipe - package
 name and version come from `debian/control` and `debian/changelog`, and
 `dh` handles layout, `Depends` and documentation. If that fails (for example
-missing build dependencies), the generated path runs unchanged. Project versions are read from Cargo, CMake,
+missing build dependencies), the generated path runs unchanged. The same
+applies to a project-provided `*.spec`: RPM packaging then runs `rpmbuild`
+with that spec (name and version are read from it), and falls back to the
+generated spec when the native run fails. Project versions are read from Cargo, CMake,
 `pyproject.toml`, `AC_INIT`/`PACKAGE_VERSION`, then Git tags. The clone is
 shallow, so tags are fetched separately (`git fetch --tags --depth=1`); a tag
 directly at `HEAD` wins, otherwise the newest version tag is used (stable

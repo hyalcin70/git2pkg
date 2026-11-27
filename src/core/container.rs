@@ -2974,6 +2974,34 @@ fn http_url(value: Option<String>) -> Option<String> {
 }
 
 /// Paketname aus `debian/control` (`Source:` zuerst, dann `Package:`).
+/// Name und Version aus der ersten `.spec` im Projektwurzelverzeichnis.
+fn spec_identity(src: &Path) -> Option<(String, String)> {
+    let entries = fs::read_dir(src).ok()?;
+    let mut specs: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .map(|ext| ext.eq_ignore_ascii_case("spec"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    specs.sort();
+    let text = fs::read_to_string(specs.first()?).ok()?;
+    let field = |key: &str| -> Option<String> {
+        let pattern = format!(r"(?mi)^\s*{}\s*:\s*([^\s#]+)", regex::escape(key));
+        Regex::new(&pattern)
+            .ok()?
+            .captures(&text)
+            .map(|caps| caps[1].to_string())
+    };
+    let name = field("Name")?;
+    let version = field("Version")?;
+    Some((name, version))
+}
+
 fn debian_package_name(text: &str) -> Option<String> {
     let re = Regex::new(r"(?m)^(?:Source|Package):\s*([A-Za-z0-9][A-Za-z0-9+.-]*)").ok()?;
     re.captures(text).map(|caps| caps[1].to_string())
@@ -2996,8 +3024,14 @@ fn project_identity(source_url: &str, src: &Path) -> ProjectIdentity {
             .ok()
             .and_then(|text| debian_package_name(&text))
     };
+    let spec = if src.as_os_str().is_empty() {
+        None
+    } else {
+        spec_identity(src)
+    };
     let name = debian_name
         .map(|raw| package_slug(&raw))
+        .or_else(|| spec.as_ref().map(|(name, _)| package_slug(name)))
         .or_else(|| repo_name_from_url(source_url).map(|raw| package_slug(&raw)))
         .unwrap_or_else(|| "app".to_string());
     let version = if src.as_os_str().is_empty() {
@@ -3020,7 +3054,9 @@ fn project_identity(source_url: &str, src: &Path) -> ProjectIdentity {
         let from_debian = fs::read_to_string(src.join("debian/changelog"))
             .ok()
             .and_then(|text| debian_changelog_version(&text));
+        let from_spec = spec.as_ref().map(|(_, version)| version.clone());
         from_debian
+            .or(from_spec)
             .or(from_cargo)
             .or(from_cmake)
             .or(from_python)
@@ -4049,6 +4085,30 @@ mod tests {
         );
         assert!(script.contains("if [ -f /work/src/x.py ] && [ -d /work/src/src/bootstrap ]"));
         assert!(script.contains("pacman -S --noconfirm --needed -- curl xz zlib openssl"));
+    }
+
+    #[test]
+    fn spec_metadaten_werden_gelesen() {
+        use std::fs;
+        let root = std::env::temp_dir().join(format!(
+            "g2p-spec-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("sample-tool.spec"),
+            "Name: sample-tool\nVersion: 2.3.4\nRelease: 1\n",
+        )
+        .unwrap();
+        let (name, version) = spec_identity(&root).expect("spec");
+        assert_eq!(name, "sample-tool");
+        assert_eq!(version, "2.3.4");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

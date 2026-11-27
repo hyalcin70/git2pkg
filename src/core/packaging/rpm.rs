@@ -4,6 +4,28 @@ use super::{line_echo, metadata_line, PackageContext};
 
 pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     let mut lines = vec![line_echo("[pkg] building RPM package")];
+    // Liefert das Projekt eine eigene `.spec` mit, uebernimmt `rpmbuild` mit
+    // diesem Rezept: Dateilisten, Abhaengigkeiten (AutoReqProv) und Doku kommen
+    // dann vom Projekt statt von unserer generierten Spezifikation.
+    lines.push(format!(
+        r#"if ls /work/src/*.spec >/dev/null 2>&1; then
+  echo '[pkg] in-tree RPM spec detected - using rpmbuild with the project spec' >&2
+  spec=$(ls /work/src/*.spec | head -n 1)
+  topdir=/work/rpmbuild
+  mkdir -p "$topdir"/{{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}}
+  if ( cd /work/src && QA_RPATHS=0x0001 rpmbuild -bb --define "_topdir $topdir" "$spec" ) >/dev/null 2>&1; then
+    rpm_file=$(find "$topdir/RPMS" -type f -name '*.rpm' 2>/dev/null | head -n 1)
+    if [ -n "$rpm_file" ] && rpm -qlp "$rpm_file" 2>/dev/null | grep -qE '^/usr/(bin|lib|lib64)/'; then
+      cp "$rpm_file" /work/dist/
+      echo "[pkg] native package: $(basename "$rpm_file")" >&2
+      echo '{ok_marker}'
+      exit 0
+    fi
+  fi
+  echo '[pkg] in-tree spec failed - using the generated spec' >&2
+fi"#,
+        ok_marker = crate::core::container::OK_MARKER
+    ));
     lines.push(super::run_step(&format!(
         "cd /work/src && {}",
         ctx.build_step
@@ -47,6 +69,29 @@ mod tests {
     use crate::core::container::BuildStrategy;
     use crate::core::distro::DistroFamily;
     use crate::core::packaging::PackageArch;
+
+    #[test]
+    fn eigene_spec_nutzt_rpmbuild() {
+        let ctx = PackageContext {
+            name: "example-app",
+            version: "1.0.0",
+            family: &crate::core::distro::DistroFamily::Fedora,
+            strategy: crate::core::container::BuildStrategy::Default,
+            has_pkgbuild: false,
+            arch: PackageArch::Amd64,
+            description: "Example application",
+            license: "MIT",
+            url: "https://example.invalid/app",
+            build_step: "true",
+            install_step: "true",
+            asset_step: "true",
+        };
+        let script = script(&ctx).join("\n");
+        assert!(script.contains("[pkg] in-tree RPM spec detected"));
+        assert!(script.contains("rpmbuild -bb --define \"_topdir $topdir\""));
+        assert!(script.contains("in-tree spec failed - using the generated spec"));
+        assert!(script.contains("rpm -qlp"));
+    }
 
     #[test]
     fn spec_enthaelt_autoreqprov_und_defattr() {
