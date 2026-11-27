@@ -119,10 +119,19 @@ simple GUI.
 ## Build from source
 
 ```sh
+# once: current Rust toolchain (the distro version is often too old)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
 git clone https://github.com/hyalcin70/git2pkg.git
 cd git2pkg
+rustup default stable
 cargo build --release
 ```
+
+The Rust version shipped by your distribution is often older than what
+`git2pkg` needs (especially on Debian/Ubuntu/Mint). `rustup default stable`
+makes sure a current toolchain is used.
 
 Run the GUI with `cargo run --release`, or the CLI with
 `cargo run --release -- --cli https://github.com/user/repo`.

@@ -136,10 +136,19 @@ simple interface graphique.
 ## Compilation depuis les sources
 
 ```sh
+# une fois : chaîne Rust à jour (celle de la distribution est souvent ancienne)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
 git clone https://github.com/hyalcin70/git2pkg.git
 cd git2pkg
+rustup default stable
 cargo build --release
 ```
+
+La version de Rust fournie par la distribution est souvent plus ancienne que
+nécessaire (surtout sous Debian/Ubuntu/Mint). `rustup default stable` garantit
+une chaîne d'outils à jour.
 
 Lancez l'interface avec `cargo run --release`, ou la CLI avec
 `cargo run --release -- --cli https://github.com/user/repo`.

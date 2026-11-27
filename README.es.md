@@ -128,10 +128,19 @@ utilizable desde una interfaz gráfica sencilla.
 ## Compilación desde el código fuente
 
 ```sh
+# una vez: cadena de Rust actual (la de la distribución suele ser antigua)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
 git clone https://github.com/hyalcin70/git2pkg.git
 cd git2pkg
+rustup default stable
 cargo build --release
 ```
+
+La versión de Rust que incluye la distribución suele ser más antigua de lo
+necesario (sobre todo en Debian/Ubuntu/Mint). `rustup default stable` garantiza
+una cadena de herramientas actual.
 
 Ejecute la GUI con `cargo run --release`, o la CLI con
 `cargo run --release -- --cli https://github.com/user/repo`.

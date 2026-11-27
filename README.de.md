@@ -127,10 +127,19 @@ per GUI nutzbar.
 ## Aus dem Quellcode bauen
 
 ```sh
+# Einmalig: aktuelle Rust-Toolchain (die Distro-Version ist oft zu alt)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
 git clone https://github.com/hyalcin70/git2pkg.git
 cd git2pkg
+rustup default stable
 cargo build --release
 ```
+
+Die von der Distribution mitgelieferte Rust-Version ist oft älter als
+nötig (besonders bei Debian/Ubuntu/Mint). `rustup default stable` stellt eine
+aktuelle Toolchain sicher.
 
 Die GUI startet mit `cargo run --release`, die CLI mit
 `cargo run --release -- --cli https://github.com/user/repo`.

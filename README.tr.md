@@ -126,10 +126,19 @@ kullanılabiliyor.
 ## Kaynaktan derleme
 
 ```sh
+# Bir kez: güncel Rust araç zinciri (dağıtımın sürümü çoğu zaman eski)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
 git clone https://github.com/hyalcin70/git2pkg.git
 cd git2pkg
+rustup default stable
 cargo build --release
 ```
+
+Dağıtımın sağladığı Rust sürümü çoğu zaman gerekenden eskidir (özellikle
+Debian/Ubuntu/Mint). `rustup default stable` güncel bir araç zinciri kullanmanızı
+sağlar.
 
 GUI'yi `cargo run --release`, CLI'yı
 `cargo run --release -- --cli https://github.com/user/repo` ile çalıştırın.
