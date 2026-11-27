@@ -66,8 +66,13 @@ generated scripts set the markers `__GIT2PKG_NO_ARTIFACT__` and
 `__GIT2PKG_EMPTY_PACKAGE__`, which take precedence over text patterns, and a
 failed `cargo build` aborts explicitly instead of leaving the install step to
 report "no binaries". When the distro `rustc` is older than the project's MSRV
-(`rustc X is not supported`, `requires rustc`), the build is retried once in
-the same run with a current stable toolchain via rustup.
+(`rustc X is not supported`, `requires rustc`, or an unreadable lock file
+version 4), the build is retried once in the same run with a current stable
+toolchain via rustup. The same applies to C++: a compiler that rejects a C++23
+feature (`compiler doesn't support std::...`, missing
+`__cpp_lib_ranges_to_container`) makes git2pkg install the newest `g++` the
+distribution offers (Ubuntu 24.04: `g++-14`) and export `CC`/`CXX` before the
+retry.
 
 CMake dependency analysis is context-aware. `find_package`, header and library
 errors inside a CMake error block become CMakeModule/Header/Library entries,
