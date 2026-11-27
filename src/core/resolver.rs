@@ -1629,22 +1629,19 @@ pub fn packages_from_file_database(output: &str, tool: &str) -> Vec<String> {
             continue;
         }
         let candidate = if let Some((_, rest)) = line.split_once("is owned by ") {
-            rest.split_whitespace().next().unwrap_or("")
-        } else if let Some((head, _)) = line.split_once(':') {
-            head.rsplit('/').next().unwrap_or(head)
+            // `usr/bin/tool is owned by package 1.0-1`
+            rest.split_whitespace().next().unwrap_or("").to_string()
         } else {
-            let token = line.split_whitespace().next().unwrap_or("");
-            if token.starts_with('/') || looks_like_path(token) {
+            let first = line.split_whitespace().next().unwrap_or("");
+            if looks_like_path(first) {
+                // Pfadzeile unter einem `pacman -F`-Treffer.
                 continue;
             }
-            token
+            // `extra/ffmpeg 2:9.1-1` -> Pfad/Repository abschneiden.
+            first.to_string()
         };
-        let candidate = candidate
-            .rsplit('/')
-            .next()
-            .unwrap_or(candidate)
-            .trim()
-            .to_ascii_lowercase();
+        let candidate = candidate.rsplit('/').next().unwrap_or(&candidate);
+        let candidate = candidate.trim().to_ascii_lowercase();
         if valid_package_name(&candidate) && !packages.contains(&candidate) {
             packages.push(candidate);
         }
@@ -3356,6 +3353,22 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.join("learned_mappings.json")
+    }
+
+    #[test]
+    fn pacman_dateidatenbank_parst_versionen_mit_doppelpunkt() {
+        let output = "extra/ffmpeg 2:9.1-1\n    usr/lib/pkgconfig/libavformat.pc\nextra/ffmpeg4.4 4.4.8-5\n    usr/lib/ffmpeg4.4/pkgconfig/libavformat.pc\n";
+        let packages = packages_from_file_database(output, "libavformat");
+        assert_eq!(
+            packages,
+            vec!["ffmpeg".to_string(), "ffmpeg4.4".to_string()]
+        );
+
+        let owned = "usr/bin/vdb_print is owned by devtools 1.0-1\n";
+        assert_eq!(
+            packages_from_file_database(owned, "vdb_print"),
+            vec!["devtools".to_string()]
+        );
     }
 
     #[test]
