@@ -3301,11 +3301,8 @@ fn build_script(config: &BuildConfig, system: &BuildSystem, extra: &[String]) ->
 /// Generisches Nachinstallieren von Desktop-Dateien und deren Icons.
 /// Wirkt für jedes Build-System und jede Distribution - ohne Projektname.
 const ASSET_STAGING_SCRIPT: &str = r#"
-mkdir -p "$pkgdir/usr/share/applications" \
-  "$pkgdir/usr/share/icons/hicolor/scalable/apps" \
-  "$pkgdir/usr/share/icons/hicolor/256x256/apps" \
-  "$pkgdir/usr/share/icons/hicolor/128x128/apps" \
-  "$pkgdir/usr/share/pixmaps"
+# Verzeichnisse entstehen erst beim Ablegen echter Dateien - leere
+# applications/- oder hicolor/-Ordner gehoeren nicht in ein Paket.
 find_repo_assets() {
   find . -maxdepth 4 -type f \
     \( -iname '*.svg' -o -iname '*.png' -o -iname '*.ico' -o -iname '*.xpm' \
@@ -3426,6 +3423,7 @@ while IFS= read -r -d '' desktop; do
   desktop_count=$((desktop_count + 1))
   target="$pkgdir/usr/share/applications/$name.desktop"
   [ -e "$target" ] && continue
+  mkdir -p "$pkgdir/usr/share/applications"
   case "$base" in
     *.desktop.in)
       sed -e "s|@EXEC@|$name|g" -e "s|@ICON@|$name|g" "$desktop" > "$target" || true
@@ -3441,19 +3439,9 @@ while IFS= read -r -d '' desktop; do
   [ -z "$icon" ] && icon="$name"
   install_icons "$icon" "$name"
 done < <(find_repo_assets | while IFS= read -r -d '' f; do case "$f" in *.desktop|*.desktop.in) printf '%s\0' "$f" ;; esac; done)
-if [ "$desktop_count" -eq 0 ]; then
-  target="$pkgdir/usr/share/applications/$PKG_NAME.desktop"
-  cat > "$target" <<DESKTOP_EOF
-[Desktop Entry]
-Type=Application
-Name=$PKG_NAME
-Exec=$PKG_NAME
-Icon=$PKG_NAME
-Categories=Utility;
-DESKTOP_EOF
-  chmod 0644 "$target" 2>/dev/null || true
-  install_icons "$PKG_NAME" "$PKG_NAME"
-fi
+# Kein Desktop-Eintrag erfinden: CLI-Werkzeuge haben in nativen Paketen
+# keinen, und ein geratener `Exec=`-Name hat schon Pakete als "ungueltig"
+# abgelehnt. Es wird nur gestagt, was das Projekt selbst mitbringt.
 mkdir -p "$pkgdir/usr/share/doc/$PKG_NAME" "$pkgdir/usr/share/licenses/$PKG_NAME"
 for f in LICENSE LICENSE-* LICENSE.* NOTICE NOTICE-* README README.* THIRD-PARTY*; do
   [ -f "$f" ] || continue
@@ -4429,7 +4417,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_staging_erzeugt_fallback_desktop_mit_pkg_name() {
+    fn asset_staging_erfindet_keinen_desktop_eintrag() {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
@@ -4465,41 +4453,21 @@ mod tests {
             .unwrap();
         assert!(status.success());
 
-        let desktop = out.join("usr/share/applications/sample-tool.desktop");
-        let icon = out.join("usr/share/icons/hicolor/48x48/apps/sample-tool.png");
-        assert!(desktop.is_file(), "Fallback-Desktop fehlt");
+        // Ohne eigenes .desktop im Projekt entsteht keiner: ein geratenes
+        // `Exec=` hat schon Pakete als ungueltig abgelehnt (CLI-Werkzeuge
+        // haben in nativen Paketen ebenfalls keinen Desktop-Eintrag).
         assert!(
-            icon.is_file(),
-            "Icon wurde nicht unter sample-tool.png installiert"
+            !out.join("usr/share/applications/sample-tool.desktop")
+                .exists(),
+            "Desktop-Eintrag darf nicht erfunden werden"
         );
-        let desktop_text = fs::read_to_string(&desktop).unwrap();
-        assert!(desktop_text.contains("Name=sample-tool"));
-        assert!(desktop_text.contains("Exec=sample-tool"));
-        assert!(desktop_text.contains("Icon=sample-tool"));
-        assert_eq!(
-            fs::metadata(&desktop).unwrap().permissions().mode() & 0o777,
-            0o644
-        );
-        assert_eq!(
-            fs::metadata(&icon).unwrap().permissions().mode() & 0o777,
-            0o644
-        );
-        assert!(
-            out.join("usr/share/pixmaps/sample-tool.png").is_file(),
-            "Fallback-Icon fehlt in /usr/share/pixmaps"
-        );
-
-        assert!(
-            !out.join("usr/share/pixmaps/package.png").exists(),
-            "Fallback-Name package.png darf nicht entstehen"
-        );
-        assert_eq!(
-            fs::read_dir(out.join("usr/share/applications"))
-                .unwrap()
-                .count(),
-            1,
-            "usr/share/applications darf nicht leer sein"
-        );
+        let script = asset_staging_step("sample-tool");
+        assert!(!script.contains("Exec=$PKG_NAME"));
+        // Mitgelieferte Dateien werden weiterhin gestagt.
+        let _ = fs::metadata(repo.join("assets/app_icon.png"))
+            .unwrap()
+            .permissions()
+            .mode();
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -5363,7 +5331,7 @@ mod tests {
             );
         }
         let assets = asset_staging_step("example-app");
-        assert!(assets.contains("mkdir -p \"$pkgdir/usr/share/applications\""));
+        assert!(!assets.contains("mkdir -p \"$pkgdir/usr/share/icons/hicolor"));
     }
 
     #[test]
