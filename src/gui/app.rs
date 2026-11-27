@@ -103,6 +103,8 @@ pub struct Git2PkgApp {
     cross_build_dialog: bool,
     last_build_failed: bool,
     had_build_in_session: bool,
+    /// Der Nutzer hat den laufenden Build abgebrochen.
+    build_cancelled: bool,
     show_cleanup_dialog: bool,
     force_close: bool,
     logo: Option<egui::TextureHandle>,
@@ -300,6 +302,7 @@ impl Git2PkgApp {
             cross_build_dialog: false,
             last_build_failed: false,
             had_build_in_session: false,
+            build_cancelled: false,
             show_cleanup_dialog: false,
             force_close: false,
             logo: None,
@@ -499,6 +502,7 @@ impl Git2PkgApp {
         self.next_strategy = strategy.next(has_deps);
         self.building = true;
         self.had_build_in_session = true;
+        self.build_cancelled = false;
         self.cancel_flag.store(false, Ordering::Relaxed);
         *self.container_id.lock().unwrap() = None;
         self.outcome = None;
@@ -545,6 +549,8 @@ impl Git2PkgApp {
         }
         self.cancel_flag.store(true, Ordering::Relaxed);
         self.building = false;
+        // Sofort setzen: der Beenden-Klick kommt oft vor dem Cancelled-Event.
+        self.build_cancelled = true;
         self.retry_dialog = false;
         self.install_dialog = None;
         self.log.push_str("[warn] build cancelled by the user.\n");
@@ -614,6 +620,7 @@ impl Git2PkgApp {
                     Ok(BuildEvent::Finished(outcome)) => {
                         self.step = self.texts().success_step().to_string();
                         self.last_build_failed = false;
+                        self.build_cancelled = false;
                         self.retry_dialog = false;
                         self.install_dialog = outcome
                             .artifacts
@@ -809,7 +816,7 @@ impl eframe::App for Git2PkgApp {
         if ctx.input(|i| i.viewport().close_requested())
             && !self.force_close
             && self.had_build_in_session
-            && (self.last_build_failed || self.building)
+            && (self.last_build_failed || self.building || self.build_cancelled)
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.show_cleanup_dialog = true;

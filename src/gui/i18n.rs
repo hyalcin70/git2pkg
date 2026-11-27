@@ -1092,11 +1092,11 @@ impl Texts {
     }
     pub fn cleanup_body(&self) -> &'static str {
         self.get(
-            "The last build failed. You can delete the build cache (the Git repository cache is kept) or everything in the cache before git2pkg exits.",
-            "Der letzte Build ist fehlgeschlagen. Du kannst den Build-Cache löschen (der Git-Repository-Cache bleibt erhalten) oder alles im Cache, bevor git2pkg beendet wird.",
-            "Son derleme başarısız oldu. git2pkg kapanmadan önce derleme önbelleğini (Git deposu önbelleği korunur) veya önbellekteki her şeyi silebilirsin.",
-            "La última compilación falló. Puedes eliminar la caché de compilación (la caché del repositorio Git se conserva) o todo en la caché antes de que se cierre git2pkg.",
-            "La dernière compilation a échoué. Vous pouvez supprimer le cache de compilation (le cache du dépôt Git est conservé) ou tout le cache avant la fermeture de git2pkg.",
+            "The last build did not finish. You can delete the build cache (the Git repository cache is kept) or everything in the cache before git2pkg exits.",
+            "Der letzte Build wurde nicht abgeschlossen. Du kannst den Build-Cache löschen (der Git-Repository-Cache bleibt erhalten) oder alles im Cache, bevor git2pkg beendet wird.",
+            "Son derleme tamamlanmadı. git2pkg kapanmadan önce derleme önbelleğini (Git deposu önbelleği korunur) veya önbellekteki her şeyi silebilirsin.",
+            "La última compilación no terminó. Puedes eliminar la caché de compilación (la caché del repositorio Git se conserva) o todo en la caché antes de que se cierre git2pkg.",
+            "La dernière compilation ne s'est pas terminée. Vous pouvez supprimer le cache de compilation (le cache du dépôt Git est conservé) ou tout le cache avant la fermeture de git2pkg.",
         )
     }
 
