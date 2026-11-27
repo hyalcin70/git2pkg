@@ -1597,42 +1597,6 @@ fn package_owner(
         .to_ascii_lowercase()
 }
 
-/// Ein Modul, das zur CMake-Installation selbst gehoert (z. B.
-/// `FindPackageHandleStandardArgs`), braucht kein Paket.
-fn is_stock_cmake_module(container: &BuildContainer, name: &str, tx: &Sender<BuildEvent>) -> bool {
-    let Some(safe) = sanitized_cmake_name(name) else {
-        return false;
-    };
-    let command = format!(
-        "ls /usr/share/cmake*/Modules/Find{}.cmake 2>/dev/null | head -n 1",
-        safe
-    );
-    let Some(path) = container
-        .exec(&command, tx)
-        .ok()
-        .and_then(|output| first_output_line(&output))
-    else {
-        return false;
-    };
-    let manager = detect_package_manager(container, tx);
-    if !package_owner(container, &manager, &path, tx).contains("cmake") {
-        return false;
-    }
-    // FindBoost.cmake gehoert ebenfalls zu CMake, Boost ist aber eine echte
-    // Abhaengigkeit. Nur wenn es zur Bibliothek weder Shared Object noch
-    // Header gibt, ist das Modul ein reines CMake-Hilfsmodul.
-    let lower = safe.to_ascii_lowercase();
-    let probe = format!(
-        "find /usr /usr/local -maxdepth 8 \\( -name 'lib{}*.so*' -o -name '{}.h' \\) -print -quit 2>/dev/null",
-        lower, lower
-    );
-    container
-        .exec(&probe, tx)
-        .ok()
-        .and_then(|output| first_output_line(&output))
-        .is_none()
-}
-
 /// Kommando, das den Besitzer einer Datei nennt.
 fn owner_command(manager: &str, path: &str) -> String {
     match manager {
@@ -2305,16 +2269,6 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                         config.include_dirs.push(dir);
                         round_progress = true;
                     }
-                }
-            }
-            if let MissingDep::CMakeModule(name) = dep {
-                if is_stock_cmake_module(&container, name, tx) {
-                    let _ = tx.send(BuildEvent::Log(format!(
-                        "[cmake] '{}' belongs to CMake itself - no package needed",
-                        name
-                    )));
-                    round_progress = true;
-                    continue;
                 }
             }
             step(tx, texts.step_search(&dep.label()));

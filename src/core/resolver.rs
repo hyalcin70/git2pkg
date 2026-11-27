@@ -2306,7 +2306,14 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
         }
         if in_cmake_error {
             let mut found_module = false;
+            // Ein Pfad unter /usr/share/cmake/... ist ein Modul von CMake
+            // selbst (z. B. FindPackageHandleStandardArgs.cmake in einer
+            // Fehlerzeile) - daraus folgt keine fehlende Abhaengigkeit.
+            let stock_module_line = trimmed.contains("/share/cmake");
             for caps in find_module_re.captures_iter(trimmed) {
+                if stock_module_line {
+                    continue;
+                }
                 push_unique(&mut deps, MissingDep::CMakeModule(caps[1].to_string()));
                 found_module = true;
             }
@@ -3455,6 +3462,23 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
         assert!(
             deps.iter()
                 .any(|dep| matches!(dep, MissingDep::CMakeModule(name) if name == "Imath")),
+            "{deps:?}"
+        );
+    }
+
+    #[test]
+    fn cmake_eigene_module_werden_ignoriert() {
+        let output = "CMake Error at /usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake:290 (message):\n  Could NOT find Boost (missing: Boost_INCLUDE_DIR) (Required is at least version \"1.83.0\")\n";
+        let deps = analyze_output(output);
+        assert!(
+            !deps
+                .iter()
+                .any(|dep| matches!(dep, MissingDep::CMakeModule(name) if name == "PackageHandleStandardArgs")),
+            "{deps:?}"
+        );
+        assert!(
+            deps.iter()
+                .any(|dep| matches!(dep, MissingDep::CMakeModule(name) if name == "Boost")),
             "{deps:?}"
         );
     }
