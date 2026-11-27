@@ -1615,7 +1615,22 @@ fn is_stock_cmake_module(container: &BuildContainer, name: &str, tx: &Sender<Bui
         return false;
     };
     let manager = detect_package_manager(container, tx);
-    package_owner(container, &manager, &path, tx).contains("cmake")
+    if !package_owner(container, &manager, &path, tx).contains("cmake") {
+        return false;
+    }
+    // FindBoost.cmake gehoert ebenfalls zu CMake, Boost ist aber eine echte
+    // Abhaengigkeit. Nur wenn es zur Bibliothek weder Shared Object noch
+    // Header gibt, ist das Modul ein reines CMake-Hilfsmodul.
+    let lower = safe.to_ascii_lowercase();
+    let probe = format!(
+        "find /usr /usr/local -maxdepth 8 \\( -name 'lib{}*.so*' -o -name '{}.h' \\) -print -quit 2>/dev/null",
+        lower, lower
+    );
+    container
+        .exec(&probe, tx)
+        .ok()
+        .and_then(|output| first_output_line(&output))
+        .is_none()
 }
 
 /// Kommando, das den Besitzer einer Datei nennt.
