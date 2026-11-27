@@ -3380,6 +3380,10 @@ install_icons() {
       base_lc=$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')
       case "$base_lc" in
         screenshot*|*screenshot*|banner*|*banner*|preview*|*preview*|bg*|background*|*background*|wallpaper*) continue ;;
+        *badge*|badge*|*social*|*creator*|*made_for*|*third-party*|*logo_creator*) continue ;;
+      esac
+      case "$(dirname "$candidate" | tr '[:upper:]' '[:lower:]')" in
+        *badge*|*badges*|*third-party*|*contrib*) continue ;;
       esac
       if [ "$ext" = "png" ]; then
         dims=$(png_dimensions "$candidate")
@@ -4456,6 +4460,65 @@ mod tests {
         assert!(script.contains("usr/share/licenses/$PKG_NAME"));
         assert!(script.contains("THIRD-PARTY*"));
         assert!(script.contains("README.*"));
+    }
+
+    #[test]
+    fn badges_werden_nicht_als_app_icon_installiert() {
+        let root = std::env::temp_dir().join(format!(
+            "git2pkg-badge-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let repo = root.join("repo");
+        let out = root.join("out");
+        fs::create_dir_all(repo.join("assets/badges")).unwrap();
+        fs::create_dir_all(repo.join("assets")).unwrap();
+
+        // App-Icon (PNG) und ein Badge (SVG), das frueher gewonnen hat.
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&48u32.to_be_bytes());
+        png.extend_from_slice(&48u32.to_be_bytes());
+        png.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+        fs::write(repo.join("assets/app_icon.png"), png).unwrap();
+        fs::write(
+            repo.join("assets/badges/hermes-agent.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1024 1024\"></svg>",
+        )
+        .unwrap();
+        // Ohne eigenen Desktop-Eintrag wird bewusst kein Icon gestagt; hier
+        // bringt das Projekt einen mit.
+        fs::write(
+            repo.join("sample-tool.desktop"),
+            "[Desktop Entry]\nType=Application\nName=sample-tool\nExec=sample-tool\nIcon=sample-tool\n",
+        )
+        .unwrap();
+
+        let command = format!(
+            "pkgdir='{}'; cd '{}'; {}",
+            out.display(),
+            repo.display(),
+            asset_staging_step("sample-tool")
+        );
+        let status = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(&command)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let icon = out.join("usr/share/icons/hicolor/48x48/apps/sample-tool.png");
+        assert!(icon.is_file(), "App-Icon wurde nicht installiert");
+        assert!(
+            !out.join("usr/share/icons/hicolor/scalable/apps/sample-tool.svg")
+                .exists(),
+            "Badge darf nicht als App-Icon landen"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
