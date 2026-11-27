@@ -1205,19 +1205,27 @@ fn verify_cmake_module(
     if let Some(evidence) = first_line(container.exec(&probe, tx).ok()?) {
         return Some(evidence);
     }
-    // Stock-Module gehören zu cmake selbst; ihr Fehlschlag ist eindeutig.
-    let stock = container
+    // Ein Modul im CMake-Modulordner kann von CMake selbst stammen - dann ist
+    // der Fehlschlag eindeutig. Es kann aber auch von einem Paket mitgeliefert
+    // werden (OpenVDB installiert dort sein FindOpenVDB.cmake); dann ist das
+    // Modul der Beweis, dass die Bibliothek vorhanden ist.
+    let module_path = container
         .exec(
             &format!(
-                "ls /usr/share/cmake*/Modules/Find{}.cmake >/dev/null 2>&1",
+                "ls /usr/share/cmake*/Modules/Find{}.cmake 2>/dev/null | head -n 1",
                 safe
             ),
             tx,
         )
-        .map(|output| output.success)
-        .unwrap_or(false);
-    if stock {
-        return None;
+        .ok()
+        .and_then(|output| first_output_line(&output));
+    if let Some(path) = module_path {
+        let manager = detect_package_manager(container, tx);
+        let owner = package_owner(container, &manager, &path, tx);
+        if owner.contains("cmake") {
+            return None;
+        }
+        return Some(path);
     }
     // Projekt-eigene Module (Qt, ECM, OpenCV, …) über ihre Config-Datei.
     if let Some(evidence) = find_cmake_config(container, &safe, tx) {
@@ -1551,6 +1559,51 @@ fn try_install(
         // ldconfig unter Debian) koennen den Exit-Code verfaelschen. Wenn das
         // Paket danach installiert ist, gilt die Installation als Erfolg.
         _ => package_is_installed(container, &target.package_manager, package, tx),
+    }
+}
+
+/// Erkennt den Paketmanager im Container (das Image folgt der Zielfamilie).
+fn detect_package_manager(container: &BuildContainer, tx: &Sender<BuildEvent>) -> String {
+    let command = "if command -v pacman >/dev/null 2>&1; then echo pacman; \
+elif command -v apt-get >/dev/null 2>&1; then echo apt; \
+elif command -v dnf >/dev/null 2>&1; then echo dnf; \
+elif command -v zypper >/dev/null 2>&1; then echo zypper; fi";
+    container
+        .exec(command, tx)
+        .ok()
+        .and_then(|output| first_output_line(&output))
+        .unwrap_or_default()
+}
+
+/// Paket, dem eine Datei im Container gehoert (leer, wenn unbekannt).
+fn package_owner(
+    container: &BuildContainer,
+    manager: &str,
+    path: &str,
+    tx: &Sender<BuildEvent>,
+) -> String {
+    if !path.starts_with('/') || path.contains('\'') {
+        return String::new();
+    }
+    let command = owner_command(manager, path);
+    if command.is_empty() {
+        return String::new();
+    }
+    container
+        .exec(&command, tx)
+        .ok()
+        .and_then(|output| first_output_line(&output))
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+/// Kommando, das den Besitzer einer Datei nennt.
+fn owner_command(manager: &str, path: &str) -> String {
+    match manager {
+        "pacman" => format!("pacman -Qoq {} 2>/dev/null", path),
+        "apt" => format!("dpkg -S {} 2>/dev/null | head -n 1", path),
+        "dnf" | "zypper" => format!("rpm -qf {} 2>/dev/null", path),
+        _ => String::new(),
     }
 }
 
@@ -4394,6 +4447,15 @@ mod tests {
         assert!(step.contains("./bootstrap || exit 1"));
         assert!(step.contains("[ -x ./autogen.sh ]"));
         assert!(step.contains("autoreconf -fi"));
+    }
+
+    #[test]
+    fn besitzerabfrage_kennt_alle_paketmanager() {
+        assert!(owner_command("pacman", "/usr/share/x").starts_with("pacman -Qoq"));
+        assert!(owner_command("apt", "/usr/share/x").starts_with("dpkg -S"));
+        assert!(owner_command("dnf", "/usr/share/x").starts_with("rpm -qf"));
+        assert!(owner_command("zypper", "/usr/share/x").starts_with("rpm -qf"));
+        assert!(owner_command("unbekannt", "/usr/share/x").is_empty());
     }
 
     #[test]
