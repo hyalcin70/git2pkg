@@ -2513,7 +2513,7 @@ fn bootstrap_packages(family: &DistroFamily) -> Vec<String> {
 fn base_dependencies(family: &DistroFamily, system: &BuildSystem) -> String {
     let base = match family {
         DistroFamily::Arch => {
-            "pacman -Syu --noconfirm --needed -- base-devel git pkgconf python cmake meson ninja"
+            "pacman -Syu --noconfirm --needed -- base-devel git pkgconf python python-pip cmake meson ninja"
         }
         DistroFamily::Debian => {
             "apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential git pkg-config python3-pip cmake meson ninja-build debhelper devscripts fakeroot dpkg-dev"
@@ -2524,7 +2524,7 @@ fn base_dependencies(family: &DistroFamily, system: &BuildSystem) -> String {
             "dnf install -y @development-tools gcc gcc-c++ make git pkgconf-pkg-config python3-pip cmake meson ninja-build rpm-build rpmdevtools dnf-plugins-core"
         }
         DistroFamily::Suse => {
-            "zypper --non-interactive install git pkgconf-pkg-config python3 gcc gcc-c++ make cmake meson ninja rpm-build"
+            "zypper --non-interactive install git pkgconf-pkg-config python3 python3-pip gcc gcc-c++ make cmake meson ninja rpm-build"
         }
         DistroFamily::Unknown => "true",
     };
