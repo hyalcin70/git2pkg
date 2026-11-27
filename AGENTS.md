@@ -53,6 +53,11 @@ are cached per distro family too, never globally. Defaults and legacy flat
 mappings remain as fallbacks.
 `git2pkg --explain-learning` prints the learned table.
 
+Healing rounds start at 5 per strategy and extend while dependencies are actually
+resolved, up to `GIT2PKG_MAX_HEAL_ROUNDS` (default 20, clamped to 1-200). A round
+without progress switches to the next strategy instead of looping. Each round
+with progress logs `[retry] round X/Y - N new dependencies resolved`.
+
 Failures are classified (dependency, version/ABI, bundled dependency,
 source/compiler, packaging, no artifact, empty package, toolchain). If no
 dependency pattern remains and the failure is a source or packaging error, the

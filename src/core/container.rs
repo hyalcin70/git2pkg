@@ -36,7 +36,15 @@ fn deps_fallback_needed(output: &str, skip_deps: bool) -> bool {
 }
 const MAX_ATTEMPTS: u8 = 4;
 const INITIAL_HEAL_ROUNDS: u8 = 5;
-const MAX_HEAL_ROUNDS: u8 = 10;
+/// Obergrenze der Heil-Runden je Strategie, sobald Abhaengigkeiten geloest
+/// werden. Ueber `GIT2PKG_MAX_HEAL_ROUNDS` anpassbar (1-200).
+fn max_heal_rounds() -> u8 {
+    std::env::var("GIT2PKG_MAX_HEAL_ROUNDS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .map(|value| value.clamp(1, 200) as u8)
+        .unwrap_or(20)
+}
 
 /// Zustand eines Selbstheilungs-Durchlaufs. Nur wenn er sich aendert, ist ein
 /// weiterer Retry derselben Strategie sinnvoll.
@@ -2081,6 +2089,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
         // Hat diese Runde überhaupt etwas verändert? Nur dann lohnt ein
         // erneuter Buildversuch trotz unauflösbarer (z. B. optionaler) Deps.
         let mut round_progress = false;
+        let mut resolved_now = 0usize;
         for dep in &missing {
             if let MissingDep::FinderBroken(module) = dep {
                 // Kein Paket raten: Der Finder des Projekts parst die Version
@@ -2163,7 +2172,7 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
                 }
                 continue;
             };
-            allowed_rounds = MAX_HEAL_ROUNDS;
+            allowed_rounds = max_heal_rounds();
             let verified = !evidence.is_empty();
             mappings.learn_dependency(family, dep, &package, verified, &evidence);
             let _ = tx.send(BuildEvent::Log(format!(
@@ -2182,9 +2191,16 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             }
             resolved_deps.insert(dep_id, package.clone());
             round_progress = true;
+            resolved_now += 1;
             if !extra_packages.contains(&package) {
                 extra_packages.push(package.clone());
             }
+        }
+        if resolved_now > 0 {
+            let _ = tx.send(BuildEvent::Log(format!(
+                "[retry] round {}/{} - {} new dependencies resolved",
+                heal_round, allowed_rounds, resolved_now
+            )));
         }
         if let Some(dep) = unresolved {
             if deps_failed {
@@ -4197,6 +4213,22 @@ mod tests {
             "git2pkg-builder:suse"
         );
         assert!(builder_image_name(&DistroFamily::Unknown).is_empty());
+    }
+
+    #[test]
+    fn heil_runden_sind_konfigurierbar() {
+        // Standard ohne Umgebungsvariable
+        std::env::remove_var("GIT2PKG_MAX_HEAL_ROUNDS");
+        assert_eq!(max_heal_rounds(), 20);
+        std::env::set_var("GIT2PKG_MAX_HEAL_ROUNDS", "40");
+        assert_eq!(max_heal_rounds(), 40);
+        std::env::set_var("GIT2PKG_MAX_HEAL_ROUNDS", "0");
+        assert_eq!(max_heal_rounds(), 1);
+        std::env::set_var("GIT2PKG_MAX_HEAL_ROUNDS", "9999");
+        assert_eq!(max_heal_rounds(), 200);
+        std::env::set_var("GIT2PKG_MAX_HEAL_ROUNDS", "unsinn");
+        assert_eq!(max_heal_rounds(), 20);
+        std::env::remove_var("GIT2PKG_MAX_HEAL_ROUNDS");
     }
 
     #[test]
