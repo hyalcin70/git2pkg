@@ -498,11 +498,9 @@ pub fn classify_failure(output: &str) -> FailureKind {
 /// Paketinstallationen nicht helfen können.
 pub fn detect_abi_mismatch(output: &str) -> Option<String> {
     let lower = output.to_ascii_lowercase();
-    if (lower.contains("unable to determine") && lower.contains("abi version"))
-        || lower.contains("could not be found with the bundled find module")
-        || lower.contains("incompatible abi")
-        || lower.contains("abi version mismatch")
-    {
+    // Nur echte Konflikte: "nicht gefunden" oder eine leere Versionssonde ist
+    // eine fehlende Abhaengigkeit und darf die Aufloesung nicht abbrechen.
+    if lower.contains("incompatible abi") || lower.contains("abi version mismatch") {
         return Some(
             "installed library has an incompatible ABI or the project's bundled find module rejects it"
                 .to_string(),
@@ -1690,6 +1688,10 @@ pub fn probe_commands(package_manager: &str, dep: &MissingDep) -> Vec<String> {
             if lower.starts_with("lib") && lower.len() > 3 {
                 files.push((format!("{}.so", lower), false));
             }
+            // Viele Projekte bringen ihren eigenen Find<Name>.cmake mit; die
+            // Distribution liefert dann nur die Bibliothek (z. B. libopenvdb.so
+            // ohne OpenVDBConfig.cmake).
+            files.push((format!("lib{}.so", lower), false));
         }
         MissingDep::Header(header) => {
             files.push((
@@ -2206,6 +2208,8 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
     )
     .unwrap();
     let meson_program_re = Regex::new(r"(?i)program\s+'([^']+)'\s+found:\s*NO").unwrap();
+    // Bundled Find-Module: "Neither Imath (OpenEXR v3) nor IlmBase ... can be found!"
+    let neither_re = Regex::new(r"(?i)neither\s+([A-Za-z0-9_+\-]+)\s+.*can be found").unwrap();
 
     let mut deps: Vec<MissingDep> = Vec::new();
     let mut in_cmake_error = false;
@@ -2261,6 +2265,12 @@ pub fn analyze_output(output: &str) -> Vec<MissingDep> {
             let name = &caps[1];
             if !is_generic_tool_word(name) {
                 push_unique(&mut deps, MissingDep::Tool(name.to_string()));
+            }
+        }
+        for caps in neither_re.captures_iter(trimmed) {
+            let name = &caps[1];
+            if !is_generic_tool_word(name) {
+                push_unique(&mut deps, MissingDep::CMakeModule(name.to_string()));
             }
         }
         for caps in cmake_find_re.captures_iter(trimmed) {
@@ -2485,25 +2495,34 @@ mod tests {
                 .any(|command| command.contains("libiniparser.so")),
             "{dnf:?}"
         );
-        // Normale Modulnamen bleiben bei Config-Dateien.
+        // Auch normale Modulnamen bekommen eine Bibliothekssonde als letzte
+        // Moeglichkeit: Projekte mit eigenem Find-Modul liefern oft nur die
+        // Bibliothek (OpenVDB hat z. B. keine Config-Datei).
         let zlib = probe_commands("pacman", &MissingDep::CMakeModule("ZLIB".to_string()));
         assert!(
-            !zlib.iter().any(|command| command.contains(".so")),
+            zlib.iter().any(|command| command.contains("libzlib.so")),
             "{zlib:?}"
         );
+        // Config-Dateien bleiben die erste Wahl.
+        assert!(zlib[0].contains("ZLIBConfig.cmake"), "{zlib:?}");
     }
 
     #[test]
-    fn abi_und_bundled_finder_werden_als_versionskonflikt_erkannt() {
-        let abi = "CMake Warning at cmake/modules/FindExampleModule.cmake:328 (message):\n  Unable to determine ExampleModule ABI version from ExampleModule installation.\n";
-        assert!(detect_abi_mismatch(abi).is_some());
-        assert_eq!(classify_failure(abi), FailureKind::VersionMismatch);
-
+    fn nur_echte_abi_konflikte_stoppen_den_build() {
+        // Ein Projekt, das die Bibliothek nicht findet (eigene Find-Module),
+        // ist eine fehlende Abhaengigkeit - kein ABI-Konflikt. Sonst bricht der
+        // Build ab, bevor der Resolver das Paket installieren kann.
         let bundled = "CMake Error at CMakeLists.txt:694 (message):\n  ExampleModule could not be found with the bundled find module.\n";
-        assert!(detect_abi_mismatch(bundled).is_some());
-        assert_eq!(classify_failure(bundled), FailureKind::VersionMismatch);
+        assert!(detect_abi_mismatch(bundled).is_none());
+        assert_ne!(classify_failure(bundled), FailureKind::VersionMismatch);
 
-        assert!(detect_abi_mismatch("Could NOT find ExampleModule").is_none());
+        let probe =
+            "Unable to determine ExampleModule ABI version from ExampleModule installation.";
+        assert!(detect_abi_mismatch(probe).is_none());
+
+        // Explizite Konflikte bleiben Konflikte.
+        assert!(detect_abi_mismatch("error: incompatible ABI detected").is_some());
+        assert!(detect_abi_mismatch("libfoo: ABI version mismatch").is_some());
     }
 
     #[test]
@@ -3390,6 +3409,47 @@ option(EXAMPLE_OTHER "Unrelated" OFF)
 
         let plain = candidate_names(&MissingDep::PkgConfig("zlib".to_string()), "pacman");
         assert!(plain.iter().any(|name| name == "libzlib"), "{plain:?}");
+    }
+
+    #[test]
+    fn weder_noch_meldung_wird_zur_abhaengigkeit() {
+        let deps = analyze_output(
+            "CMake Warning at cmake/modules/FindOpenVDB.cmake:349 (message):\n\
+             \tNeither Imath (OpenEXR v3) nor IlmBase (OpenEXR v2) can be found!",
+        );
+        assert!(
+            deps.iter()
+                .any(|dep| matches!(dep, MissingDep::CMakeModule(name) if name == "Imath")),
+            "{deps:?}"
+        );
+    }
+
+    #[test]
+    fn bundled_find_modul_ist_kein_abi_konflikt() {
+        let output = "-- Could NOT find OpenVDB (missing: OpenVDB_INCLUDE_DIR OpenVDB_LIB_COMPONENTS openvdb) (Required is at least version \"5.0\")\n\
+                      CMake Warning at cmake/modules/FindOpenVDB.cmake:328 (message):\n\
+                        Unable to determine OpenVDB ABI version from OpenVDB installation.\n\
+                      CMake Error at CMakeLists.txt:699 (message):\n\
+                        OpenVDB could not be found with the bundled find module.";
+        assert_eq!(detect_abi_mismatch(output), None);
+        assert_eq!(classify_failure(output), FailureKind::Dependency);
+        let deps = analyze_output(output);
+        assert!(
+            deps.iter()
+                .any(|dep| matches!(dep, MissingDep::CMakeModule(name) if name == "OpenVDB")),
+            "{deps:?}"
+        );
+        // Echte Konflikte bleiben Konflikte.
+        assert!(detect_abi_mismatch("error: incompatible ABI detected").is_some());
+    }
+
+    #[test]
+    fn cmake_modul_sucht_auch_die_bibliotheksdatei() {
+        let probes = probe_commands("pacman", &MissingDep::CMakeModule("OpenVDB".to_string()));
+        assert!(
+            probes.iter().any(|cmd| cmd.contains("libopenvdb.so")),
+            "{probes:?}"
+        );
     }
 
     #[test]
