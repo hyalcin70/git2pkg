@@ -161,7 +161,10 @@ impl BuildContainer {
             format!("{}:/work", work.to_string_lossy()),
             "-w".to_string(),
             "/work".to_string(),
-            config.target_distro.info(&config.distro).base_image.clone(),
+            choose_build_image(
+                config,
+                &config.target_distro.info(&config.distro).base_image,
+            ),
             "sleep".to_string(),
             "infinity".to_string(),
         ];
@@ -545,6 +548,32 @@ fn container_cleanup_args(builds: &Path, image: &str) -> (String, Vec<String>) {
             script.to_string(),
         ],
     )
+}
+
+/// Name des optionalen, vorgebauten Builder-Images einer Distribution.
+///
+/// Solche Images bringen die komplette Toolchain bereits mit (siehe
+/// `packaging/builders/`). Ist eines vorhanden, wird es statt des nackten
+/// Basis-Images verwendet und die Paketinstallation im Build entfaellt -
+/// das macht Laeufe reproduzierbar und deutlich schneller.
+fn builder_image_name(family: &DistroFamily) -> String {
+    let suffix = match family {
+        DistroFamily::Arch => "arch",
+        DistroFamily::Debian => "debian",
+        DistroFamily::Fedora => "fedora",
+        DistroFamily::Suse => "suse",
+        DistroFamily::Unknown => return String::new(),
+    };
+    format!("git2pkg-builder:{suffix}")
+}
+
+/// Waehlt das Builder-Image, wenn es lokal vorhanden ist, sonst das Basis-Image.
+fn choose_build_image(config: &BuildConfig, base_image: &str) -> String {
+    let builder = builder_image_name(&config.target_distro.info(&config.distro).family);
+    if !builder.is_empty() && local_image_exists(&config.engine, &builder) {
+        return builder;
+    }
+    base_image.to_string()
 }
 
 fn local_image_exists(engine: &ContainerEngine, image: &str) -> bool {
@@ -3411,8 +3440,16 @@ fn build_script_with_flags(
         "mkdir -p /work/cargo-target /work/cargo-home /work/ccache".to_string(),
         echo_line(&texts.log_setup(&target.package_manager)),
         format!("export GIT2PKG_LIBDIR={}", target_libdir(&target.family)),
-        base_dependencies(&target.family, system),
     ];
+    // Ein vorgebautes Builder-Image bringt die Toolchain schon mit; dann
+    // entfaellt die Paketinstallation zu Beginn jedes Builds.
+    if choose_build_image(config, &target.base_image) != target.base_image {
+        lines.push(echo_line(
+            "[build] prebuilt builder image - toolchain already installed",
+        ));
+    } else {
+        lines.push(base_dependencies(&target.family, system));
+    }
     // Upstream-Bootstrap-Projekte (`x.py`, z. B. der Rust-Compiler) laden ihre
     // Stage0-Toolchain und LLVM selbst herunter. Die Dateien werden erst zur
     // Laufzeit geprueft, damit normale Cargo-Projekte nichts extra installieren.
@@ -3892,6 +3929,27 @@ mod tests {
         );
         assert!(script.contains("if [ -f /work/src/x.py ] && [ -d /work/src/src/bootstrap ]"));
         assert!(script.contains("pacman -S --noconfirm --needed -- curl xz zlib openssl"));
+    }
+
+    #[test]
+    fn builder_image_namen_folgen_der_familie() {
+        assert_eq!(
+            builder_image_name(&DistroFamily::Arch),
+            "git2pkg-builder:arch"
+        );
+        assert_eq!(
+            builder_image_name(&DistroFamily::Debian),
+            "git2pkg-builder:debian"
+        );
+        assert_eq!(
+            builder_image_name(&DistroFamily::Fedora),
+            "git2pkg-builder:fedora"
+        );
+        assert_eq!(
+            builder_image_name(&DistroFamily::Suse),
+            "git2pkg-builder:suse"
+        );
+        assert!(builder_image_name(&DistroFamily::Unknown).is_empty());
     }
 
     #[test]

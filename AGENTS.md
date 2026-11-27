@@ -133,6 +133,13 @@ shallow, so tags are fetched separately (`git fetch --tags --depth=1`); a tag
 directly at `HEAD` wins, otherwise the newest version tag is used (stable
 releases before alpha/beta/rc). Untagged checkouts fall back to `0.1.0`.
 
+Optional prebuilt builder images (`git2pkg-builder:arch`, `:debian`,
+`:fedora`, `:suse`) carry the complete toolchain and are built with
+`packaging/builders/build.sh`. When one exists locally, git2pkg uses it
+instead of the bare base image and skips the package installation at the
+start of the build; project-specific extra packages are still installed. The
+images are optional - without them everything works as before.
+
 Persistent Git clones live in `~/.cache/git2pkg/repos/repo-<repo_hash>/` and
 are refreshed to the remote default branch (`origin/HEAD`) and updated in place;
 submodules are initialized shallow and in parallel (`git submodule update
