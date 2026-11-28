@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           git2pkg
-Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.37}
+Version:        %{?git2pkg_version}%{!?git2pkg_version:0.2.0~alpha.38}
 Release:        1%{?dist}
 Summary:        Isolated package builder from Git repositories
 License:        GPL-3.0-or-later
@@ -48,6 +48,9 @@ install -Dm644 assets/app_icon.png %{buildroot}%{_datadir}/pixmaps/git2pkg.png
 %license LICENSE
 
 %changelog
+* Sat Nov 28 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.38-1
+- Associate the window with the desktop entry (correct task bar icon).
+
 * Sat Nov 28 2026 Hakan Yalçın <hyalcin70@github.com> - 0.2.0~alpha.37-1
 - Accept an install when a package manager hook fails.
 - Treat package-provided find modules as evidence; ignore CMake's own modules.
