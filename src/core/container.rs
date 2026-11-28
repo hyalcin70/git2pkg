@@ -1869,6 +1869,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
     let mut strategy_attempt: u8 = 1;
     let mut visited_strategies: HashSet<&'static str> = HashSet::new();
     let mut heal_round: u8 = 1;
+    // Module, die im Container nachweislich vorhanden sind, aber vom
+    // projekt-eigenen Find-Modul weiter abgelehnt werden.
+    let mut rejected_modules: HashSet<String> = HashSet::new();
     // Die MSRV-Heilung wird pro Lauf hoechstens einmal angewandt.
     let mut toolchain_healed = false;
     // Ebenso die C++-Compiler-Heilung.
@@ -2278,6 +2281,9 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
 
             let dep_id = dependency_id(dep);
             if let Some(previous) = resolved_deps.remove(&dep_id) {
+                if let MissingDep::CMakeModule(name) = dep {
+                    rejected_modules.insert(name.clone());
+                }
                 if should_penalize_mapping(dep) {
                     let _ = tx.send(BuildEvent::Log(format!(
                         "[learn] '{}' is still missing after installing '{}' - scoring the mapping down",
@@ -2375,6 +2381,15 @@ fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOut
             }
             if !round_progress {
                 mark_failed_build(&work);
+                if let MissingDep::CMakeModule(name) = &dep {
+                    if rejected_modules.contains(name) {
+                        let _ = tx.send(BuildEvent::Log(format!(
+                            "[failure] CMake module '{}' rejected by the project - a library or header is installed, but its finder still fails (version or components)",
+                            name
+                        )));
+                        return Err(texts.err_module_rejected(name));
+                    }
+                }
                 return Err(texts.err_no_package(&dep.label()));
             }
             // Andere Abhängigkeiten wurden gelöst: erst erneut bauen. Viele

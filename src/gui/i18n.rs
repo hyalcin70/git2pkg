@@ -882,6 +882,17 @@ impl Texts {
         );
         format!("{}{}", head, class)
     }
+    pub fn err_module_rejected(&self, module: &str) -> String {
+        let template = self.get(
+            "The CMake module '{}' is installed, but the project's own finder rejects it. That is usually a version or component requirement, not a missing package.",
+            "Das CMake-Modul '{}' ist installiert, aber das projekt-eigene Find-Modul lehnt es ab. Meist ist das eine Versions- oder Komponenten-Anforderung, kein fehlendes Paket.",
+            "CMake modülü '{}' kurulu, ancak projenin kendi find modülü onu reddediyor. Bu genellikle bir sürüm veya bileşen gereksinimidir, eksik paket değildir.",
+            "El módulo CMake '{}' está instalado, pero el módulo de búsqueda del proyecto lo rechaza. Normalmente es un requisito de versión o de componentes, no un paquete que falte.",
+            "Le module CMake « {} » est installé, mais le module de recherche du projet le refuse. Il s'agit généralement d'une exigence de version ou de composants, pas d'un paquet manquant.",
+        );
+        template.replace("{}", module)
+    }
+
     pub fn err_no_package(&self, label: &str) -> String {
         format!(
             "{} {}",
@@ -1179,6 +1190,15 @@ impl Texts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abgelehntes_modul_wird_in_allen_sprachen_benannt() {
+        let de = Texts::new(Language::De);
+        assert!(de.err_module_rejected("libnoise").contains("libnoise"));
+        let en = Texts::new(Language::En);
+        assert!(en.err_module_rejected("libnoise").contains("libnoise"));
+        assert!(en.err_module_rejected("libnoise").contains("finder"));
+    }
 
     #[test]
     fn alle_sprachen_sind_erreichbar() {
