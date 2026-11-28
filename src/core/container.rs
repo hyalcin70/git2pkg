@@ -2497,15 +2497,29 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
     buffer: Arc<Mutex<String>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        for line in std::io::BufReader::new(reader)
-            .lines()
-            .map_while(Result::ok)
-        {
-            let tag = if is_error_line(&line) { "err" } else { "out" };
-            let _ = tx.send(BuildEvent::Log(format!("[{}] {}", tag, line)));
-            if let Ok(mut shared) = buffer.lock() {
-                shared.push_str(&line);
-                shared.push('\n');
+        let mut reader = std::io::BufReader::new(reader);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let text = line.trim_end_matches(['\n', '\r']).to_string();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let tag = if is_error_line(&text) { "err" } else { "out" };
+                    let _ = tx.send(BuildEvent::Log(format!("[{}] {}", tag, text)));
+                    if let Ok(mut shared) = buffer.lock() {
+                        shared.push_str(&text);
+                        shared.push('\n');
+                    }
+                }
+                // Ein unterbrochener Systemaufruf (EINTR) darf den Leser nicht
+                // beenden: sonst schliesst die Pipe und der Build-Prozess
+                // stirbt an SIGPIPE (Exit-Code 141).
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
             }
         }
     })
