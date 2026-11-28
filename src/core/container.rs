@@ -1212,7 +1212,7 @@ fn verify_cmake_module(
     let module_path = container
         .exec(
             &format!(
-                "ls /usr/share/cmake*/Modules/Find{}.cmake 2>/dev/null | head -n 1",
+                "find /usr/share/cmake*/Modules -maxdepth 1 -name 'Find{}.cmake' -print -quit 2>/dev/null",
                 safe
             ),
             tx,
@@ -1741,6 +1741,12 @@ fn heal_source_group(work: &Path, error: &SourceGroupError, tx: &Sender<BuildEve
 
 fn execute(config: &mut BuildConfig, tx: &Sender<BuildEvent>) -> Result<BuildOutcome, String> {
     let texts = Texts::new(config.language);
+    // 32-Bit-Ziele werden nicht unterstuetzt: lieber sofort und klar abbrechen
+    // als ein Paket mit falscher Architektur zu erzeugen.
+    let arch = crate::core::packaging::PackageArch::detect();
+    if !arch.is_supported() {
+        return Err(texts.err_unsupported_arch(&arch.unsupported_label()));
+    }
     let mut mappings = MappingStore::load();
     let mut failed_candidates: HashSet<String> = HashSet::new();
     // Bereits erfolgreich installierte Abhängigkeiten dieses Builds. Fehlt eine
@@ -3362,7 +3368,7 @@ fn project_install_step(system: &BuildSystem, name: &str) -> String {
         BuildSystem::CMake => {
             r#"cmake --build build -j$(nproc)
 if [ -f build/cmake_install.cmake ]; then DESTDIR="$pkgdir" cmake --install build; fi
-if [ -z "$(find "$pkgdir/usr" -type f -perm -u+x 2>/dev/null | head -1)" ]; then
+if [ -z "$(find "$pkgdir/usr" -type f -perm -u+x -print -quit 2>/dev/null)" ]; then
   echo '[pkg] no install rules - staging built binaries' >&2
   find build -maxdepth 4 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.a|*.o) exit 0;; *.so|*.so.*) install -Dm755 "$1" "$2/$(basename "$1")"; exit 0;; esac; head -c 4 "$1" | grep -q ELF || exit 0; install -Dm755 "$1" "$3/$(basename "$1")"' _ {} "$pkgdir/usr/lib" "$pkgdir/usr/bin" \;
 fi"#
@@ -3370,7 +3376,7 @@ fi"#
         }
         BuildSystem::Meson => {
             r#"DESTDIR="$pkgdir" ninja -C build install
-if [ -z "$(find "$pkgdir/usr" -type f -perm -u+x 2>/dev/null | head -1)" ]; then
+if [ -z "$(find "$pkgdir/usr" -type f -perm -u+x -print -quit 2>/dev/null)" ]; then
   echo '[pkg] no install rules - staging built binaries' >&2
   find build -maxdepth 4 -type f -perm -u+x ! -path '*/CMakeFiles/*' -exec sh -c 'case "$1" in *.a|*.o) exit 0;; *.so|*.so.*) install -Dm755 "$1" "$2/$(basename "$1")"; exit 0;; esac; head -c 4 "$1" | grep -q ELF || exit 0; install -Dm755 "$1" "$3/$(basename "$1")"' _ {} "$pkgdir/usr/lib" "$pkgdir/usr/bin" \;
 fi"#
@@ -3404,7 +3410,7 @@ fi"#
 /// fast immer aus mitgebauten Fremdbibliotheken (z. B. einem eingebetteten
 /// Test-Framework) und gehoeren in ein separates -dev-Paket.
 fn dev_artifacts_cleanup_step() -> &'static str {
-    r#"if [ -n "$(find "$pkgdir/usr/bin" -maxdepth 1 -type f -perm -u+x 2>/dev/null | head -1)" ]; then
+    r#"if [ -n "$(find "$pkgdir/usr/bin" -maxdepth 1 -type f -perm -u+x -print -quit 2>/dev/null)" ]; then
   rm -rf "$pkgdir/usr/include"
   find "$pkgdir/usr/lib" "$pkgdir/usr/lib64" -name '*.a' -type f -delete 2>/dev/null || true
   find "$pkgdir/usr/lib" "$pkgdir/usr/lib64" -name '*.pc' -type f -delete 2>/dev/null || true

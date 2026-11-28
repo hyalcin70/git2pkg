@@ -10,11 +10,11 @@ pub fn script(ctx: &PackageContext<'_>) -> Vec<String> {
     lines.push(format!(
         r#"if ls /work/src/*.spec >/dev/null 2>&1; then
   echo '[pkg] in-tree RPM spec detected - using rpmbuild with the project spec' >&2
-  spec=$(ls /work/src/*.spec | head -n 1)
+  spec=$(find /work/src -maxdepth 1 -name '*.spec' -print -quit 2>/dev/null)
   topdir=/work/rpmbuild
   mkdir -p "$topdir"/{{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}}
   if ( cd /work/src && QA_RPATHS=0x0001 rpmbuild -bb --define "_topdir $topdir" "$spec" ) >/dev/null 2>&1; then
-    rpm_file=$(find "$topdir/RPMS" -type f -name '*.rpm' 2>/dev/null | head -n 1)
+    rpm_file=$(find "$topdir/RPMS" -type f -name '*.rpm' -print -quit 2>/dev/null)
     if [ -n "$rpm_file" ] && rpm -qlp "$rpm_file" 2>/dev/null | grep -qE '^/usr/(bin|lib|lib64)/'; then
       cp "$rpm_file" /work/dist/
       echo "[pkg] native package: $(basename "$rpm_file")" >&2
@@ -50,7 +50,7 @@ fi"#,
     ));
     lines.push(
         [
-            "rpm_file=$(find /root/rpmbuild/RPMS /usr/src/packages/RPMS -type f -name \"*.rpm\" 2>/dev/null | head -n 1 || true)",
+            "rpm_file=$(find /root/rpmbuild/RPMS /usr/src/packages/RPMS -type f -name \"*.rpm\" -print -quit 2>/dev/null || true)",
             "if [ -z \"$rpm_file\" ]; then",
             "  echo \"[pkg] no RPM file found\" >&2",
             "  find /root/rpmbuild/RPMS /usr/src/packages/RPMS -maxdepth 3 -print 2>/dev/null || true",
@@ -165,7 +165,7 @@ mod tests {
             assert!(script
                 .contains("mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}"));
             assert!(script.contains("--define \"_topdir /root/rpmbuild\""));
-            assert!(script.contains("find /root/rpmbuild/RPMS /usr/src/packages/RPMS -type f -name \"*.rpm\" 2>/dev/null | head -n 1"));
+            assert!(script.contains("find /root/rpmbuild/RPMS /usr/src/packages/RPMS -type f -name \"*.rpm\" -print -quit"));
             assert!(script.contains("cp \"$rpm_file\" /work/dist/"));
             assert!(!script.contains("cp \"$HOME\"/rpmbuild/RPMS/*/*.rpm"));
         }

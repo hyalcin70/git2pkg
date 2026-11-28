@@ -882,6 +882,17 @@ impl Texts {
         );
         format!("{}{}", head, class)
     }
+    pub fn err_unsupported_arch(&self, arch: &str) -> String {
+        let template = self.get(
+            "git2pkg only builds 64-bit packages (x86_64, aarch64); this host reports '{}'. 32-bit targets are not supported.",
+            "git2pkg baut nur 64-Bit-Pakete (x86_64, aarch64); dieser Host meldet '{}'. 32-Bit-Ziele werden nicht unterstützt.",
+            "git2pkg yalnızca 64 bit paketler üretir (x86_64, aarch64); bu sistem '{}' bildiriyor. 32 bit hedefler desteklenmez.",
+            "git2pkg solo genera paquetes de 64 bits (x86_64, aarch64); este equipo informa '{}'. Los objetivos de 32 bits no son compatibles.",
+            "git2pkg ne produit que des paquets 64 bits (x86_64, aarch64) ; cet hôte indique « {} ». Les cibles 32 bits ne sont pas prises en charge.",
+        );
+        template.replace("{}", arch)
+    }
+
     pub fn err_module_rejected(&self, module: &str) -> String {
         let template = self.get(
             "The CMake module '{}' is installed, but the project's own finder rejects it. That is usually a version or component requirement, not a missing package.",

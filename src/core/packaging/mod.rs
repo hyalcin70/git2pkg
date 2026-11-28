@@ -28,6 +28,20 @@ impl PackageArch {
         }
     }
 
+    /// Nur 64-Bit-Ziele werden unterstuetzt.
+    pub fn is_supported(&self) -> bool {
+        matches!(self, Self::Amd64 | Self::Arm64)
+    }
+
+    /// Beschreibung der nicht unterstuetzten Architektur (fuer die Meldung).
+    pub fn unsupported_label(&self) -> String {
+        match self {
+            Self::Amd64 => "x86_64".to_string(),
+            Self::Arm64 => "aarch64".to_string(),
+            Self::Other(value) => value.clone(),
+        }
+    }
+
     pub fn deb(&self) -> String {
         match self {
             Self::Amd64 => "amd64".to_string(),
@@ -380,6 +394,17 @@ mod tests {
                 .unwrap_or(false);
             let _ = std::fs::remove_file(&path);
             assert!(ok, "ungueltiges Paketskript fuer {:?}", family);
+        }
+    }
+
+    #[test]
+    fn nur_64_bit_architekturen_sind_erlaubt() {
+        assert!(PackageArch::Amd64.is_supported());
+        assert!(PackageArch::Arm64.is_supported());
+        for unsupported in ["i386", "i686", "x86", "armv7l"] {
+            let arch = PackageArch::Other(unsupported.to_string());
+            assert!(!arch.is_supported(), "{unsupported}");
+            assert_eq!(arch.unsupported_label(), unsupported);
         }
     }
 

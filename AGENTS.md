@@ -110,6 +110,10 @@ and can be overridden with `GIT2PKG_BOOTSTRAP_STAGE`. The extra packages they
 need (curl, xz, zlib, OpenSSL) are installed only when those marker files
 actually exist.
 
+Generated scripts run with `set -e` and `set -o pipefail`; never end a pipeline
+with `head` (`find … | head -1` dies with SIGPIPE/141). Use `find … -print -quit`
+or `grep -m1`.
+
 **Log language policy:** static UI text is localized in five languages
 (`src/gui/i18n.rs`), but live build logs are English technical diagnostics
 (`[learn]`, `[warn]`, `[strategy]`, `[retry]`, `[cmake]`, ...). Do not add new
