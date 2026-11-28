@@ -9,3 +9,4 @@ Terminal=false
 Categories=Development;
 Keywords=package;build;git;container;
 StartupNotify=true
+StartupWMClass=git2pkg

@@ -137,6 +137,9 @@ fn main() -> eframe::Result<()> {
     }
 
     let viewport = egui::ViewportBuilder::default()
+        // App-ID = Name der Desktop-Datei: so ordnet die Taskleiste das Fenster
+        // der Anwendung zu und zeigt das richtige Symbol statt eines Ersatzes.
+        .with_app_id("git2pkg")
         .with_inner_size([1145.0, 780.0])
         .with_min_inner_size([785.0, 520.0])
         .with_title(format!("git2pkg v{}", env!("CARGO_PKG_VERSION")));
